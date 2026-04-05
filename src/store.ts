@@ -49,6 +49,10 @@ export interface IndexedImagesBatch {
   images: ImageRecord[];
 }
 
+export interface ThumbnailBatch {
+  images: ImageRecord[];
+}
+
 export type SortOrder =
   | "date_desc"
   | "date_asc"
@@ -151,6 +155,20 @@ function mergeImages(currentImages: ImageRecord[], newImages: ImageRecord[], sor
   }
 
   return Array.from(merged.values()).sort((a, b) => compareImages(a, b, sort));
+}
+
+function countNewImages(currentImages: ImageRecord[], newImages: ImageRecord[]): number {
+  const existingPaths = new Set(currentImages.map((image) => image.path));
+  let count = 0;
+
+  for (const image of newImages) {
+    if (!existingPaths.has(image.path)) {
+      existingPaths.add(image.path);
+      count += 1;
+    }
+  }
+
+  return count;
 }
 
 function replaceImage(images: ImageRecord[], updatedImage: ImageRecord, sort: SortOrder): ImageRecord[] {
@@ -340,11 +358,42 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           return state;
         }
 
+        const newVisibleCount = countNewImages(state.images, visibleImages);
         const images = mergeImages(state.images, visibleImages, state.sort);
         return {
           images,
           loadedCount: images.length,
-          totalImages: Math.max(state.totalImages, images.length),
+          totalImages: Math.max(state.totalImages + newVisibleCount, images.length),
+        };
+      });
+    });
+
+    const unlistenThumbnails = await listen<ThumbnailBatch>("thumbnail-updated", (event) => {
+      const batch = event.payload;
+
+      set((state) => {
+        const visibleImages = batch.images.filter((image) =>
+          matchesFilters(
+            image,
+            state.selectedFolderId,
+            state.mediaFilter,
+            state.favoritesOnly,
+            state.search,
+          ),
+        );
+
+        const selectedImage =
+          state.selectedImage && batch.images.some((image) => image.id === state.selectedImage?.id)
+            ? batch.images.find((image) => image.id === state.selectedImage?.id) ?? state.selectedImage
+            : state.selectedImage;
+
+        if (visibleImages.length === 0) {
+          return { selectedImage };
+        }
+
+        return {
+          images: mergeImages(state.images, visibleImages, state.sort),
+          selectedImage,
         };
       });
     });
@@ -352,6 +401,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     return () => {
       unlistenProgress();
       unlistenImages();
+      unlistenThumbnails();
     };
   },
 }));

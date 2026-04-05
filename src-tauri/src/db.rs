@@ -65,6 +65,13 @@ pub struct EmbeddingJob {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ThumbnailJob {
+    pub image_id: i64,
+    pub path: String,
+    pub media_kind: String,
+}
+
 pub fn create_pool(db_path: &Path) -> Result<DbPool> {
     vector::register_sqlite_vec();
     let manager = SqliteConnectionManager::file(db_path);
@@ -111,9 +118,19 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS thumbnail_jobs (
+            image_id    INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            attempts    INTEGER NOT NULL DEFAULT 0,
+            last_error  TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_images_folder_id ON images(folder_id);
         CREATE INDEX IF NOT EXISTS idx_images_modified_at ON images(modified_at);
         CREATE INDEX IF NOT EXISTS idx_embedding_jobs_status ON embedding_jobs(status);
+        CREATE INDEX IF NOT EXISTS idx_thumbnail_jobs_status ON thumbnail_jobs(status);
         ",
     )?;
 
@@ -209,6 +226,19 @@ pub fn enqueue_embedding_job(conn: &Connection, image_id: i64) -> Result<()> {
     Ok(())
 }
 
+pub fn enqueue_thumbnail_job(conn: &Connection, image_id: i64) -> Result<()> {
+    conn.execute(
+        "INSERT INTO thumbnail_jobs (image_id, status, attempts, last_error, created_at, updated_at)
+         VALUES (?1, 'pending', 0, NULL, datetime('now'), datetime('now'))
+         ON CONFLICT(image_id) DO UPDATE SET
+            status = 'pending',
+            last_error = NULL,
+            updated_at = datetime('now')",
+        [image_id],
+    )?;
+    Ok(())
+}
+
 #[allow(dead_code)]
 pub fn get_next_embedding_job(conn: &Connection) -> Result<Option<EmbeddingJob>> {
     let mut stmt = conn.prepare(
@@ -282,6 +312,61 @@ pub fn update_folder_count(conn: &Connection, folder_id: i64) -> Result<()> {
     Ok(())
 }
 
+pub fn get_next_thumbnail_job(conn: &Connection) -> Result<Option<ThumbnailJob>> {
+    let mut stmt = conn.prepare(
+        "SELECT j.image_id, i.path, i.media_kind
+         FROM thumbnail_jobs j
+         JOIN images i ON i.id = j.image_id
+         WHERE j.status = 'pending'
+         ORDER BY j.updated_at, j.image_id
+         LIMIT 1",
+    )?;
+
+    let mut rows = stmt.query([])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+
+    Ok(Some(ThumbnailJob {
+        image_id: row.get(0)?,
+        path: row.get(1)?,
+        media_kind: row.get(2)?,
+    }))
+}
+
+pub fn mark_thumbnail_job_processing(conn: &Connection, image_id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE thumbnail_jobs
+         SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
+         WHERE image_id = ?1",
+        [image_id],
+    )?;
+    Ok(())
+}
+
+pub fn mark_thumbnail_ready(
+    conn: &Connection,
+    image_id: i64,
+    thumbnail_path: Option<&str>,
+) -> Result<ImageRecord> {
+    conn.execute(
+        "UPDATE images SET thumbnail_path = ?2 WHERE id = ?1",
+        params![image_id, thumbnail_path],
+    )?;
+    conn.execute("DELETE FROM thumbnail_jobs WHERE image_id = ?1", [image_id])?;
+    get_image_by_id(conn, image_id)
+}
+
+pub fn mark_thumbnail_failed(conn: &Connection, image_id: i64, error: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE thumbnail_jobs
+         SET status = 'failed', last_error = ?2, updated_at = datetime('now')
+         WHERE image_id = ?1",
+        params![image_id, error],
+    )?;
+    Ok(())
+}
+
 pub fn update_image_details(
     conn: &Connection,
     image_id: i64,
@@ -296,6 +381,18 @@ pub fn update_image_details(
         params![image_id, favorite, rating],
     )?;
 
+    conn.query_row(
+        "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
+                media_kind, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error
+         FROM images
+         WHERE id = ?1",
+        [image_id],
+        map_image_row,
+    )
+    .map_err(Into::into)
+}
+
+pub fn get_image_by_id(conn: &Connection, image_id: i64) -> Result<ImageRecord> {
     conn.query_row(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
                 media_kind, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error

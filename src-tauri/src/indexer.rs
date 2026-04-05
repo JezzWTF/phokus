@@ -63,7 +63,13 @@ pub struct IndexedImagesBatch {
     pub images: Vec<ImageRecord>,
 }
 
+#[derive(Clone, Serialize)]
+pub struct ThumbnailBatch {
+    pub images: Vec<ImageRecord>,
+}
+
 const INDEX_BATCH_SIZE: usize = 25;
+const THUMBNAIL_BATCH_SIZE: usize = 12;
 
 pub fn index_folder(
     app: AppHandle,
@@ -101,25 +107,40 @@ fn do_index(app: AppHandle, pool: DbPool, folder_id: i64, folder_path: PathBuf) 
         },
     );
 
-    // Parallel: read file metadata and dimensions across all CPU cores
-    let records: Vec<ImageRecord> = image_paths
-        .par_iter()
-        .filter_map(|path| build_record(path, folder_id))
-        .collect();
-
-    // Sequential: commit in batches and stream results to the frontend
     let mut indexed = 0usize;
-    for chunk in records.chunks(INDEX_BATCH_SIZE) {
-        let committed = commit_batch(&pool, chunk)?;
+    for path_chunk in image_paths.chunks(INDEX_BATCH_SIZE) {
+        let records: Vec<ImageRecord> = path_chunk
+            .par_iter()
+            .filter_map(|path| build_record(path, folder_id))
+            .collect();
+
+        if records.is_empty() {
+            continue;
+        }
+
+        let committed = commit_batch(&pool, &records)?;
         indexed += committed.len();
-        emit_images(&app, &IndexedImagesBatch { folder_id, images: committed });
+        emit_images(
+            &app,
+            &IndexedImagesBatch {
+                folder_id,
+                images: committed,
+            },
+        );
+
+        let current_file = path_chunk
+            .last()
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
+
         emit_progress(
             &app,
             &IndexProgress {
                 folder_id,
                 total,
                 indexed,
-                current_file: String::new(),
+                current_file,
                 done: false,
             },
         );
@@ -191,6 +212,10 @@ fn emit_images(app: &AppHandle, batch: &IndexedImagesBatch) {
     let _ = app.emit("indexed-images", batch);
 }
 
+fn emit_thumbnails(app: &AppHandle, batch: &ThumbnailBatch) {
+    let _ = app.emit("thumbnail-updated", batch);
+}
+
 fn commit_batch(pool: &DbPool, records: &[ImageRecord]) -> Result<Vec<ImageRecord>> {
     let mut conn = pool.get()?;
     let tx = conn.transaction()?;
@@ -200,9 +225,76 @@ fn commit_batch(pool: &DbPool, records: &[ImageRecord]) -> Result<Vec<ImageRecor
         let mut committed_record = record.clone();
         committed_record.id = db::upsert_image(&tx, record)?;
         db::enqueue_embedding_job(&tx, committed_record.id)?;
+        db::enqueue_thumbnail_job(&tx, committed_record.id)?;
         committed.push(committed_record);
     }
 
     tx.commit()?;
     Ok(committed)
+}
+
+pub fn start_thumbnail_worker(app: AppHandle, pool: DbPool, cache_dir: PathBuf) {
+    std::thread::spawn(move || loop {
+        if let Err(error) = process_thumbnail_batch(&app, &pool, &cache_dir) {
+            eprintln!("Thumbnail worker error: {}", error);
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    });
+}
+
+fn process_thumbnail_batch(app: &AppHandle, pool: &DbPool, cache_dir: &Path) -> Result<()> {
+    let mut updated_images = Vec::new();
+
+    for _ in 0..THUMBNAIL_BATCH_SIZE {
+        let job = {
+            let conn = pool.get()?;
+            db::get_next_thumbnail_job(&conn)?
+        };
+
+        let Some(job) = job else {
+            break;
+        };
+
+        {
+            let conn = pool.get()?;
+            db::mark_thumbnail_job_processing(&conn, job.image_id)?;
+        }
+
+        let thumbnail_result = match job.media_kind.as_str() {
+            "image" => thumbnail::generate_thumbnail(Path::new(&job.path), cache_dir),
+            "video" => thumbnail::generate_video_poster(Path::new(&job.path), cache_dir),
+            _ => {
+                let conn = pool.get()?;
+                updated_images.push(db::mark_thumbnail_ready(&conn, job.image_id, None)?);
+                continue;
+            }
+        };
+
+        let thumbnail_path = match thumbnail_result {
+            Ok(path) => Some(path.to_string_lossy().to_string()),
+            Err(error) => {
+                let conn = pool.get()?;
+                db::mark_thumbnail_failed(&conn, job.image_id, &error.to_string())?;
+                continue;
+            }
+        };
+
+        let updated_image = {
+            let conn = pool.get()?;
+            db::mark_thumbnail_ready(&conn, job.image_id, thumbnail_path.as_deref())?
+        };
+        updated_images.push(updated_image);
+    }
+
+    if !updated_images.is_empty() {
+        emit_thumbnails(
+            app,
+            &ThumbnailBatch {
+                images: updated_images,
+            },
+        );
+    }
+
+    Ok(())
 }

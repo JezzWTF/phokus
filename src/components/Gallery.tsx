@@ -79,15 +79,20 @@ function ContextMenu({
             </button>
           );
         })}
-        <button
-          className="ml-auto rounded-lg px-2 py-1 text-sm text-gray-400 hover:bg-white/5 hover:text-white"
-          onClick={async () => {
-            await updateImageDetails(image.id, { rating: 0 });
-            onClose();
-          }}
-        >
-          Clear
-        </button>
+        {image.rating > 0 ? (
+          <button
+            className="ml-auto rounded-lg p-1.5 text-gray-400 hover:bg-white/5 hover:text-white"
+            onClick={async () => {
+              await updateImageDetails(image.id, { rating: 0 });
+              onClose();
+            }}
+            title="Remove rating"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -119,15 +124,7 @@ function ImageTile({
       onContextMenu={onContextMenu}
       title={image.filename}
     >
-      {image.media_kind === "video" ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-fuchsia-500/10 via-white/5 to-cyan-500/10">
-          <div className="rounded-full border border-white/10 bg-black/30 p-4 text-white shadow-lg">
-            <svg className="h-8 w-8" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          </div>
-        </div>
-      ) : src && !errored ? (
+      {src && !errored ? (
         <>
           {!loaded ? <div className="absolute inset-0 animate-pulse bg-white/5" /> : null}
           <img
@@ -140,17 +137,35 @@ function ImageTile({
           />
         </>
       ) : (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/5 text-gray-600">
-          <svg className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1}
-              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-            />
-          </svg>
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-fuchsia-500/10 via-white/5 to-cyan-500/10 text-gray-300">
+          {image.media_kind === "video" ? (
+            <div className="rounded-full border border-white/10 bg-black/30 p-4 text-white shadow-lg">
+              <svg className="h-8 w-8" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </div>
+          ) : (
+            <svg className="h-9 w-9" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1}
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+              />
+            </svg>
+          )}
         </div>
       )}
+
+      {image.media_kind === "video" ? (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="rounded-full border border-white/10 bg-black/35 p-3 text-white shadow-lg backdrop-blur-sm">
+            <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </div>
+        </div>
+      ) : null}
 
       <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent opacity-80 transition-opacity group-hover:opacity-100" />
 

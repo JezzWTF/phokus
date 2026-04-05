@@ -28,6 +28,11 @@ pub fn run() {
                 db::migrate(&conn).expect("Failed to run migrations");
             }
 
+            let thumb_dir = app_dir.join("thumbnails");
+            std::fs::create_dir_all(&thumb_dir).expect("Failed to create thumbnail dir");
+
+            indexer::start_thumbnail_worker(app.handle().clone(), pool.clone(), thumb_dir);
+
             app.manage(pool);
 
             Ok(())
