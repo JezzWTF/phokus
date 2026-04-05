@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+mod embedder;
 mod indexer;
 mod media;
 mod storage;
@@ -32,6 +33,12 @@ pub fn run() {
             {
                 let conn = pool.get().expect("Failed to get connection for migration");
                 db::migrate(&conn).expect("Failed to run migrations");
+                db::reset_inflight_jobs(&conn).expect("Failed to reset inflight jobs");
+                let backfilled = db::backfill_embedding_jobs(&conn)
+                    .expect("Failed to backfill embedding jobs");
+                if backfilled > 0 {
+                    println!("Backfilled {} embedding jobs.", backfilled);
+                }
             }
 
             let thumb_dir = app_dir.join("thumbnails");
@@ -50,6 +57,7 @@ pub fn run() {
                 );
             }
             indexer::start_metadata_worker(app.handle().clone(), pool.clone(), media_tools.clone());
+            indexer::start_embedding_worker(app.handle().clone(), pool.clone());
 
             app.manage(pool);
             app.manage(media_tools);
@@ -59,10 +67,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::add_folder,
             commands::get_folders,
+            commands::get_background_job_progress,
             commands::remove_folder,
             commands::get_images,
             commands::reindex_folder,
             commands::update_image_details,
+            commands::find_similar_images,
+            commands::retry_failed_embeddings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

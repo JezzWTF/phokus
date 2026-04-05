@@ -38,6 +38,19 @@ function formatDuration(durationMs: number | null): string | null {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function embeddingLabel(image: ImageRecord): string {
+  if (image.embedding_status === "ready") {
+    return image.embedding_model ? `Embeddings ready` : "Embeddings ready";
+  }
+  if (image.embedding_status === "failed") {
+    return "Embeddings failed";
+  }
+  if (image.embedding_status === "processing") {
+    return "Embedding...";
+  }
+  return "Embedding queued";
+}
+
 function ContextMenu({
   x,
   y,
@@ -49,10 +62,13 @@ function ContextMenu({
   image: ImageRecord;
   onClose: () => void;
 }) {
-  const { openImage, updateImageDetails } = useGalleryStore();
+  const openImage = useGalleryStore((state) => state.openImage);
+  const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
+  const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
 
   return (
     <div
+      data-gallery-context-menu
       className="fixed z-40 min-w-56 rounded-2xl border border-white/10 bg-gray-950/95 p-2 shadow-2xl backdrop-blur"
       style={{ left: x, top: y }}
       onClick={(event) => event.stopPropagation()}
@@ -75,21 +91,37 @@ function ContextMenu({
       >
         {image.favorite ? "Remove Favorite" : "Add to Favorites"}
       </button>
+      <button
+        className="w-full rounded-xl px-3 py-2 text-left text-sm text-gray-200 hover:bg-white/5"
+        onClick={async () => {
+          await loadSimilarImages(image.id);
+          onClose();
+        }}
+      >
+        Find Similar
+      </button>
       <div className="my-2 h-px bg-white/5" />
       <div className="px-3 pb-1 pt-1 text-[11px] uppercase tracking-[0.2em] text-gray-500">Rating</div>
-      <div className="flex gap-1 px-2 pb-1">
+      <div className="flex items-center gap-1 px-2 pb-1">
         {Array.from({ length: 5 }, (_, index) => {
           const rating = index + 1;
           return (
             <button
               key={rating}
-              className={`rounded-lg px-2 py-1 text-sm ${rating <= image.rating ? "bg-amber-400/15 text-amber-300" : "bg-white/5 text-gray-400 hover:text-white"}`}
+              className="rounded-md p-1"
               onClick={async () => {
                 await updateImageDetails(image.id, { rating });
                 onClose();
               }}
+              title={`Set ${rating} star rating`}
             >
-              {rating}
+              <svg
+                className={`h-5 w-5 ${rating <= image.rating ? "text-amber-300" : "text-white/20 hover:text-white/50"}`}
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81H7.03a1 1 0 00.951-.69l1.07-3.292z" />
+              </svg>
             </button>
           );
         })}
@@ -123,6 +155,7 @@ function ImageTile({
 }) {
   const [loaded, setLoaded] = useState(false);
   const [errored, setErrored] = useState(false);
+  const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
 
   const src = image.thumbnail_path
     ? convertFileSrc(image.thumbnail_path)
@@ -207,7 +240,19 @@ function ImageTile({
         <p className="truncate text-sm font-medium text-white">{image.filename}</p>
         <div className="mt-1 flex items-center justify-between gap-2 text-xs text-white/70">
           <RatingStars rating={image.rating} />
-          <span>{image.embedding_status === "ready" ? "indexed" : image.embedding_status}</span>
+          <span>{embeddingLabel(image)}</span>
+        </div>
+        <div className="mt-2 flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+          <button
+            className="rounded-full border border-white/10 bg-black/40 px-2.5 py-1 text-[11px] text-white/85 hover:bg-black/60"
+            onClick={(event) => {
+              event.stopPropagation();
+              void loadSimilarImages(image.id);
+            }}
+          >
+            Find Similar
+          </button>
+          <span className="text-[11px] text-white/50">Right-click for more</span>
         </div>
       </div>
     </button>
@@ -242,18 +287,21 @@ export function Gallery() {
   }, [handleScroll]);
 
   useEffect(() => {
-    const close = () => setContextMenu(null);
+    const close = (event: PointerEvent) => {
+      if ((event.target as HTMLElement | null)?.closest("[data-gallery-context-menu]")) {
+        return;
+      }
+      setContextMenu(null);
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setContextMenu(null);
       }
     };
-    window.addEventListener("click", close);
-    window.addEventListener("contextmenu", close);
+    window.addEventListener("pointerdown", close);
     window.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("contextmenu", close);
+      window.removeEventListener("pointerdown", close);
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, []);

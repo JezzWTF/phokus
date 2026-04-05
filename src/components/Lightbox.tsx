@@ -32,11 +32,25 @@ function formatDuration(durationMs: number | null): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function embeddingLabel(status: string, model: string | null): string {
+  if (status === "ready") {
+    return model ? `Ready (${model})` : "Ready";
+  }
+  if (status === "failed") {
+    return "Failed";
+  }
+  if (status === "processing") {
+    return "Processing";
+  }
+  return "Queued";
+}
+
 export function Lightbox() {
   const selectedImage = useGalleryStore((state) => state.selectedImage);
   const closeImage = useGalleryStore((state) => state.closeImage);
   const images = useGalleryStore((state) => state.images);
   const openImage = useGalleryStore((state) => state.openImage);
+  const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
   const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
   const [zoom, setZoom] = useState(1);
   const imageViewportRef = useRef<HTMLDivElement>(null);
@@ -184,6 +198,12 @@ export function Lightbox() {
                         <path d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" />
                       </svg>
                     </button>
+                    <button
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 hover:text-white"
+                      onClick={() => void loadSimilarImages(selectedImage.id)}
+                    >
+                      Similar
+                    </button>
                   </div>
                   <button className="rounded p-1 text-gray-400 hover:text-white" onClick={closeImage}>
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -281,7 +301,10 @@ export function Lightbox() {
 
                   <div>
                     <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">Embedding</p>
-                    <p className="text-white">{selectedImage.embedding_status}</p>
+                    <p className="text-white">{embeddingLabel(selectedImage.embedding_status, selectedImage.embedding_model)}</p>
+                    {selectedImage.embedding_error ? (
+                      <p className="mt-1 text-xs text-amber-300">{selectedImage.embedding_error}</p>
+                    ) : null}
                   </div>
 
                   <div>

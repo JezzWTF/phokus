@@ -1,5 +1,6 @@
-use crate::db::{self, DbPool, Folder, ImageRecord};
+use crate::db::{self, DbPool, Folder, FolderJobProgress, ImageRecord};
 use crate::indexer;
+use crate::vector;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, State};
@@ -30,6 +31,17 @@ pub struct UpdateImageDetailsParams {
     pub image_id: i64,
     pub favorite: Option<bool>,
     pub rating: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct FindSimilarImagesParams {
+    pub image_id: i64,
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct RetryFailedEmbeddingsParams {
+    pub folder_id: i64,
 }
 
 #[tauri::command]
@@ -73,6 +85,14 @@ pub async fn add_folder(
 pub async fn get_folders(db: State<'_, DbState>) -> Result<Vec<Folder>, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     db::get_folders(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_background_job_progress(
+    db: State<'_, DbState>,
+) -> Result<Vec<FolderJobProgress>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::get_all_folder_job_progress(&conn).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -146,4 +166,25 @@ pub async fn reindex_folder(
 
     indexer::index_folder(app, db.inner().clone(), folder_id, folder_path);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn find_similar_images(
+    db: State<'_, DbState>,
+    params: FindSimilarImagesParams,
+) -> Result<Vec<ImageRecord>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let limit = params.limit.unwrap_or(32);
+    let image_ids = vector::find_similar_image_ids(&conn, params.image_id, limit)
+        .map_err(|e| e.to_string())?;
+    db::get_images_by_ids(&conn, &image_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn retry_failed_embeddings(
+    db: State<'_, DbState>,
+    params: RetryFailedEmbeddingsParams,
+) -> Result<usize, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::retry_failed_embedding_jobs(&conn, params.folder_id).map_err(|e| e.to_string())
 }

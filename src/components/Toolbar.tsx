@@ -41,6 +41,7 @@ export function Toolbar() {
   const totalImages = useGalleryStore((state) => state.totalImages);
   const loadedCount = useGalleryStore((state) => state.loadedCount);
   const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
+  const collectionTitle = useGalleryStore((state) => state.collectionTitle);
   const folders = useGalleryStore((state) => state.folders);
   const mediaFilter = useGalleryStore((state) => state.mediaFilter);
   const setMediaFilter = useGalleryStore((state) => state.setMediaFilter);
@@ -53,7 +54,7 @@ export function Toolbar() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedFolder = folders.find((folder) => folder.id === selectedFolderId);
-  const title = selectedFolder ? selectedFolder.name : "All Media";
+  const title = collectionTitle ?? (selectedFolder ? selectedFolder.name : "All Media");
   const tileSize = tileSizeForZoom(zoomPreset);
 
   useEffect(() => {

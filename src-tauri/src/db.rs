@@ -63,6 +63,10 @@ pub struct ImageRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingJob {
     pub image_id: i64,
+    pub folder_id: i64,
+    pub path: String,
+    pub thumbnail_path: Option<String>,
+    pub media_kind: String,
     pub status: String,
     pub attempts: i64,
     pub last_error: Option<String>,
@@ -99,6 +103,9 @@ pub struct FolderJobProgress {
     pub folder_id: i64,
     pub thumbnail_pending: i64,
     pub metadata_pending: i64,
+    pub embedding_pending: i64,
+    pub embedding_ready: i64,
+    pub embedding_failed: i64,
 }
 
 pub fn create_pool(db_path: &Path) -> Result<DbPool> {
@@ -280,6 +287,56 @@ pub fn enqueue_embedding_job(conn: &Connection, image_id: i64) -> Result<()> {
     Ok(())
 }
 
+pub fn backfill_embedding_jobs(conn: &Connection) -> Result<usize> {
+    let inserted = conn.execute(
+        "INSERT INTO embedding_jobs (image_id, status, attempts, last_error, created_at, updated_at)
+         SELECT i.id, 'pending', 0, NULL, datetime('now'), datetime('now')
+         FROM images i
+         LEFT JOIN embedding_jobs j ON j.image_id = i.id
+         WHERE i.embedding_status != 'ready'
+           AND j.image_id IS NULL",
+        [],
+    )?;
+    Ok(inserted)
+}
+
+pub fn retry_failed_embedding_jobs(conn: &Connection, folder_id: i64) -> Result<usize> {
+    let updated = conn.execute(
+        "INSERT INTO embedding_jobs (image_id, status, attempts, last_error, created_at, updated_at)
+         SELECT id, 'pending', 0, NULL, datetime('now'), datetime('now')
+         FROM images
+         WHERE folder_id = ?1 AND embedding_status = 'failed'
+         ON CONFLICT(image_id) DO UPDATE SET
+             status = 'pending',
+             last_error = NULL,
+             updated_at = datetime('now')",
+        [folder_id],
+    )?;
+    conn.execute(
+        "UPDATE images
+         SET embedding_status = 'pending', embedding_error = NULL
+         WHERE folder_id = ?1 AND embedding_status = 'failed'",
+        [folder_id],
+    )?;
+    Ok(updated)
+}
+
+pub fn reset_inflight_jobs(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "UPDATE thumbnail_jobs SET status = 'pending' WHERE status = 'processing'",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE metadata_jobs SET status = 'pending' WHERE status = 'processing'",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE embedding_jobs SET status = 'pending' WHERE status = 'processing'",
+        [],
+    )?;
+    Ok(())
+}
+
 pub fn enqueue_thumbnail_job(conn: &Connection, image_id: i64) -> Result<()> {
     conn.execute(
         "INSERT INTO thumbnail_jobs (image_id, status, attempts, last_error, created_at, updated_at)
@@ -306,40 +363,57 @@ pub fn enqueue_metadata_job(conn: &Connection, image_id: i64) -> Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
-pub fn get_next_embedding_job(conn: &Connection) -> Result<Option<EmbeddingJob>> {
+pub fn get_pending_embedding_jobs(conn: &Connection, limit: usize) -> Result<Vec<EmbeddingJob>> {
     let mut stmt = conn.prepare(
-        "SELECT image_id, status, attempts, last_error, created_at, updated_at
-         FROM embedding_jobs
+        "SELECT j.image_id, i.folder_id, i.path, i.thumbnail_path, i.media_kind,
+                j.status, j.attempts, j.last_error, j.created_at, j.updated_at
+         FROM embedding_jobs j
+         JOIN images i ON i.id = j.image_id
          WHERE status = 'pending'
-         ORDER BY updated_at, image_id
-         LIMIT 1",
+         ORDER BY j.updated_at, j.image_id
+         LIMIT ?1",
     )?;
-
-    let mut rows = stmt.query([])?;
-    let Some(row) = rows.next()? else {
-        return Ok(None);
-    };
-
-    Ok(Some(EmbeddingJob {
-        image_id: row.get(0)?,
-        status: row.get(1)?,
-        attempts: row.get(2)?,
-        last_error: row.get(3)?,
-        created_at: row.get(4)?,
-        updated_at: row.get(5)?,
-    }))
+    let rows = stmt.query_map([limit as i64], |row| {
+        Ok(EmbeddingJob {
+            image_id: row.get(0)?,
+            folder_id: row.get(1)?,
+            path: row.get(2)?,
+            thumbnail_path: row.get(3)?,
+            media_kind: row.get(4)?,
+            status: row.get(5)?,
+            attempts: row.get(6)?,
+            last_error: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-#[allow(dead_code)]
-pub fn mark_embedding_job_processing(conn: &Connection, image_id: i64) -> Result<()> {
-    conn.execute(
-        "UPDATE embedding_jobs
-         SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
-         WHERE image_id = ?1",
-        [image_id],
-    )?;
-    Ok(())
+pub fn claim_embedding_jobs(conn: &mut Connection, limit: usize) -> Result<Vec<EmbeddingJob>> {
+    let tx = conn.transaction()?;
+    let candidates = get_pending_embedding_jobs(&tx, limit * 2)?;
+    let mut claimed = Vec::with_capacity(limit);
+
+    for job in candidates {
+        let updated = tx.execute(
+            "UPDATE embedding_jobs
+             SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
+             WHERE image_id = ?1 AND status = 'pending'",
+            [job.image_id],
+        )?;
+
+        if updated == 1 {
+            claimed.push(job);
+        }
+
+        if claimed.len() >= limit {
+            break;
+        }
+    }
+
+    tx.commit()?;
+    Ok(claimed)
 }
 
 #[allow(dead_code)]
@@ -426,11 +500,52 @@ pub fn get_folder_job_progress(conn: &Connection, folder_id: i64) -> Result<Fold
         |row| row.get(0),
     )?;
 
+    let embedding_pending = conn.query_row(
+        "SELECT COUNT(*)
+         FROM embedding_jobs j
+         JOIN images i ON i.id = j.image_id
+         WHERE i.folder_id = ?1 AND j.status IN ('pending', 'processing')",
+        [folder_id],
+        |row| row.get(0),
+    )?;
+
+    let embedding_ready = conn.query_row(
+        "SELECT COUNT(*)
+         FROM images
+         WHERE folder_id = ?1 AND embedding_status = 'ready'",
+        [folder_id],
+        |row| row.get(0),
+    )?;
+
+    let embedding_failed = conn.query_row(
+        "SELECT COUNT(*)
+         FROM images
+         WHERE folder_id = ?1 AND embedding_status = 'failed'",
+        [folder_id],
+        |row| row.get(0),
+    )?;
+
     Ok(FolderJobProgress {
         folder_id,
         thumbnail_pending,
         metadata_pending,
+        embedding_pending,
+        embedding_ready,
+        embedding_failed,
     })
+}
+
+pub fn get_all_folder_job_progress(conn: &Connection) -> Result<Vec<FolderJobProgress>> {
+    let folder_ids = get_folders(conn)?
+        .into_iter()
+        .map(|folder| folder.id)
+        .collect::<Vec<_>>();
+
+    let mut progress = Vec::with_capacity(folder_ids.len());
+    for folder_id in folder_ids {
+        progress.push(get_folder_job_progress(conn, folder_id)?);
+    }
+    Ok(progress)
 }
 
 pub fn get_pending_thumbnail_jobs(conn: &Connection, limit: usize) -> Result<Vec<ThumbnailJob>> {
@@ -656,6 +771,14 @@ pub fn get_image_by_id(conn: &Connection, image_id: i64) -> Result<ImageRecord> 
         map_image_row,
     )
     .map_err(Into::into)
+}
+
+pub fn get_images_by_ids(conn: &Connection, image_ids: &[i64]) -> Result<Vec<ImageRecord>> {
+    let mut images = Vec::with_capacity(image_ids.len());
+    for image_id in image_ids {
+        images.push(get_image_by_id(conn, *image_id)?);
+    }
+    Ok(images)
 }
 
 pub fn get_folders(conn: &Connection) -> Result<Vec<Folder>> {

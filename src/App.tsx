@@ -9,11 +9,15 @@ import { Lightbox } from "./components/Lightbox";
 
 export default function App() {
   const loadFolders = useGalleryStore((state) => state.loadFolders);
+  const loadBackgroundJobProgress = useGalleryStore((state) => state.loadBackgroundJobProgress);
   const loadImages = useGalleryStore((state) => state.loadImages);
   const subscribeToProgress = useGalleryStore((state) => state.subscribeToProgress);
 
   useEffect(() => {
-    loadFolders().then(() => loadImages(true));
+    loadFolders().then(() => {
+      void loadBackgroundJobProgress();
+      return loadImages(true);
+    });
     let unlisten: (() => void) | undefined;
     subscribeToProgress().then((fn) => {
       unlisten = fn;

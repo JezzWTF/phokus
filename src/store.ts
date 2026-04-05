@@ -53,6 +53,9 @@ export interface FolderJobProgress {
   folder_id: number;
   thumbnail_pending: number;
   metadata_pending: number;
+  embedding_pending: number;
+  embedding_ready: number;
+  embedding_failed: number;
 }
 
 export interface MediaJobProgressEvent {
@@ -89,11 +92,13 @@ interface GalleryState {
   favoritesOnly: boolean;
   zoomPreset: ZoomPreset;
   selectedImage: ImageRecord | null;
+  collectionTitle: string | null;
   indexingProgress: Record<number, IndexProgress>;
   mediaJobProgress: Record<number, FolderJobProgress>;
   cacheDir: string;
 
   loadFolders: () => Promise<void>;
+  loadBackgroundJobProgress: () => Promise<void>;
   addFolder: (path: string) => Promise<void>;
   removeFolder: (folderId: number) => Promise<void>;
   reindexFolder: (folderId: number) => Promise<void>;
@@ -107,6 +112,8 @@ interface GalleryState {
   setZoomPreset: (zoomPreset: ZoomPreset) => void;
   openImage: (image: ImageRecord) => void;
   closeImage: () => void;
+  loadSimilarImages: (imageId: number) => Promise<void>;
+  retryFailedEmbeddings: (folderId: number) => Promise<void>;
   updateImageDetails: (imageId: number, updates: { favorite?: boolean; rating?: number }) => Promise<void>;
   setCacheDir: (dir: string) => void;
   subscribeToProgress: () => Promise<UnlistenFn>;
@@ -235,6 +242,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   favoritesOnly: false,
   zoomPreset: "comfortable",
   selectedImage: null,
+  collectionTitle: null,
   indexingProgress: {},
   mediaJobProgress: {},
   cacheDir: "",
@@ -246,16 +254,25 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     set({ folders });
   },
 
+  loadBackgroundJobProgress: async () => {
+    const progress = await invoke<FolderJobProgress[]>("get_background_job_progress");
+    set(() => ({
+      mediaJobProgress: Object.fromEntries(progress.map((entry) => [entry.folder_id, entry])),
+    }));
+  },
+
   addFolder: async (path) => {
-    const { loadFolders } = get();
+    const { loadFolders, loadBackgroundJobProgress } = get();
     await invoke("add_folder", { path });
     await loadFolders();
+    await loadBackgroundJobProgress();
   },
 
   removeFolder: async (folderId) => {
     await invoke("remove_folder", { folderId });
-    const { selectedFolderId, loadFolders, loadImages } = get();
+    const { selectedFolderId, loadFolders, loadImages, loadBackgroundJobProgress } = get();
     await loadFolders();
+    await loadBackgroundJobProgress();
     if (selectedFolderId === folderId) {
       set({ selectedFolderId: null });
       await loadImages(true);
@@ -263,13 +280,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   reindexFolder: async (folderId) => {
-    const { loadFolders } = get();
+    const { loadFolders, loadBackgroundJobProgress } = get();
     await invoke("reindex_folder", { folderId });
     await loadFolders();
+    await loadBackgroundJobProgress();
   },
 
   selectFolder: (folderId) => {
-    set({ selectedFolderId: folderId, images: [], loadedCount: 0 });
+    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null });
     void get().loadImages(true);
   },
 
@@ -301,6 +319,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         totalImages: result.total,
         loadedCount: reset ? result.images.length : state.loadedCount + result.images.length,
         loadingImages: false,
+        collectionTitle: reset ? null : state.collectionTitle,
       }));
     } catch (error) {
       console.error("Failed to load media:", error);
@@ -315,22 +334,22 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   setSearch: (search) => {
-    set({ search, images: [], loadedCount: 0 });
+    set({ search, images: [], loadedCount: 0, collectionTitle: null });
     void get().loadImages(true);
   },
 
   setSort: (sort) => {
-    set({ sort, images: [], loadedCount: 0 });
+    set({ sort, images: [], loadedCount: 0, collectionTitle: null });
     void get().loadImages(true);
   },
 
   setMediaFilter: (mediaFilter) => {
-    set({ mediaFilter, images: [], loadedCount: 0 });
+    set({ mediaFilter, images: [], loadedCount: 0, collectionTitle: null });
     void get().loadImages(true);
   },
 
   setFavoritesOnly: (favoritesOnly) => {
-    set({ favoritesOnly, images: [], loadedCount: 0 });
+    set({ favoritesOnly, images: [], loadedCount: 0, collectionTitle: null });
     void get().loadImages(true);
   },
 
@@ -338,6 +357,25 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   openImage: (image) => set({ selectedImage: image }),
   closeImage: () => set({ selectedImage: null }),
+
+  loadSimilarImages: async (imageId) => {
+    const images = await invoke<ImageRecord[]>("find_similar_images", {
+      params: { image_id: imageId, limit: PAGE_SIZE },
+    });
+    set({
+      images,
+      totalImages: images.length,
+      loadedCount: images.length,
+      loadingImages: false,
+      collectionTitle: "Similar Images",
+      selectedFolderId: null,
+    });
+  },
+
+  retryFailedEmbeddings: async (folderId) => {
+    await invoke("retry_failed_embeddings", { params: { folder_id: folderId } });
+    await get().loadBackgroundJobProgress();
+  },
 
   updateImageDetails: async (imageId, updates) => {
     const updatedImage = await invoke<ImageRecord>("update_image_details", {
@@ -366,6 +404,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
       if (progress.done) {
         void get().loadFolders();
+        void get().loadBackgroundJobProgress();
         void get().loadImages(true);
 
         setTimeout(() => {

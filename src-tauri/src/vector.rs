@@ -50,6 +50,34 @@ pub fn upsert_embedding(conn: &Connection, image_id: i64, embedding: &[f32]) -> 
     Ok(())
 }
 
+pub fn find_similar_image_ids(conn: &Connection, image_id: i64, limit: usize) -> Result<Vec<i64>> {
+    let embedding: Vec<u8> = conn.query_row(
+        "SELECT embedding FROM image_vec WHERE image_id = ?1",
+        [image_id],
+        |row| row.get(0),
+    )?;
+
+    let mut stmt = conn.prepare(
+        "SELECT image_id
+         FROM image_vec
+         WHERE embedding MATCH vec_f32(?1)
+           AND k = ?2",
+    )?;
+    let rows = stmt.query_map((&embedding, (limit as i64) + 1), |row| row.get::<_, i64>(0))?;
+
+    let mut ids = Vec::new();
+    for row in rows {
+        let candidate_id = row?;
+        if candidate_id != image_id {
+            ids.push(candidate_id);
+        }
+        if ids.len() >= limit {
+            break;
+        }
+    }
+    Ok(ids)
+}
+
 #[allow(dead_code)]
 fn pack_f32(values: &[f32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(values.len() * std::mem::size_of::<f32>());

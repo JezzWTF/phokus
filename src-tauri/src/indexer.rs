@@ -1,4 +1,5 @@
 use crate::db::{self, DbPool, FolderJobProgress, ImageRecord, IndexedMediaEntry};
+use crate::embedder::{embedding_source_path, ClipImageEmbedder};
 use crate::media::{probe_video_metadata, MediaTools};
 use crate::storage::{detect_storage_profile, RuntimeAdaptiveProfile, StorageProfile};
 use crate::thumbnail;
@@ -26,6 +27,7 @@ static ACTIVE_INDEXING_FOLDERS: OnceLock<Mutex<HashSet<i64>>> = OnceLock::new();
 static FOLDER_STORAGE_PROFILES: OnceLock<Mutex<HashMap<i64, RuntimeAdaptiveProfile>>> =
     OnceLock::new();
 static DB_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+const EMBEDDING_BATCH_SIZE: usize = 8;
 
 #[derive(Clone, Serialize)]
 pub struct IndexProgress {
@@ -86,6 +88,20 @@ pub fn start_metadata_worker(app: AppHandle, pool: DbPool, media_tools: MediaToo
         }
 
         std::thread::sleep(std::time::Duration::from_millis(250));
+    });
+}
+
+pub fn start_embedding_worker(app: AppHandle, pool: DbPool) {
+    std::thread::spawn(move || {
+        let mut embedder: Option<ClipImageEmbedder> = None;
+        println!("Embedding worker started.");
+        loop {
+            if let Err(error) = process_embedding_batch(&app, &pool, &mut embedder) {
+                eprintln!("Embedding worker error: {}", error);
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
     });
 }
 
@@ -303,6 +319,8 @@ fn process_thumbnail_batch(
         return Ok(());
     }
 
+    println!("Embedding batch claimed: {} items", jobs.len());
+
     let (image_jobs, video_jobs): (Vec<_>, Vec<_>) =
         jobs.into_iter().partition(|job| job.media_kind == "image");
 
@@ -459,6 +477,105 @@ fn process_metadata_batch(app: &AppHandle, pool: &DbPool, media_tools: &MediaToo
         );
         emit_folder_job_progress(app, pool, &folder_ids.into_iter().collect::<Vec<_>>());
     }
+
+    Ok(())
+}
+
+fn process_embedding_batch(
+    app: &AppHandle,
+    pool: &DbPool,
+    embedder: &mut Option<ClipImageEmbedder>,
+) -> Result<()> {
+    let batch_started_at = Instant::now();
+    if embedder.is_none() {
+        *embedder = Some(ClipImageEmbedder::new()?);
+    }
+
+    let claim_started_at = Instant::now();
+    let jobs = with_db_write_lock(|| {
+        let mut conn = pool.get()?;
+        db::claim_embedding_jobs(&mut conn, EMBEDDING_BATCH_SIZE)
+    })?;
+    let claim_elapsed = claim_started_at.elapsed();
+
+    if jobs.is_empty() {
+        return Ok(());
+    }
+
+    println!("Embedding batch claimed: {} items", jobs.len());
+    let folder_ids = jobs.iter().map(|job| job.folder_id).collect::<HashSet<_>>();
+    emit_folder_job_progress(app, pool, &folder_ids.iter().copied().collect::<Vec<_>>());
+    let embedder = embedder.as_ref().expect("embedder should be initialized");
+
+    let infer_started_at = Instant::now();
+    let source_paths = jobs
+        .iter()
+        .map(|job| embedding_source_path(&job.path, job.thumbnail_path.as_deref(), &job.media_kind))
+        .collect::<Vec<_>>();
+
+    let results = match embedder.embed_images(&source_paths) {
+        Ok(embeddings) => jobs
+            .into_iter()
+            .zip(embeddings.into_iter().map(Ok))
+            .collect::<Vec<_>>(),
+        Err(batch_error) => {
+            eprintln!(
+                "Embedding batch fallback to per-image mode: {}",
+                batch_error
+            );
+            jobs.into_iter()
+                .zip(source_paths.into_iter())
+                .map(|(job, source_path)| (job, embedder.embed_image(&source_path)))
+                .collect::<Vec<_>>()
+        }
+    };
+    let infer_elapsed = infer_started_at.elapsed();
+
+    let write_started_at = Instant::now();
+    let updated_images = with_db_write_lock(|| {
+        let mut conn = pool.get()?;
+        let tx = conn.transaction()?;
+        let mut updated_images = Vec::new();
+
+        for (job, embedding_result) in results {
+            match embedding_result {
+                Ok(embedding) => {
+                    vector::upsert_embedding(&tx, job.image_id, &embedding)?;
+                    db::mark_embedding_ready(&tx, job.image_id, vector::CLIP_MODEL_NAME)?;
+                }
+                Err(error) => {
+                    db::mark_embedding_failed(&tx, job.image_id, &error.to_string())?;
+                }
+            }
+
+            updated_images.push(db::get_image_by_id(&tx, job.image_id)?);
+        }
+
+        tx.commit()?;
+        Ok(updated_images)
+    })?;
+
+    if !updated_images.is_empty() {
+        println!("Embedding batch completed: {} items", updated_images.len());
+        let folder_ids = updated_images
+            .iter()
+            .map(|image| image.folder_id)
+            .collect::<HashSet<_>>();
+        emit_media_updates(
+            app,
+            &MediaUpdateBatch {
+                images: updated_images,
+            },
+        );
+        emit_folder_job_progress(app, pool, &folder_ids.into_iter().collect::<Vec<_>>());
+    }
+
+    let write_elapsed = write_started_at.elapsed();
+    let batch_elapsed = batch_started_at.elapsed();
+    println!(
+        "Embedding batch timing: claimed {} in {:?}, infer {:?}, write {:?}, total {:?}",
+        EMBEDDING_BATCH_SIZE, claim_elapsed, infer_elapsed, write_elapsed, batch_elapsed
+    );
 
     Ok(())
 }
