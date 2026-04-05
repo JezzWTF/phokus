@@ -34,22 +34,20 @@ function FilterChip({
 }
 
 export function Toolbar() {
-  const {
-    search,
-    setSearch,
-    sort,
-    setSort,
-    totalImages,
-    loadedCount,
-    selectedFolderId,
-    folders,
-    mediaFilter,
-    setMediaFilter,
-    favoritesOnly,
-    setFavoritesOnly,
-    zoomPreset,
-    setZoomPreset,
-  } = useGalleryStore();
+  const search = useGalleryStore((state) => state.search);
+  const setSearch = useGalleryStore((state) => state.setSearch);
+  const sort = useGalleryStore((state) => state.sort);
+  const setSort = useGalleryStore((state) => state.setSort);
+  const totalImages = useGalleryStore((state) => state.totalImages);
+  const loadedCount = useGalleryStore((state) => state.loadedCount);
+  const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
+  const folders = useGalleryStore((state) => state.folders);
+  const mediaFilter = useGalleryStore((state) => state.mediaFilter);
+  const setMediaFilter = useGalleryStore((state) => state.setMediaFilter);
+  const favoritesOnly = useGalleryStore((state) => state.favoritesOnly);
+  const setFavoritesOnly = useGalleryStore((state) => state.setFavoritesOnly);
+  const zoomPreset = useGalleryStore((state) => state.zoomPreset);
+  const setZoomPreset = useGalleryStore((state) => state.setZoomPreset);
 
   const [searchValue, setSearchValue] = useState(search);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);

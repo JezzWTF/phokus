@@ -28,6 +28,11 @@ export interface ImageRecord {
   modified_at: string | null;
   mime_type: string;
   media_kind: MediaKind;
+  duration_ms: number | null;
+  video_codec: string | null;
+  audio_codec: string | null;
+  metadata_updated_at: string | null;
+  metadata_error: string | null;
   favorite: boolean;
   rating: number;
   embedding_status: string;
@@ -42,6 +47,16 @@ export interface IndexProgress {
   indexed: number;
   current_file: string;
   done: boolean;
+}
+
+export interface FolderJobProgress {
+  folder_id: number;
+  thumbnail_pending: number;
+  metadata_pending: number;
+}
+
+export interface MediaJobProgressEvent {
+  progress: FolderJobProgress[];
 }
 
 export interface IndexedImagesBatch {
@@ -75,6 +90,7 @@ interface GalleryState {
   zoomPreset: ZoomPreset;
   selectedImage: ImageRecord | null;
   indexingProgress: Record<number, IndexProgress>;
+  mediaJobProgress: Record<number, FolderJobProgress>;
   cacheDir: string;
 
   loadFolders: () => Promise<void>;
@@ -97,6 +113,16 @@ interface GalleryState {
 }
 
 const PAGE_SIZE = 200;
+
+function mergeIntoVisibleWindow(
+  currentImages: ImageRecord[],
+  newImages: ImageRecord[],
+  sort: SortOrder,
+  windowSize: number,
+): ImageRecord[] {
+  const merged = mergeImages(currentImages, newImages, sort);
+  return merged.slice(0, Math.max(windowSize, 0));
+}
 
 function matchesSearch(image: ImageRecord, search: string): boolean {
   if (!search) return true;
@@ -175,6 +201,16 @@ function replaceImage(images: ImageRecord[], updatedImage: ImageRecord, sort: So
   return mergeImages(images, [updatedImage], sort);
 }
 
+function replaceExistingImages(
+  currentImages: ImageRecord[],
+  updatedImages: ImageRecord[],
+  sort: SortOrder,
+): ImageRecord[] {
+  const updatesByPath = new Map(updatedImages.map((image) => [image.path, image]));
+  const nextImages = currentImages.map((image) => updatesByPath.get(image.path) ?? image);
+  return nextImages.sort((a, b) => compareImages(a, b, sort));
+}
+
 export function tileSizeForZoom(zoomPreset: ZoomPreset): number {
   switch (zoomPreset) {
     case "compact":
@@ -200,6 +236,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   zoomPreset: "comfortable",
   selectedImage: null,
   indexingProgress: {},
+  mediaJobProgress: {},
   cacheDir: "",
 
   setCacheDir: (cacheDir) => set({ cacheDir }),
@@ -210,8 +247,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   addFolder: async (path) => {
-    const { cacheDir, loadFolders } = get();
-    await invoke("add_folder", { path, cacheDir });
+    const { loadFolders } = get();
+    await invoke("add_folder", { path });
     await loadFolders();
   },
 
@@ -226,8 +263,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   reindexFolder: async (folderId) => {
-    const { cacheDir, loadFolders } = get();
-    await invoke("reindex_folder", { folderId, cacheDir });
+    const { loadFolders } = get();
+    await invoke("reindex_folder", { folderId });
     await loadFolders();
   },
 
@@ -329,6 +366,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
       if (progress.done) {
         void get().loadFolders();
+        void get().loadImages(true);
 
         setTimeout(() => {
           set((state) => {
@@ -338,6 +376,16 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           });
         }, 2000);
       }
+    });
+
+    const unlistenMediaJobs = await listen<MediaJobProgressEvent>("media-job-progress", (event) => {
+      set((state) => {
+        const next = { ...state.mediaJobProgress };
+        for (const progress of event.payload.progress) {
+          next[progress.folder_id] = progress;
+        }
+        return { mediaJobProgress: next };
+      });
     });
 
     const unlistenImages = await listen<IndexedImagesBatch>("indexed-images", (event) => {
@@ -359,16 +407,17 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         }
 
         const newVisibleCount = countNewImages(state.images, visibleImages);
-        const images = mergeImages(state.images, visibleImages, state.sort);
+        const visibleWindow = Math.max(state.loadedCount, PAGE_SIZE);
+        const images = mergeIntoVisibleWindow(state.images, visibleImages, state.sort, visibleWindow);
         return {
           images,
-          loadedCount: images.length,
+          loadedCount: Math.max(state.loadedCount, Math.min(images.length, visibleWindow)),
           totalImages: Math.max(state.totalImages + newVisibleCount, images.length),
         };
       });
     });
 
-    const unlistenThumbnails = await listen<ThumbnailBatch>("thumbnail-updated", (event) => {
+    const unlistenThumbnails = await listen<ThumbnailBatch>("media-updated", (event) => {
       const batch = event.payload;
 
       set((state) => {
@@ -392,7 +441,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         }
 
         return {
-          images: mergeImages(state.images, visibleImages, state.sort),
+          images: replaceExistingImages(state.images, visibleImages, state.sort),
           selectedImage,
         };
       });
@@ -400,6 +449,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
     return () => {
       unlistenProgress();
+      unlistenMediaJobs();
       unlistenImages();
       unlistenThumbnails();
     };

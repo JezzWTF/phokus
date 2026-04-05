@@ -18,8 +18,26 @@ function formatDate(iso: string | null): string {
   });
 }
 
+function formatDuration(durationMs: number | null): string {
+  if (!durationMs || durationMs <= 0) return "Pending / unavailable";
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const seconds = totalSeconds % 60;
+  const minutes = Math.floor(totalSeconds / 60) % 60;
+  const hours = Math.floor(totalSeconds / 3600);
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
 export function Lightbox() {
-  const { selectedImage, closeImage, images, openImage, updateImageDetails } = useGalleryStore();
+  const selectedImage = useGalleryStore((state) => state.selectedImage);
+  const closeImage = useGalleryStore((state) => state.closeImage);
+  const images = useGalleryStore((state) => state.images);
+  const openImage = useGalleryStore((state) => state.openImage);
+  const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
   const [zoom, setZoom] = useState(1);
   const imageViewportRef = useRef<HTMLDivElement>(null);
 
@@ -93,58 +111,61 @@ export function Lightbox() {
             </svg>
           </button>
 
-          <motion.div
-            key={selectedImage.id}
-            className="flex flex-1 flex-col"
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            onClick={(event) => event.stopPropagation()}
-          >
+          <div className="flex flex-1 flex-col" onClick={(event) => event.stopPropagation()}>
             <div className="flex flex-1 overflow-hidden">
               <div
                 ref={imageViewportRef}
                 className="group relative flex flex-1 items-center justify-center overflow-auto p-10"
               >
-                {selectedImage.media_kind === "video" ? (
-                  <video
-                    src={convertFileSrc(selectedImage.path)}
-                    controls
-                    className="max-h-full max-w-full rounded-2xl shadow-2xl"
-                    style={{ maxHeight: "calc(100vh - 10rem)" }}
-                  />
-                ) : (
-                  <>
-                    <img
-                      src={convertFileSrc(selectedImage.path)}
-                      alt={selectedImage.filename}
-                      className="max-w-full rounded-2xl shadow-2xl"
-                      style={{
-                        maxHeight: "calc(100vh - 10rem)",
-                        transform: `scale(${zoom})`,
-                        transformOrigin: "center center",
-                      }}
-                    />
-                    <div className="pointer-events-none absolute right-6 top-6 opacity-0 transition-opacity group-hover:opacity-100">
-                      <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-black/55 px-2 py-1 backdrop-blur">
-                        <button
-                          className="px-2 text-sm text-gray-300 hover:text-white"
-                          onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}
-                        >
-                          -
-                        </button>
-                        <span className="min-w-14 text-center text-xs text-gray-300">{Math.round(zoom * 100)}%</span>
-                        <button
-                          className="px-2 text-sm text-gray-300 hover:text-white"
-                          onClick={() => setZoom((value) => Math.min(4, value + 0.25))}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={selectedImage.id}
+                    className="flex items-center justify-center"
+                    initial={{ opacity: 0.3, scale: 0.985 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0.3, scale: 0.985 }}
+                    transition={{ duration: 0.12 }}
+                  >
+                    {selectedImage.media_kind === "video" ? (
+                      <video
+                        src={convertFileSrc(selectedImage.path)}
+                        controls
+                        className="max-h-full max-w-full rounded-2xl shadow-2xl"
+                        style={{ maxHeight: "calc(100vh - 10rem)" }}
+                      />
+                    ) : (
+                      <>
+                        <img
+                          src={convertFileSrc(selectedImage.path)}
+                          alt={selectedImage.filename}
+                          className="max-w-full rounded-2xl shadow-2xl"
+                          style={{
+                            maxHeight: "calc(100vh - 10rem)",
+                            transform: `scale(${zoom})`,
+                            transformOrigin: "center center",
+                          }}
+                        />
+                        <div className="pointer-events-none absolute right-6 top-6 opacity-0 transition-opacity group-hover:opacity-100">
+                          <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-black/55 px-2 py-1 backdrop-blur">
+                            <button
+                              className="px-2 text-sm text-gray-300 hover:text-white"
+                              onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}
+                            >
+                              -
+                            </button>
+                            <span className="min-w-14 text-center text-xs text-gray-300">{Math.round(zoom * 100)}%</span>
+                            <button
+                              className="px-2 text-sm text-gray-300 hover:text-white"
+                              onClick={() => setZoom((value) => Math.min(4, value + 0.25))}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </motion.div>
+                </AnimatePresence>
               </div>
 
               <div className="flex w-72 shrink-0 flex-col border-l border-white/5 bg-gray-900/95 p-5">
@@ -217,6 +238,32 @@ export function Lightbox() {
                     </p>
                   </div>
 
+                  {selectedImage.media_kind === "video" ? (
+                    <>
+                      <div>
+                        <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">Duration</p>
+                        <p className="text-white">{formatDuration(selectedImage.duration_ms)}</p>
+                      </div>
+
+                      <div>
+                        <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">Video codec</p>
+                        <p className="text-white">{selectedImage.video_codec ?? "Pending / unavailable"}</p>
+                      </div>
+
+                      <div>
+                        <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">Audio codec</p>
+                        <p className="text-white">{selectedImage.audio_codec ?? "None / unavailable"}</p>
+                      </div>
+
+                      {selectedImage.metadata_error ? (
+                        <div>
+                          <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">Metadata</p>
+                          <p className="text-amber-300">{selectedImage.metadata_error}</p>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
+
                   <div>
                     <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">Type</p>
                     <p className="text-white">{selectedImage.mime_type}</p>
@@ -248,7 +295,7 @@ export function Lightbox() {
                 </div>
               </div>
             </div>
-          </motion.div>
+          </div>
 
           <button
             className="absolute right-80 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white transition-colors hover:bg-white/20 disabled:opacity-20"

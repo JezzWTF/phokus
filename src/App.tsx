@@ -1,13 +1,16 @@
 import { useEffect } from "react";
 import { useGalleryStore } from "./store";
 import { Sidebar } from "./components/Sidebar";
+import { BackgroundTasks } from "./components/BackgroundTasks";
 import { MenuBar } from "./components/MenuBar";
 import { Toolbar } from "./components/Toolbar";
 import { Gallery } from "./components/Gallery";
 import { Lightbox } from "./components/Lightbox";
 
 export default function App() {
-  const { loadFolders, loadImages, subscribeToProgress } = useGalleryStore();
+  const loadFolders = useGalleryStore((state) => state.loadFolders);
+  const loadImages = useGalleryStore((state) => state.loadImages);
+  const subscribeToProgress = useGalleryStore((state) => state.subscribeToProgress);
 
   useEffect(() => {
     loadFolders().then(() => loadImages(true));
@@ -26,6 +29,7 @@ export default function App() {
       <main className="flex-1 flex flex-col min-w-0">
         <MenuBar />
         <Toolbar />
+        <BackgroundTasks />
         <Gallery />
       </main>
       <Lightbox />

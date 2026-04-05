@@ -1,7 +1,5 @@
 # Phokus
 
-`Phokus` is the chosen name for this project. It keeps the visual/photo association obvious while feeling sharper and more distinctive than `image-gallery`.
-
 ## Overview
 
 Phokus is a Tauri desktop app for building a fast, local media library from folders on disk. It indexes images and videos, stores metadata in SQLite, and gives you a dense browsing workflow with filtering, favorites, ratings, and a lightbox preview.

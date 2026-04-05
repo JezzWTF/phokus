@@ -95,8 +95,12 @@ function FolderItem({
 }
 
 export function Sidebar() {
-  const { folders, selectedFolderId, addFolder, indexingProgress, totalImages, selectFolder } =
-    useGalleryStore();
+  const folders = useGalleryStore((state) => state.folders);
+  const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
+  const addFolder = useGalleryStore((state) => state.addFolder);
+  const indexingProgress = useGalleryStore((state) => state.indexingProgress);
+  const totalImages = useGalleryStore((state) => state.totalImages);
+  const selectFolder = useGalleryStore((state) => state.selectFolder);
 
   const handleAddFolder = async () => {
     const selected = await open({

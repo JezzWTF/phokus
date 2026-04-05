@@ -72,17 +72,15 @@ const FILTER_OPTIONS: { value: MediaFilter; label: string }[] = [
 export function MenuBar() {
   const [openMenu, setOpenMenu] = useState<MenuKey | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const {
-    addFolder,
-    reindexFolder,
-    selectedFolderId,
-    zoomPreset,
-    setZoomPreset,
-    mediaFilter,
-    setMediaFilter,
-    favoritesOnly,
-    setFavoritesOnly,
-  } = useGalleryStore();
+  const addFolder = useGalleryStore((state) => state.addFolder);
+  const reindexFolder = useGalleryStore((state) => state.reindexFolder);
+  const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
+  const zoomPreset = useGalleryStore((state) => state.zoomPreset);
+  const setZoomPreset = useGalleryStore((state) => state.setZoomPreset);
+  const mediaFilter = useGalleryStore((state) => state.mediaFilter);
+  const setMediaFilter = useGalleryStore((state) => state.setMediaFilter);
+  const favoritesOnly = useGalleryStore((state) => state.favoritesOnly);
+  const setFavoritesOnly = useGalleryStore((state) => state.setFavoritesOnly);
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {

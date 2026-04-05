@@ -37,7 +37,6 @@ pub async fn add_folder(
     app: AppHandle,
     db: State<'_, DbState>,
     path: String,
-    cache_dir: String,
 ) -> Result<Folder, String> {
     let folder_path = PathBuf::from(&path);
 
@@ -65,8 +64,7 @@ pub async fn add_folder(
         .find(|f| f.id == folder_id)
         .ok_or("Folder not found after insert")?;
 
-    let cache_path = PathBuf::from(cache_dir);
-    indexer::index_folder(app, db.inner().clone(), folder_id, folder_path, cache_path);
+    indexer::index_folder(app, db.inner().clone(), folder_id, folder_path);
 
     Ok(folder)
 }
@@ -135,7 +133,6 @@ pub async fn reindex_folder(
     app: AppHandle,
     db: State<'_, DbState>,
     folder_id: i64,
-    cache_dir: String,
 ) -> Result<(), String> {
     let folder_path = {
         let conn = db.get().map_err(|e| e.to_string())?;
@@ -147,7 +144,6 @@ pub async fn reindex_folder(
             .ok_or("Folder not found")?
     };
 
-    let cache_path = PathBuf::from(cache_dir);
-    indexer::index_folder(app, db.inner().clone(), folder_id, folder_path, cache_path);
+    indexer::index_folder(app, db.inner().clone(), folder_id, folder_path);
     Ok(())
 }

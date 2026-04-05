@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod indexer;
+mod media;
 mod thumbnail;
 mod vector;
 
@@ -20,8 +21,11 @@ pub fn run() {
 
             std::fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
 
+            media::MediaTools::ensure_installed().expect("Failed to provision FFmpeg sidecar");
+
             let db_path = app_dir.join("gallery.db");
             let pool = db::create_pool(&db_path).expect("Failed to create database pool");
+            let media_tools = media::MediaTools::resolve();
 
             {
                 let conn = pool.get().expect("Failed to get connection for migration");
@@ -31,9 +35,16 @@ pub fn run() {
             let thumb_dir = app_dir.join("thumbnails");
             std::fs::create_dir_all(&thumb_dir).expect("Failed to create thumbnail dir");
 
-            indexer::start_thumbnail_worker(app.handle().clone(), pool.clone(), thumb_dir);
+            indexer::start_thumbnail_worker(
+                app.handle().clone(),
+                pool.clone(),
+                media_tools.clone(),
+                thumb_dir,
+            );
+            indexer::start_metadata_worker(app.handle().clone(), pool.clone(), media_tools.clone());
 
             app.manage(pool);
+            app.manage(media_tools);
 
             Ok(())
         })

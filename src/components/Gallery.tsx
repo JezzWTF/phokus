@@ -24,6 +24,20 @@ function RatingStars({ rating }: { rating: number }) {
   );
 }
 
+function formatDuration(durationMs: number | null): string | null {
+  if (!durationMs || durationMs <= 0) return null;
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const seconds = totalSeconds % 60;
+  const minutes = Math.floor(totalSeconds / 60) % 60;
+  const hours = Math.floor(totalSeconds / 3600);
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
 function ContextMenu({
   x,
   y,
@@ -174,6 +188,11 @@ function ImageTile({
           {image.media_kind}
         </div>
         <div className="flex items-center gap-1">
+          {image.media_kind === "video" && image.duration_ms ? (
+            <div className="rounded-full border border-white/10 bg-black/35 px-2 py-1 text-[10px] font-medium text-white/80">
+              {formatDuration(image.duration_ms)}
+            </div>
+          ) : null}
           {image.favorite ? (
             <div className="rounded-full border border-white/10 bg-black/35 p-1 text-rose-300">
               <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
@@ -196,7 +215,12 @@ function ImageTile({
 }
 
 export function Gallery() {
-  const { images, loadMoreImages, openImage, totalImages, loadingImages, zoomPreset } = useGalleryStore();
+  const images = useGalleryStore((state) => state.images);
+  const loadMoreImages = useGalleryStore((state) => state.loadMoreImages);
+  const openImage = useGalleryStore((state) => state.openImage);
+  const totalImages = useGalleryStore((state) => state.totalImages);
+  const loadingImages = useGalleryStore((state) => state.loadingImages);
+  const zoomPreset = useGalleryStore((state) => state.zoomPreset);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; image: ImageRecord } | null>(null);

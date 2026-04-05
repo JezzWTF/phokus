@@ -46,6 +46,11 @@ pub struct ImageRecord {
     pub modified_at: Option<String>,
     pub mime_type: String,
     pub media_kind: String,
+    pub duration_ms: Option<i64>,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+    pub metadata_updated_at: Option<String>,
+    pub metadata_error: Option<String>,
     pub favorite: bool,
     pub rating: i64,
     pub embedding_status: String,
@@ -68,8 +73,32 @@ pub struct EmbeddingJob {
 #[derive(Debug, Clone)]
 pub struct ThumbnailJob {
     pub image_id: i64,
+    pub folder_id: i64,
     pub path: String,
     pub media_kind: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MetadataJob {
+    pub image_id: i64,
+    pub folder_id: i64,
+    pub path: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexedMediaEntry {
+    pub id: i64,
+    pub path: String,
+    pub modified_at: Option<String>,
+    pub file_size: i64,
+    pub media_kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FolderJobProgress {
+    pub folder_id: i64,
+    pub thumbnail_pending: i64,
+    pub metadata_pending: i64,
 }
 
 pub fn create_pool(db_path: &Path) -> Result<DbPool> {
@@ -127,10 +156,20 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS metadata_jobs (
+            image_id    INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            attempts    INTEGER NOT NULL DEFAULT 0,
+            last_error  TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_images_folder_id ON images(folder_id);
         CREATE INDEX IF NOT EXISTS idx_images_modified_at ON images(modified_at);
         CREATE INDEX IF NOT EXISTS idx_embedding_jobs_status ON embedding_jobs(status);
         CREATE INDEX IF NOT EXISTS idx_thumbnail_jobs_status ON thumbnail_jobs(status);
+        CREATE INDEX IF NOT EXISTS idx_metadata_jobs_status ON metadata_jobs(status);
         ",
     )?;
 
@@ -151,6 +190,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     )?;
     ensure_column(conn, "images", "favorite", "INTEGER NOT NULL DEFAULT 0")?;
     ensure_column(conn, "images", "rating", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_column(conn, "images", "duration_ms", "INTEGER")?;
+    ensure_column(conn, "images", "video_codec", "TEXT")?;
+    ensure_column(conn, "images", "audio_codec", "TEXT")?;
+    ensure_column(conn, "images", "metadata_updated_at", "TEXT")?;
+    ensure_column(conn, "images", "metadata_error", "TEXT")?;
 
     vector::migrate(conn)?;
     Ok(())
@@ -171,8 +215,8 @@ pub fn insert_folder(conn: &Connection, path: &str, name: &str) -> Result<i64> {
 
 pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
     let id = conn.query_row(
-        "INSERT INTO images (folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type, media_kind, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+        "INSERT INTO images (folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type, media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
          ON CONFLICT(path) DO UPDATE SET
             folder_id = excluded.folder_id,
             filename = excluded.filename,
@@ -184,6 +228,11 @@ pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
             modified_at = excluded.modified_at,
             mime_type = excluded.mime_type,
             media_kind = excluded.media_kind,
+            duration_ms = excluded.duration_ms,
+            video_codec = excluded.video_codec,
+            audio_codec = excluded.audio_codec,
+            metadata_updated_at = excluded.metadata_updated_at,
+            metadata_error = excluded.metadata_error,
             embedding_status = excluded.embedding_status,
             embedding_model = excluded.embedding_model,
             embedding_updated_at = excluded.embedding_updated_at,
@@ -201,6 +250,11 @@ pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
             img.modified_at,
             img.mime_type,
             img.media_kind,
+            img.duration_ms,
+            img.video_codec,
+            img.audio_codec,
+            img.metadata_updated_at,
+            img.metadata_error,
             img.favorite,
             img.rating,
             img.embedding_status,
@@ -229,6 +283,19 @@ pub fn enqueue_embedding_job(conn: &Connection, image_id: i64) -> Result<()> {
 pub fn enqueue_thumbnail_job(conn: &Connection, image_id: i64) -> Result<()> {
     conn.execute(
         "INSERT INTO thumbnail_jobs (image_id, status, attempts, last_error, created_at, updated_at)
+         VALUES (?1, 'pending', 0, NULL, datetime('now'), datetime('now'))
+         ON CONFLICT(image_id) DO UPDATE SET
+            status = 'pending',
+            last_error = NULL,
+            updated_at = datetime('now')",
+        [image_id],
+    )?;
+    Ok(())
+}
+
+pub fn enqueue_metadata_job(conn: &Connection, image_id: i64) -> Result<()> {
+    conn.execute(
+        "INSERT INTO metadata_jobs (image_id, status, attempts, last_error, created_at, updated_at)
          VALUES (?1, 'pending', 0, NULL, datetime('now'), datetime('now'))
          ON CONFLICT(image_id) DO UPDATE SET
             status = 'pending',
@@ -312,26 +379,97 @@ pub fn update_folder_count(conn: &Connection, folder_id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn get_next_thumbnail_job(conn: &Connection) -> Result<Option<ThumbnailJob>> {
+pub fn get_folder_media_index(conn: &Connection, folder_id: i64) -> Result<Vec<IndexedMediaEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT j.image_id, i.path, i.media_kind
+        "SELECT id, path, modified_at, file_size, media_kind
+         FROM images
+         WHERE folder_id = ?1",
+    )?;
+    let rows = stmt.query_map([folder_id], |row| {
+        Ok(IndexedMediaEntry {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            modified_at: row.get(2)?,
+            file_size: row.get(3)?,
+            media_kind: row.get(4)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub fn delete_images_by_ids(conn: &Connection, image_ids: &[i64]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for image_id in image_ids {
+        vector::delete_embedding(&tx, *image_id)?;
+        tx.execute("DELETE FROM images WHERE id = ?1", [image_id])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn get_folder_job_progress(conn: &Connection, folder_id: i64) -> Result<FolderJobProgress> {
+    let thumbnail_pending = conn.query_row(
+        "SELECT COUNT(*)
+         FROM thumbnail_jobs j
+         JOIN images i ON i.id = j.image_id
+         WHERE i.folder_id = ?1 AND j.status IN ('pending', 'processing')",
+        [folder_id],
+        |row| row.get(0),
+    )?;
+
+    let metadata_pending = conn.query_row(
+        "SELECT COUNT(*)
+         FROM metadata_jobs j
+         JOIN images i ON i.id = j.image_id
+         WHERE i.folder_id = ?1 AND j.status IN ('pending', 'processing')",
+        [folder_id],
+        |row| row.get(0),
+    )?;
+
+    Ok(FolderJobProgress {
+        folder_id,
+        thumbnail_pending,
+        metadata_pending,
+    })
+}
+
+pub fn get_pending_thumbnail_jobs(conn: &Connection, limit: usize) -> Result<Vec<ThumbnailJob>> {
+    let mut stmt = conn.prepare(
+        "SELECT j.image_id, i.folder_id, i.path, i.media_kind
          FROM thumbnail_jobs j
          JOIN images i ON i.id = j.image_id
          WHERE j.status = 'pending'
          ORDER BY j.updated_at, j.image_id
-         LIMIT 1",
+         LIMIT ?1",
     )?;
+    let rows = stmt.query_map([limit as i64], |row| {
+        Ok(ThumbnailJob {
+            image_id: row.get(0)?,
+            folder_id: row.get(1)?,
+            path: row.get(2)?,
+            media_kind: row.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
 
-    let mut rows = stmt.query([])?;
-    let Some(row) = rows.next()? else {
-        return Ok(None);
-    };
-
-    Ok(Some(ThumbnailJob {
-        image_id: row.get(0)?,
-        path: row.get(1)?,
-        media_kind: row.get(2)?,
-    }))
+pub fn get_pending_metadata_jobs(conn: &Connection, limit: usize) -> Result<Vec<MetadataJob>> {
+    let mut stmt = conn.prepare(
+        "SELECT j.image_id, i.folder_id, i.path
+         FROM metadata_jobs j
+         JOIN images i ON i.id = j.image_id
+         WHERE j.status = 'pending' AND i.media_kind = 'video'
+         ORDER BY j.updated_at, j.image_id
+         LIMIT ?1",
+    )?;
+    let rows = stmt.query_map([limit as i64], |row| {
+        Ok(MetadataJob {
+            image_id: row.get(0)?,
+            folder_id: row.get(1)?,
+            path: row.get(2)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 pub fn mark_thumbnail_job_processing(conn: &Connection, image_id: i64) -> Result<()> {
@@ -348,10 +486,16 @@ pub fn mark_thumbnail_ready(
     conn: &Connection,
     image_id: i64,
     thumbnail_path: Option<&str>,
+    width: Option<i64>,
+    height: Option<i64>,
 ) -> Result<ImageRecord> {
     conn.execute(
-        "UPDATE images SET thumbnail_path = ?2 WHERE id = ?1",
-        params![image_id, thumbnail_path],
+        "UPDATE images
+         SET thumbnail_path = ?2,
+             width = COALESCE(?3, width),
+             height = COALESCE(?4, height)
+         WHERE id = ?1",
+        params![image_id, thumbnail_path, width, height],
     )?;
     conn.execute("DELETE FROM thumbnail_jobs WHERE image_id = ?1", [image_id])?;
     get_image_by_id(conn, image_id)
@@ -360,6 +504,64 @@ pub fn mark_thumbnail_ready(
 pub fn mark_thumbnail_failed(conn: &Connection, image_id: i64, error: &str) -> Result<()> {
     conn.execute(
         "UPDATE thumbnail_jobs
+         SET status = 'failed', last_error = ?2, updated_at = datetime('now')
+         WHERE image_id = ?1",
+        params![image_id, error],
+    )?;
+    Ok(())
+}
+
+pub fn mark_metadata_job_processing(conn: &Connection, image_id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE metadata_jobs
+         SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
+         WHERE image_id = ?1",
+        [image_id],
+    )?;
+    Ok(())
+}
+
+pub fn mark_metadata_ready(
+    conn: &Connection,
+    image_id: i64,
+    duration_ms: Option<i64>,
+    width: Option<i64>,
+    height: Option<i64>,
+    video_codec: Option<&str>,
+    audio_codec: Option<&str>,
+) -> Result<ImageRecord> {
+    conn.execute(
+        "UPDATE images
+         SET duration_ms = ?2,
+             width = COALESCE(?3, width),
+             height = COALESCE(?4, height),
+             video_codec = ?5,
+             audio_codec = ?6,
+             metadata_updated_at = datetime('now'),
+             metadata_error = NULL
+         WHERE id = ?1",
+        params![
+            image_id,
+            duration_ms,
+            width,
+            height,
+            video_codec,
+            audio_codec
+        ],
+    )?;
+    conn.execute("DELETE FROM metadata_jobs WHERE image_id = ?1", [image_id])?;
+    get_image_by_id(conn, image_id)
+}
+
+pub fn mark_metadata_failed(conn: &Connection, image_id: i64, error: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE images
+         SET metadata_error = ?2
+         WHERE id = ?1",
+        params![image_id, error],
+    )?;
+    conn.execute(
+        "UPDATE metadata_jobs
          SET status = 'failed', last_error = ?2, updated_at = datetime('now')
          WHERE image_id = ?1",
         params![image_id, error],
@@ -383,7 +585,8 @@ pub fn update_image_details(
 
     conn.query_row(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
-                media_kind, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error
+                media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
+                favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error
          FROM images
          WHERE id = ?1",
         [image_id],
@@ -395,7 +598,8 @@ pub fn update_image_details(
 pub fn get_image_by_id(conn: &Connection, image_id: i64) -> Result<ImageRecord> {
     conn.query_row(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
-                media_kind, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error
+                media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
+                favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error
          FROM images
          WHERE id = ?1",
         [image_id],
@@ -443,7 +647,8 @@ pub fn get_images(
     let favorites_flag = i64::from(favorites_only);
     let sql = format!(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
-                media_kind, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error
+                media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
+                favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error
          FROM images
          WHERE (?1 IS NULL OR folder_id = ?1)
            AND (?2 IS NULL OR filename LIKE ?2)
@@ -510,12 +715,17 @@ fn map_image_row(row: &Row<'_>) -> rusqlite::Result<ImageRecord> {
         modified_at: row.get(9)?,
         mime_type: row.get(10)?,
         media_kind: row.get(11)?,
-        favorite: row.get::<_, i64>(12)? != 0,
-        rating: row.get(13)?,
-        embedding_status: row.get(14)?,
-        embedding_model: row.get(15)?,
-        embedding_updated_at: row.get(16)?,
-        embedding_error: row.get(17)?,
+        duration_ms: row.get(12)?,
+        video_codec: row.get(13)?,
+        audio_codec: row.get(14)?,
+        metadata_updated_at: row.get(15)?,
+        metadata_error: row.get(16)?,
+        favorite: row.get::<_, i64>(17)? != 0,
+        rating: row.get(18)?,
+        embedding_status: row.get(19)?,
+        embedding_model: row.get(20)?,
+        embedding_updated_at: row.get(21)?,
+        embedding_error: row.get(22)?,
     })
 }
 
