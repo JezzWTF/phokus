@@ -2,8 +2,8 @@ use crate::media::MediaTools;
 use anyhow::{anyhow, Result};
 use fast_image_resize as fir;
 use fast_image_resize::IntoImageView;
+use image::codecs::jpeg::JpegEncoder;
 use image::ImageDecoder;
-use image::ImageFormat;
 use std::path::{Path, PathBuf};
 
 pub const THUMB_SIZE: u32 = 320;
@@ -53,7 +53,10 @@ pub fn generate_image_thumbnail(image_path: &Path, cache_dir: &Path) -> Result<G
         std::fs::create_dir_all(parent)?;
     }
 
-    image::DynamicImage::ImageRgba8(thumb).save_with_format(&out_path, ImageFormat::WebP)?;
+    let thumb = image::DynamicImage::ImageRgba8(thumb).into_rgb8();
+    let mut output_file = std::fs::File::create(&out_path)?;
+    let mut encoder = JpegEncoder::new_with_quality(&mut output_file, 82);
+    encoder.encode_image(&thumb)?;
     Ok(GeneratedThumbnail {
         path: out_path,
         width: original_dimensions.0,
@@ -146,7 +149,7 @@ pub fn generate_video_thumbnail(
 }
 
 pub fn thumb_path(cache_dir: &Path, image_path: &str) -> PathBuf {
-    thumb_path_with_ext(cache_dir, image_path, "webp")
+    thumb_path_with_ext(cache_dir, image_path, "jpg")
 }
 
 pub fn video_poster_path(cache_dir: &Path, video_path: &str) -> PathBuf {

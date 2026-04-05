@@ -1,5 +1,6 @@
 use crate::db::{self, DbPool, FolderJobProgress, ImageRecord, IndexedMediaEntry};
 use crate::media::{probe_video_metadata, MediaTools};
+use crate::storage::{detect_storage_profile, RuntimeAdaptiveProfile, StorageProfile};
 use crate::thumbnail;
 use crate::vector;
 use anyhow::Result;
@@ -18,13 +19,13 @@ const IMAGE_EXTENSIONS: &[&str] = &[
 
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "m4v", "webm"];
 
-const INDEX_BATCH_SIZE: usize = 250;
-const WORKER_BATCH_SIZE: usize = 12;
-const WORKER_FETCH_SIZE: usize = 64;
 const JOB_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(750);
 
 static LAST_JOB_PROGRESS_EMIT: OnceLock<Mutex<HashMap<i64, Instant>>> = OnceLock::new();
 static ACTIVE_INDEXING_FOLDERS: OnceLock<Mutex<HashSet<i64>>> = OnceLock::new();
+static FOLDER_STORAGE_PROFILES: OnceLock<Mutex<HashMap<i64, RuntimeAdaptiveProfile>>> =
+    OnceLock::new();
+static DB_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Clone, Serialize)]
 pub struct IndexProgress {
@@ -53,6 +54,8 @@ pub struct MediaJobProgressEvent {
 
 pub fn index_folder(app: AppHandle, pool: DbPool, folder_id: i64, folder_path: PathBuf) {
     std::thread::spawn(move || {
+        let storage_profile = detect_storage_profile(&folder_path);
+        set_folder_storage_profile(folder_id, RuntimeAdaptiveProfile::new(storage_profile));
         set_folder_indexing_state(folder_id, true);
         if let Err(error) = do_index(app, pool, folder_id, folder_path) {
             eprintln!("Indexing error: {}", error);
@@ -119,7 +122,12 @@ fn do_index(app: AppHandle, pool: DbPool, folder_id: i64, folder_path: PathBuf) 
     let mut seen_paths = HashSet::with_capacity(total);
     let mut processed = 0usize;
 
-    for path_chunk in media_paths.chunks(INDEX_BATCH_SIZE) {
+    let mut offset = 0usize;
+    while offset < media_paths.len() {
+        let storage_profile = folder_storage_profile(folder_id);
+        let end = (offset + storage_profile.index_batch_size()).min(media_paths.len());
+        let path_chunk = &media_paths[offset..end];
+        let batch_start = Instant::now();
         let records: Vec<ImageRecord> = path_chunk
             .par_iter()
             .filter_map(|path| {
@@ -146,6 +154,7 @@ fn do_index(app: AppHandle, pool: DbPool, folder_id: i64, folder_path: PathBuf) 
         }
 
         processed += path_chunk.len();
+        observe_folder_scan_batch(folder_id, path_chunk.len(), batch_start.elapsed());
         let current_file = path_chunk
             .last()
             .and_then(|path| path.file_name())
@@ -162,6 +171,7 @@ fn do_index(app: AppHandle, pool: DbPool, folder_id: i64, folder_path: PathBuf) 
                 done: false,
             },
         );
+        offset = end;
     }
 
     let missing_ids = existing_by_path
@@ -275,22 +285,22 @@ fn process_thumbnail_batch(
     cache_dir: &Path,
 ) -> Result<()> {
     let jobs = {
-        let conn = pool.get()?;
-        let active_folders = active_indexing_folders();
-        db::get_pending_thumbnail_jobs(&conn, WORKER_FETCH_SIZE)?
-            .into_iter()
-            .filter(|job| !active_folders.contains(&job.folder_id))
-            .take(WORKER_BATCH_SIZE)
-            .collect::<Vec<_>>()
+        with_db_write_lock(|| {
+            let mut conn = pool.get()?;
+            let active_folders = active_indexing_folders();
+            let worker_batch_size = max_worker_batch_size(&active_folders);
+            let worker_fetch_size = max_worker_fetch_size(&active_folders);
+            db::claim_thumbnail_jobs(
+                &mut conn,
+                &active_folders,
+                worker_fetch_size,
+                worker_batch_size,
+            )
+        })?
     };
 
     if jobs.is_empty() {
         return Ok(());
-    }
-
-    for job in &jobs {
-        let conn = pool.get()?;
-        db::mark_thumbnail_job_processing(&conn, job.image_id)?;
     }
 
     let (image_jobs, video_jobs): (Vec<_>, Vec<_>) =
@@ -323,29 +333,40 @@ fn process_thumbnail_batch(
         ));
     }
 
-    let mut updated_images = Vec::new();
-    for (image_id, thumbnail_result) in results {
-        let generated = match thumbnail_result {
-            Ok(path) => path,
-            Err(error) => {
-                let conn = pool.get()?;
-                db::mark_thumbnail_failed(&conn, image_id, &error.to_string())?;
-                continue;
+    let updated_images = {
+        with_db_write_lock(|| {
+            let mut conn = pool.get()?;
+            let tx = conn.transaction()?;
+            let mut updated_images = Vec::new();
+
+            for (image_id, thumbnail_result) in results {
+                let generated = match thumbnail_result {
+                    Ok(path) => path,
+                    Err(error) => {
+                        db::mark_thumbnail_failed(&tx, image_id, &error.to_string())?;
+                        continue;
+                    }
+                };
+
+                let thumbnail_path = generated
+                    .as_ref()
+                    .map(|thumb| thumb.path.to_string_lossy().to_string());
+                let width = generated.as_ref().and_then(|thumb| thumb.width);
+                let height = generated.as_ref().and_then(|thumb| thumb.height);
+
+                updated_images.push(db::mark_thumbnail_ready(
+                    &tx,
+                    image_id,
+                    thumbnail_path.as_deref(),
+                    width,
+                    height,
+                )?);
             }
-        };
 
-        let thumbnail_path = generated
-            .as_ref()
-            .map(|thumb| thumb.path.to_string_lossy().to_string());
-        let width = generated.as_ref().and_then(|thumb| thumb.width);
-        let height = generated.as_ref().and_then(|thumb| thumb.height);
-
-        let updated_image = {
-            let conn = pool.get()?;
-            db::mark_thumbnail_ready(&conn, image_id, thumbnail_path.as_deref(), width, height)?
-        };
-        updated_images.push(updated_image);
-    }
+            tx.commit()?;
+            Ok(updated_images)
+        })?
+    };
 
     if !updated_images.is_empty() {
         let folder_ids = updated_images
@@ -366,50 +387,64 @@ fn process_thumbnail_batch(
 
 fn process_metadata_batch(app: &AppHandle, pool: &DbPool, media_tools: &MediaTools) -> Result<()> {
     let jobs = {
-        let conn = pool.get()?;
-        let active_folders = active_indexing_folders();
-        db::get_pending_metadata_jobs(&conn, WORKER_FETCH_SIZE)?
-            .into_iter()
-            .filter(|job| !active_folders.contains(&job.folder_id))
-            .take(WORKER_BATCH_SIZE)
-            .collect::<Vec<_>>()
+        with_db_write_lock(|| {
+            let mut conn = pool.get()?;
+            let active_folders = active_indexing_folders();
+            let worker_batch_size = max_worker_batch_size(&active_folders);
+            let worker_fetch_size = max_worker_fetch_size(&active_folders);
+            db::claim_metadata_jobs(
+                &mut conn,
+                &active_folders,
+                worker_fetch_size,
+                worker_batch_size,
+            )
+        })?
     };
 
     if jobs.is_empty() {
         return Ok(());
     }
 
-    for job in &jobs {
-        let conn = pool.get()?;
-        db::mark_metadata_job_processing(&conn, job.image_id)?;
-    }
-
-    let mut updated_images = Vec::new();
-
-    for job in jobs {
-        let metadata = match probe_video_metadata(media_tools, Path::new(&job.path)) {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                let conn = pool.get()?;
-                db::mark_metadata_failed(&conn, job.image_id, &error.to_string())?;
-                continue;
-            }
-        };
-
-        let updated_image = {
-            let conn = pool.get()?;
-            db::mark_metadata_ready(
-                &conn,
+    let results = jobs
+        .into_iter()
+        .map(|job| {
+            (
                 job.image_id,
-                metadata.duration_ms,
-                metadata.width,
-                metadata.height,
-                metadata.video_codec.as_deref(),
-                metadata.audio_codec.as_deref(),
-            )?
-        };
-        updated_images.push(updated_image);
-    }
+                probe_video_metadata(media_tools, Path::new(&job.path)),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let updated_images = {
+        with_db_write_lock(|| {
+            let mut conn = pool.get()?;
+            let tx = conn.transaction()?;
+            let mut updated_images = Vec::new();
+
+            for (image_id, metadata_result) in results {
+                let metadata = match metadata_result {
+                    Ok(metadata) => metadata,
+                    Err(error) => {
+                        db::mark_metadata_failed(&tx, image_id, &error.to_string())?;
+                        continue;
+                    }
+                };
+
+                updated_images.push(db::mark_metadata_ready(
+                    &tx,
+                    image_id,
+                    metadata.duration_ms,
+                    metadata.width,
+                    metadata.height,
+                    metadata.video_codec.as_deref(),
+                    metadata.audio_codec.as_deref(),
+                )?);
+            }
+
+            tx.commit()?;
+            Ok(updated_images)
+        })?
+    };
 
     if !updated_images.is_empty() {
         let folder_ids = updated_images
@@ -447,6 +482,58 @@ fn set_folder_indexing_state(folder_id: i64, is_active: bool) {
             folders.remove(&folder_id);
         }
     }
+}
+
+fn set_folder_storage_profile(folder_id: i64, profile: RuntimeAdaptiveProfile) {
+    if let Ok(mut profiles) = FOLDER_STORAGE_PROFILES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        profiles.insert(folder_id, profile);
+    }
+}
+
+fn folder_storage_profile(folder_id: i64) -> StorageProfile {
+    FOLDER_STORAGE_PROFILES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()
+        .and_then(|profiles| profiles.get(&folder_id).copied())
+        .map(|profile| profile.profile())
+        .unwrap_or(StorageProfile::Balanced)
+}
+
+fn observe_folder_scan_batch(folder_id: i64, item_count: usize, elapsed: Duration) {
+    if let Ok(mut profiles) = FOLDER_STORAGE_PROFILES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        if let Some(profile) = profiles.get_mut(&folder_id) {
+            profile.observe_scan_batch(item_count, elapsed);
+        }
+    }
+}
+
+fn max_worker_batch_size(active_folders: &HashSet<i64>) -> usize {
+    active_folders
+        .iter()
+        .map(|folder_id| folder_storage_profile(*folder_id).worker_batch_size())
+        .min()
+        .unwrap_or(StorageProfile::Balanced.worker_batch_size())
+}
+
+fn max_worker_fetch_size(active_folders: &HashSet<i64>) -> usize {
+    active_folders
+        .iter()
+        .map(|folder_id| folder_storage_profile(*folder_id).worker_fetch_size())
+        .min()
+        .unwrap_or(StorageProfile::Balanced.worker_fetch_size())
+}
+
+fn with_db_write_lock<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
+    let lock = DB_WRITE_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().unwrap();
+    operation()
 }
 
 fn emit_progress(app: &AppHandle, progress: &IndexProgress) {

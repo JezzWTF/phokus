@@ -34,3 +34,4 @@ anyhow = "1"
 log = "0.4"
 ffmpeg-sidecar = "2.5.0"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+sysinfo = "0.38.4"

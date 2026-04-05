@@ -2,10 +2,12 @@ mod commands;
 mod db;
 mod indexer;
 mod media;
+mod storage;
 mod thumbnail;
 mod vector;
 
 use tauri::Manager;
+use crate::storage::StorageProfile;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -35,12 +37,18 @@ pub fn run() {
             let thumb_dir = app_dir.join("thumbnails");
             std::fs::create_dir_all(&thumb_dir).expect("Failed to create thumbnail dir");
 
-            indexer::start_thumbnail_worker(
-                app.handle().clone(),
-                pool.clone(),
-                media_tools.clone(),
-                thumb_dir,
-            );
+            let thumbnail_worker_count = std::thread::available_parallelism()
+                .map(|parallelism| StorageProfile::Balanced.thumbnail_workers(parallelism.get()))
+                .unwrap_or(2);
+
+            for _ in 0..thumbnail_worker_count {
+                indexer::start_thumbnail_worker(
+                    app.handle().clone(),
+                    pool.clone(),
+                    media_tools.clone(),
+                    thumb_dir.clone(),
+                );
+            }
             indexer::start_metadata_worker(app.handle().clone(), pool.clone(), media_tools.clone());
 
             app.manage(pool);

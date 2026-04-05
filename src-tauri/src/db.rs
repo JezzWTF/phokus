@@ -453,6 +453,41 @@ pub fn get_pending_thumbnail_jobs(conn: &Connection, limit: usize) -> Result<Vec
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+pub fn claim_thumbnail_jobs(
+    conn: &mut Connection,
+    active_folder_ids: &std::collections::HashSet<i64>,
+    fetch_limit: usize,
+    claim_limit: usize,
+) -> Result<Vec<ThumbnailJob>> {
+    let tx = conn.transaction()?;
+    let candidates = get_pending_thumbnail_jobs(&tx, fetch_limit)?;
+    let mut claimed = Vec::with_capacity(claim_limit);
+
+    for job in candidates {
+        if active_folder_ids.contains(&job.folder_id) {
+            continue;
+        }
+
+        let updated = tx.execute(
+            "UPDATE thumbnail_jobs
+             SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
+             WHERE image_id = ?1 AND status = 'pending'",
+            [job.image_id],
+        )?;
+
+        if updated == 1 {
+            claimed.push(job);
+        }
+
+        if claimed.len() >= claim_limit {
+            break;
+        }
+    }
+
+    tx.commit()?;
+    Ok(claimed)
+}
+
 pub fn get_pending_metadata_jobs(conn: &Connection, limit: usize) -> Result<Vec<MetadataJob>> {
     let mut stmt = conn.prepare(
         "SELECT j.image_id, i.folder_id, i.path
@@ -472,14 +507,39 @@ pub fn get_pending_metadata_jobs(conn: &Connection, limit: usize) -> Result<Vec<
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-pub fn mark_thumbnail_job_processing(conn: &Connection, image_id: i64) -> Result<()> {
-    conn.execute(
-        "UPDATE thumbnail_jobs
-         SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
-         WHERE image_id = ?1",
-        [image_id],
-    )?;
-    Ok(())
+pub fn claim_metadata_jobs(
+    conn: &mut Connection,
+    active_folder_ids: &std::collections::HashSet<i64>,
+    fetch_limit: usize,
+    claim_limit: usize,
+) -> Result<Vec<MetadataJob>> {
+    let tx = conn.transaction()?;
+    let candidates = get_pending_metadata_jobs(&tx, fetch_limit)?;
+    let mut claimed = Vec::with_capacity(claim_limit);
+
+    for job in candidates {
+        if active_folder_ids.contains(&job.folder_id) {
+            continue;
+        }
+
+        let updated = tx.execute(
+            "UPDATE metadata_jobs
+             SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
+             WHERE image_id = ?1 AND status = 'pending'",
+            [job.image_id],
+        )?;
+
+        if updated == 1 {
+            claimed.push(job);
+        }
+
+        if claimed.len() >= claim_limit {
+            break;
+        }
+    }
+
+    tx.commit()?;
+    Ok(claimed)
 }
 
 pub fn mark_thumbnail_ready(
@@ -507,16 +567,6 @@ pub fn mark_thumbnail_failed(conn: &Connection, image_id: i64, error: &str) -> R
          SET status = 'failed', last_error = ?2, updated_at = datetime('now')
          WHERE image_id = ?1",
         params![image_id, error],
-    )?;
-    Ok(())
-}
-
-pub fn mark_metadata_job_processing(conn: &Connection, image_id: i64) -> Result<()> {
-    conn.execute(
-        "UPDATE metadata_jobs
-         SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
-         WHERE image_id = ?1",
-        [image_id],
     )?;
     Ok(())
 }
