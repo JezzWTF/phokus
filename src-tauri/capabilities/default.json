@@ -12,6 +12,10 @@
     "fs:allow-read-file",
     "fs:allow-read-dir",
     "fs:read-files",
-    "fs:read-dirs"
+    "fs:read-dirs",
+    "core:window:allow-minimize",
+    "core:window:allow-close",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized"
   ]
 }
