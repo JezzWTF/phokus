@@ -78,6 +78,41 @@ pub fn find_similar_image_ids(conn: &Connection, image_id: i64, limit: usize) ->
     Ok(ids)
 }
 
+/// Returns all stored image embeddings, optionally filtered to one folder.
+/// Each embedding is returned as a normalized f32 vector.
+pub fn get_all_image_embeddings(conn: &Connection, folder_id: Option<i64>) -> Result<Vec<Vec<f32>>> {
+    let packed_rows: Vec<Vec<u8>> = match folder_id {
+        Some(fid) => {
+            let mut stmt = conn.prepare(
+                "SELECT embedding FROM image_vec
+                 WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
+            )?;
+            let rows: Vec<Vec<u8>> = stmt
+                .query_map([fid], |row| row.get::<_, Vec<u8>>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            rows
+        }
+        None => {
+            let mut stmt = conn.prepare("SELECT embedding FROM image_vec")?;
+            let rows: Vec<Vec<u8>> = stmt
+                .query_map([], |row| row.get::<_, Vec<u8>>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            rows
+        }
+    };
+
+    Ok(packed_rows.iter().map(|b| unpack_f32(b)).collect())
+}
+
+fn unpack_f32(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect()
+}
+
 pub fn search_image_ids_by_embedding(
     conn: &Connection,
     embedding: &[f32],

@@ -77,6 +77,8 @@ export function Sidebar() {
   const addFolder = useGalleryStore((state) => state.addFolder);
   const indexingProgress = useGalleryStore((state) => state.indexingProgress);
   const selectFolder = useGalleryStore((state) => state.selectFolder);
+  const activeView = useGalleryStore((state) => state.activeView);
+  const setView = useGalleryStore((state) => state.setView);
 
   const handleAddFolder = async () => {
     const selected = await open({ directory: true, multiple: false, title: "Select Media Folder" });
@@ -102,10 +104,10 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <div className="px-2 pt-2 pb-1">
+      <div className="px-2 pt-2 pb-1 space-y-px">
         <div
           className={`flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150 ${
-            selectedFolderId === null
+            activeView === "gallery" && selectedFolderId === null
               ? "bg-white/8 text-white"
               : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
           }`}
@@ -115,8 +117,25 @@ export function Sidebar() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
               d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          <span className={`text-[13px] font-medium ${selectedFolderId === null ? "text-white" : ""}`}>
+          <span className={`text-[13px] font-medium ${activeView === "gallery" && selectedFolderId === null ? "text-white" : ""}`}>
             All Media
+          </span>
+        </div>
+
+        <div
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150 ${
+            activeView === "explore"
+              ? "bg-white/8 text-white"
+              : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
+          }`}
+          onClick={() => setView("explore")}
+        >
+          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+              d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
+          </svg>
+          <span className={`text-[13px] font-medium ${activeView === "explore" ? "text-white" : ""}`}>
+            Explore
           </span>
         </div>
       </div>

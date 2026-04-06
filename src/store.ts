@@ -72,6 +72,13 @@ export interface ThumbnailBatch {
   images: ImageRecord[];
 }
 
+export type ActiveView = "gallery" | "explore";
+
+export interface TagCloudEntry {
+  label: string;
+  count: number;
+}
+
 export type SortOrder =
   | "date_desc"
   | "date_asc"
@@ -97,6 +104,9 @@ interface GalleryState {
   zoomPreset: ZoomPreset;
   selectedImage: ImageRecord | null;
   collectionTitle: string | null;
+  activeView: ActiveView;
+  tagCloudEntries: TagCloudEntry[];
+  tagCloudLoading: boolean;
   indexingProgress: Record<number, IndexProgress>;
   mediaJobProgress: Record<number, FolderJobProgress>;
   cacheDir: string;
@@ -119,6 +129,9 @@ interface GalleryState {
   setZoomPreset: (zoomPreset: ZoomPreset) => void;
   openImage: (image: ImageRecord) => void;
   closeImage: () => void;
+  setView: (view: ActiveView) => void;
+  loadTagCloud: () => Promise<void>;
+  searchByTag: (tag: string) => void;
   loadSimilarImages: (imageId: number) => Promise<void>;
   retryFailedEmbeddings: (folderId: number) => Promise<void>;
   updateImageDetails: (imageId: number, updates: { favorite?: boolean; rating?: number }) => Promise<void>;
@@ -255,6 +268,9 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   zoomPreset: "comfortable",
   selectedImage: null,
   collectionTitle: null,
+  activeView: "gallery",
+  tagCloudEntries: [],
+  tagCloudLoading: false,
   indexingProgress: {},
   mediaJobProgress: {},
   cacheDir: "",
@@ -299,7 +315,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   selectFolder: (folderId) => {
-    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null });
+    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, activeView: "gallery" });
     void get().loadImages(true);
   },
 
@@ -405,6 +421,34 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   openImage: (image) => set({ selectedImage: image }),
   closeImage: () => set({ selectedImage: null }),
+
+  setView: (activeView) => set({ activeView }),
+
+  loadTagCloud: async () => {
+    const { selectedFolderId } = get();
+    set({ tagCloudLoading: true });
+    try {
+      const entries = await invoke<TagCloudEntry[]>("get_tag_cloud", {
+        folderId: selectedFolderId,
+      });
+      set({ tagCloudEntries: entries, tagCloudLoading: false });
+    } catch (error) {
+      console.error("Failed to load tag cloud:", error);
+      set({ tagCloudLoading: false });
+    }
+  },
+
+  searchByTag: (tag) => {
+    set({
+      activeView: "gallery",
+      search: tag,
+      searchMode: "semantic",
+      images: [],
+      loadedCount: 0,
+      collectionTitle: `Exploring: ${tag}`,
+    });
+    void get().loadImages(true);
+  },
 
   loadSimilarImages: async (imageId) => {
     const images = await invoke<ImageRecord[]>("find_similar_images", {

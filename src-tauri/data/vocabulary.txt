@@ -1,0 +1,535 @@
+# Visual concept vocabulary for tag cloud labelling
+# Each non-empty, non-comment line is embedded as "a photo of <word>"
+# and used to name clusters found in your library.
+# Add your own words — changes take effect after restarting the app.
+
+# People
+person
+man
+woman
+boy
+girl
+baby
+child
+teenager
+elderly person
+couple
+family
+friends
+crowd
+portrait
+face
+smile
+athlete
+soldier
+chef
+bride
+groom
+wedding
+monk
+dancer
+musician
+street performer
+protester
+
+# Animals
+cat
+dog
+bird
+horse
+cow
+pig
+sheep
+chicken
+duck
+rabbit
+fox
+wolf
+bear
+deer
+elk
+moose
+elephant
+lion
+tiger
+leopard
+cheetah
+giraffe
+zebra
+monkey
+gorilla
+chimpanzee
+kangaroo
+koala
+panda
+polar bear
+penguin
+flamingo
+parrot
+owl
+eagle
+hawk
+falcon
+hummingbird
+peacock
+crane
+seagull
+pelican
+snake
+lizard
+iguana
+crocodile
+turtle
+frog
+fish
+shark
+whale
+dolphin
+seal
+otter
+octopus
+jellyfish
+crab
+lobster
+bee
+butterfly
+dragonfly
+ant
+spider
+ladybug
+beetle
+squirrel
+raccoon
+bat
+hedgehog
+
+# Nature — water & coast
+ocean
+sea
+beach
+waves
+coastline
+cliff
+tide pool
+lake
+river
+stream
+creek
+waterfall
+swamp
+marsh
+wetland
+pond
+reservoir
+fjord
+lagoon
+bay
+harbour
+reef
+coral
+iceberg
+glacier
+
+# Nature — land & terrain
+mountain
+mountains
+valley
+canyon
+gorge
+cliff face
+hill
+plain
+meadow
+field
+prairie
+farmland
+vineyard
+orchard
+forest
+rainforest
+jungle
+woodland
+mangrove
+desert
+sand dunes
+salt flats
+savanna
+steppe
+tundra
+arctic
+volcano
+lava
+cave
+stalactite
+hot spring
+
+# Nature — plants & vegetation
+tree
+trees
+pine tree
+oak tree
+palm tree
+bamboo
+grass
+wildflowers
+flower
+rose
+sunflower
+tulip
+lavender
+cherry blossom
+dandelion
+clover
+fern
+moss
+lichen
+mushroom
+cactus
+succulent
+seaweed
+lily pad
+autumn leaves
+fallen leaves
+vineyard
+
+# Sky & weather
+sky
+blue sky
+clouds
+storm clouds
+thunderstorm
+lightning
+rainbow
+fog
+mist
+haze
+smoke
+sunrise
+sunset
+golden hour
+blue hour
+dusk
+dawn
+night sky
+stars
+milky way
+moon
+full moon
+crescent moon
+northern lights
+aurora
+snow
+blizzard
+rain
+puddle
+ice
+frost
+dew drops
+
+# Urban — streets & infrastructure
+city
+cityscape
+skyline
+skyscraper
+building
+apartment block
+neighbourhood
+street
+alley
+road
+highway
+motorway
+crossroads
+traffic
+car park
+bridge
+overpass
+tunnel
+fence
+wall
+power lines
+crane
+construction site
+fire hydrant
+street lamp
+billboard
+bus stop
+telephone booth
+postbox
+
+# Urban — buildings & architecture
+architecture
+church
+cathedral
+mosque
+temple
+synagogue
+pagoda
+monastery
+castle
+palace
+fortress
+ruins
+museum
+library
+stadium
+arena
+theatre
+cinema
+school
+university
+hospital
+factory
+warehouse
+barn
+farmhouse
+cottage
+villa
+lighthouse
+windmill
+water tower
+dam
+
+# Urban — interior spaces
+bedroom
+living room
+kitchen
+bathroom
+dining room
+office
+corridor
+staircase
+attic
+basement
+garage
+studio
+classroom
+laboratory
+workshop
+greenhouse
+gymnasium
+
+# Food & drink
+food
+meal
+bread
+pastry
+cake
+pie
+cookie
+pizza
+pasta
+noodles
+rice
+soup
+salad
+sandwich
+burger
+hot dog
+taco
+sushi
+sashimi
+seafood
+steak
+chicken
+barbecue
+breakfast
+brunch
+fruit
+vegetables
+herbs
+spices
+cheese
+eggs
+coffee
+espresso
+tea
+wine
+beer
+cocktail
+juice
+ice cream
+dessert
+chocolate
+candy
+market stall
+
+# Transport
+car
+sports car
+vintage car
+truck
+van
+bus
+tram
+motorcycle
+scooter
+bicycle
+skateboard
+train
+metro
+subway
+tram
+steam train
+aeroplane
+helicopter
+hot air balloon
+drone
+speedboat
+sailing boat
+yacht
+cruise ship
+container ship
+submarine
+kayak
+canoe
+surfboard
+
+# Activities & sport
+running
+jogging
+walking
+hiking
+cycling
+swimming
+surfing
+diving
+snorkelling
+sailing
+rowing
+kayaking
+climbing
+abseiling
+skiing
+snowboarding
+ice skating
+skateboarding
+horse riding
+football
+basketball
+tennis
+golf
+baseball
+cricket
+rugby
+boxing
+wrestling
+martial arts
+gymnastics
+yoga
+meditation
+stretching
+weight training
+dancing
+ballet
+breakdancing
+cheerleading
+fishing
+
+# Arts, culture & leisure
+painting
+drawing
+sketch
+sculpture
+mural
+graffiti
+street art
+calligraphy
+pottery
+glasswork
+photography
+concert
+live music
+festival
+carnival
+parade
+fireworks
+ceremony
+graduation
+protest
+market
+fair
+circus
+magic show
+puppet show
+gaming
+reading
+writing
+chess
+board game
+
+# Mood, lighting & photographic style
+silhouette
+reflection
+shadow
+long exposure
+light trails
+bokeh
+macro photography
+close-up
+aerial view
+bird's eye view
+underwater
+black and white
+vintage
+film grain
+neon lights
+candlelight
+backlight
+rim light
+dramatic lighting
+soft light
+misty
+moody
+minimalist
+symmetry
+geometry
+abstract
+pattern
+texture
+repetition
+colour splash
+double exposure
+
+# Miscellaneous visual subjects
+window
+door
+gate
+staircase
+mirror
+candle
+clock
+book
+map
+flag
+trophy
+statue
+monument
+graveyard
+cemetery
+prison
+lighthouse
+windmill
+water mill
+solar panels
+satellite dish
+telescope
+microscope
+laboratory equipment
+musical instrument
+guitar
+piano
+violin
+drums
+trumpet
+painting on wall
+cinema screen
+television
+old photograph
+typewriter
+sewing
+knitting
+gardening
+woodworking
+welding
+pottery wheel

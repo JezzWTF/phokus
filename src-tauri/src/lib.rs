@@ -77,6 +77,7 @@ pub fn run() {
             commands::semantic_search_images,
             commands::set_worker_paused,
             commands::get_worker_states,
+            commands::get_tag_cloud,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
