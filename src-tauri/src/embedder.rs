@@ -84,20 +84,17 @@ impl ClipImageEmbedder {
 }
 
 fn resolve_device() -> Result<Device> {
-    let cuda_device = Device::cuda_if_available(0)?;
-    if cuda_device.is_cuda() {
-        println!("CLIP embedder using CUDA device.");
-        return Ok(cuda_device);
-    }
-
-    #[cfg(target_os = "macos")]
+    #[cfg(feature = "candle-cuda")]
     {
-        let metal_device = Device::metal_if_available(0)?;
-        if metal_device.is_metal() {
-            println!("CLIP embedder using Metal device.");
-            return Ok(metal_device);
+        let cuda_device = Device::cuda_if_available(0)?;
+        if cuda_device.is_cuda() {
+            println!("CLIP embedder using CUDA device.");
+            return Ok(cuda_device);
         }
     }
+
+    #[cfg(not(feature = "candle-cuda"))]
+    println!("CLIP embedder built without CUDA support.");
 
     println!("CLIP embedder using CPU device.");
     Ok(Device::Cpu)

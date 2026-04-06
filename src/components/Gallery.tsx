@@ -234,6 +234,8 @@ export function Gallery() {
   const totalImages = useGalleryStore((state) => state.totalImages);
   const loadingImages = useGalleryStore((state) => state.loadingImages);
   const zoomPreset = useGalleryStore((state) => state.zoomPreset);
+  const search = useGalleryStore((state) => state.search);
+  const searchMode = useGalleryStore((state) => state.searchMode);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; image: ImageRecord } | null>(null);
@@ -270,6 +272,26 @@ export function Gallery() {
     };
   }, []);
 
+  if (images.length === 0 && loadingImages) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8">
+        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8 min-w-72">
+          <div className="h-5 w-5 mx-auto rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
+          <p className="mt-4 text-sm text-white/40 font-medium">
+            {searchMode === "semantic" && search.trim().length > 0
+              ? `Searching for matches to "${search}"`
+              : "Loading media"}
+          </p>
+          <p className="text-xs text-white/20 mt-1">
+            {searchMode === "semantic" && search.trim().length > 0
+              ? "Semantic search can take a little longer than filename search"
+              : "Fetching results"}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (images.length === 0 && !loadingImages) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8">
@@ -278,8 +300,16 @@ export function Gallery() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={0.75}
               d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          <p className="text-sm text-white/30 font-medium">No media found</p>
-          <p className="text-xs text-white/15 mt-1">Try adjusting your filters or add a new folder</p>
+          <p className="text-sm text-white/30 font-medium">
+            {searchMode === "semantic" && search.trim().length > 0
+              ? "No semantic matches found"
+              : "No media found"}
+          </p>
+          <p className="text-xs text-white/15 mt-1">
+            {searchMode === "semantic" && search.trim().length > 0
+              ? "Try a broader phrase, or wait for more embeddings to finish processing"
+              : "Try adjusting your filters or add a new folder"}
+          </p>
         </div>
       </div>
     );
