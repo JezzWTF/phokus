@@ -39,3 +39,4 @@ candle-core = { version = "0.10.2", features = ["cuda"] }
 candle-nn = { version = "0.10.2", features = ["cuda"] }
 candle-transformers = { version = "0.10.2", features = ["cuda"] }
 hf-hub = { version = "0.5.0", default-features = false, features = ["ureq", "native-tls"] }
+tokenizers = "0.22.1"

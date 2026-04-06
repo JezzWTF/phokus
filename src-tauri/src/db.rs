@@ -813,6 +813,8 @@ pub fn get_images(
         "date_desc" => "modified_at DESC NULLS LAST",
         "size_asc" => "file_size ASC",
         "size_desc" => "file_size DESC",
+        "duration_asc" => "duration_ms ASC NULLS LAST",
+        "duration_desc" => "duration_ms DESC NULLS LAST",
         _ => "modified_at DESC NULLS LAST",
     };
 

@@ -14,6 +14,7 @@ export interface Folder {
 export type MediaKind = "image" | "video";
 export type MediaFilter = "all" | MediaKind;
 export type ZoomPreset = "compact" | "comfortable" | "detail";
+export type SearchMode = "filename" | "semantic";
 
 export interface ImageRecord {
   id: number;
@@ -77,7 +78,9 @@ export type SortOrder =
   | "name_asc"
   | "name_desc"
   | "size_desc"
-  | "size_asc";
+  | "size_asc"
+  | "duration_desc"
+  | "duration_asc";
 
 interface GalleryState {
   folders: Folder[];
@@ -87,6 +90,7 @@ interface GalleryState {
   loadedCount: number;
   loadingImages: boolean;
   search: string;
+  searchMode: SearchMode;
   sort: SortOrder;
   mediaFilter: MediaFilter;
   favoritesOnly: boolean;
@@ -106,6 +110,9 @@ interface GalleryState {
   loadImages: (reset?: boolean) => Promise<void>;
   loadMoreImages: () => Promise<void>;
   setSearch: (search: string) => void;
+  clearSearch: () => void;
+  resetSearch: () => void;
+  setSearchMode: (mode: SearchMode) => void;
   setSort: (sort: SortOrder) => void;
   setMediaFilter: (filter: MediaFilter) => void;
   setFavoritesOnly: (favoritesOnly: boolean) => void;
@@ -171,6 +178,10 @@ function compareImages(a: ImageRecord, b: ImageRecord, sort: SortOrder): number 
       return compareNullableNumber(a.file_size, b.file_size);
     case "size_desc":
       return compareNullableNumber(b.file_size, a.file_size);
+    case "duration_asc":
+      return compareNullableNumber(a.duration_ms, b.duration_ms);
+    case "duration_desc":
+      return compareNullableNumber(b.duration_ms, a.duration_ms);
     default:
       return compareNullableDate(b.modified_at, a.modified_at);
   }
@@ -237,6 +248,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   loadedCount: 0,
   loadingImages: false,
   search: "",
+  searchMode: "filename",
   sort: "date_desc",
   mediaFilter: "all",
   favoritesOnly: false,
@@ -292,10 +304,31 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   loadImages: async (reset = false) => {
-    const { selectedFolderId, search, sort, loadedCount, mediaFilter, favoritesOnly } = get();
+    const { selectedFolderId, search, searchMode, sort, loadedCount, mediaFilter, favoritesOnly } = get();
     set({ loadingImages: true });
 
     try {
+      if (searchMode === "semantic" && search.trim()) {
+        const images = await invoke<ImageRecord[]>("semantic_search_images", {
+          params: {
+            query: search,
+            folder_id: selectedFolderId,
+            media_kind: mediaFilter === "all" ? null : mediaFilter,
+            favorites_only: favoritesOnly,
+            limit: PAGE_SIZE,
+          },
+        });
+
+        set({
+          images,
+          totalImages: images.length,
+          loadedCount: images.length,
+          loadingImages: false,
+          collectionTitle: `Semantic search: ${search}`,
+        });
+        return;
+      }
+
       const offset = reset ? 0 : loadedCount;
       const result = await invoke<{
         images: ImageRecord[];
@@ -338,6 +371,21 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     void get().loadImages(true);
   },
 
+  clearSearch: () => {
+    set({ search: "", images: [], loadedCount: 0, collectionTitle: null });
+    void get().loadImages(true);
+  },
+
+  resetSearch: () => {
+    set({ search: "", searchMode: "filename", images: [], loadedCount: 0, collectionTitle: null });
+    void get().loadImages(true);
+  },
+
+  setSearchMode: (searchMode) => {
+    set({ searchMode, images: [], loadedCount: 0, collectionTitle: null });
+    void get().loadImages(true);
+  },
+
   setSort: (sort) => {
     set({ sort, images: [], loadedCount: 0, collectionTitle: null });
     void get().loadImages(true);
@@ -369,6 +417,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       loadingImages: false,
       collectionTitle: "Similar Images",
       selectedFolderId: null,
+      selectedImage: null,
     });
   },
 

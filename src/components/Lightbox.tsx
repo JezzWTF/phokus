@@ -56,6 +56,7 @@ export function Lightbox() {
   const imageViewportRef = useRef<HTMLDivElement>(null);
 
   const currentIndex = selectedImage ? images.findIndex((image) => image.id === selectedImage.id) : -1;
+  const canFindSimilar = selectedImage?.embedding_status === "ready";
 
   const goPrev = useCallback(() => {
     if (currentIndex > 0) openImage(images[currentIndex - 1]);
@@ -199,10 +200,18 @@ export function Lightbox() {
                       </svg>
                     </button>
                     <button
-                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 hover:text-white"
-                      onClick={() => void loadSimilarImages(selectedImage.id)}
+                      className={`rounded-full border px-3 py-1.5 text-xs ${
+                        canFindSimilar
+                          ? "border-white/10 bg-white/5 text-gray-300 hover:text-white"
+                          : "border-white/5 bg-white/[0.03] text-gray-600 cursor-not-allowed"
+                      }`}
+                      onClick={() => {
+                        if (!canFindSimilar) return;
+                        void loadSimilarImages(selectedImage.id);
+                      }}
+                      disabled={!canFindSimilar}
                     >
-                      Similar
+                      {canFindSimilar ? "Similar" : "Embeddings not ready"}
                     </button>
                   </div>
                   <button className="rounded p-1 text-gray-400 hover:text-white" onClick={closeImage}>

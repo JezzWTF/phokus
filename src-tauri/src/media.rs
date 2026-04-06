@@ -6,6 +6,13 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+// On Windows, GUI apps spawn subprocesses with a visible console window by default.
+// CREATE_NO_WINDOW suppresses that for every ffmpeg/ffprobe invocation.
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 #[derive(Debug, Clone)]
 pub struct MediaTools {
     ffmpeg_path: PathBuf,
@@ -30,6 +37,10 @@ impl MediaTools {
     }
 
     pub fn ensure_installed() -> Result<()> {
+        // Skip download entirely if both binaries are already present.
+        if ffmpeg_path().exists() && ffprobe_path().exists() {
+            return Ok(());
+        }
         auto_download_with_progress(|event| match event {
             FfmpegDownloadProgressEvent::Starting => {
                 println!("Downloading bundled FFmpeg...");
@@ -53,11 +64,17 @@ impl MediaTools {
     }
 
     pub fn ffmpeg_command(&self) -> Command {
-        Command::new(&self.ffmpeg_path)
+        let mut cmd = Command::new(&self.ffmpeg_path);
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd
     }
 
     pub fn ffprobe_command(&self) -> Command {
-        Command::new(&self.ffprobe_path)
+        let mut cmd = Command::new(&self.ffprobe_path);
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd
     }
 }
 

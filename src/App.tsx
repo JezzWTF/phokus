@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { useGalleryStore } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { BackgroundTasks } from "./components/BackgroundTasks";
-import { MenuBar } from "./components/MenuBar";
 import { Toolbar } from "./components/Toolbar";
 import { Gallery } from "./components/Gallery";
 import { Lightbox } from "./components/Lightbox";
@@ -31,7 +30,6 @@ export default function App() {
     <div className="flex h-screen bg-gray-950 text-white overflow-hidden select-none">
       <Sidebar />
       <main className="flex-1 flex flex-col min-w-0">
-        <MenuBar />
         <Toolbar />
         <BackgroundTasks />
         <Gallery />

@@ -78,6 +78,38 @@ pub fn find_similar_image_ids(conn: &Connection, image_id: i64, limit: usize) ->
     Ok(ids)
 }
 
+pub fn search_image_ids_by_embedding(
+    conn: &Connection,
+    embedding: &[f32],
+    limit: usize,
+) -> Result<Vec<i64>> {
+    if embedding.len() != CLIP_VECTOR_DIM {
+        return Err(anyhow!(
+            "expected {}-dimensional embedding, got {}",
+            CLIP_VECTOR_DIM,
+            embedding.len()
+        ));
+    }
+
+    let packed = pack_f32(embedding);
+    let mut stmt = conn.prepare(
+        "SELECT image_id
+         FROM image_vec
+         WHERE embedding MATCH vec_f32(?1)
+           AND k = ?2",
+    )?;
+    let rows = stmt.query_map((&packed, limit as i64), |row| row.get::<_, i64>(0))?;
+
+    let mut ids = Vec::new();
+    for row in rows {
+        ids.push(row?);
+        if ids.len() >= limit {
+            break;
+        }
+    }
+    Ok(ids)
+}
+
 #[allow(dead_code)]
 fn pack_f32(values: &[f32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(values.len() * std::mem::size_of::<f32>());

@@ -1,4 +1,5 @@
 use crate::db::{self, DbPool, Folder, FolderJobProgress, ImageRecord};
+use crate::embedder::ClipImageEmbedder;
 use crate::indexer;
 use crate::vector;
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,15 @@ pub struct FindSimilarImagesParams {
 #[derive(Deserialize)]
 pub struct RetryFailedEmbeddingsParams {
     pub folder_id: i64,
+}
+
+#[derive(Deserialize)]
+pub struct SemanticSearchParams {
+    pub query: String,
+    pub folder_id: Option<i64>,
+    pub media_kind: Option<String>,
+    pub favorites_only: Option<bool>,
+    pub limit: Option<usize>,
 }
 
 #[tauri::command]
@@ -187,4 +197,53 @@ pub async fn retry_failed_embeddings(
 ) -> Result<usize, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     db::retry_failed_embedding_jobs(&conn, params.folder_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn semantic_search_images(
+    db: State<'_, DbState>,
+    params: SemanticSearchParams,
+) -> Result<Vec<ImageRecord>, String> {
+    let embedder = ClipImageEmbedder::new().map_err(|e| e.to_string())?;
+    let embedding = embedder.embed_text(&params.query).map_err(|e| e.to_string())?;
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let limit = params.limit.unwrap_or(64);
+    let ids = vector::search_image_ids_by_embedding(&conn, &embedding, limit).map_err(|e| e.to_string())?;
+    let mut images = db::get_images_by_ids(&conn, &ids).map_err(|e| e.to_string())?;
+
+    if let Some(folder_id) = params.folder_id {
+        images.retain(|image| image.folder_id == folder_id);
+    }
+    if let Some(media_kind) = params.media_kind.as_deref() {
+        images.retain(|image| image.media_kind == media_kind);
+    }
+    if params.favorites_only.unwrap_or(false) {
+        images.retain(|image| image.favorite);
+    }
+
+    Ok(images)
+}
+
+#[derive(Serialize)]
+pub struct WorkerStates {
+    pub thumbnail_paused: bool,
+    pub metadata_paused: bool,
+    pub embedding_paused: bool,
+}
+
+#[tauri::command]
+pub async fn set_worker_paused(worker: String, paused: bool) -> Result<(), String> {
+    indexer::set_worker_paused(&worker, paused);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_worker_states() -> Result<WorkerStates, String> {
+    let states = indexer::get_worker_paused_states();
+    Ok(WorkerStates {
+        thumbnail_paused: states[0],
+        metadata_paused: states[1],
+        embedding_paused: states[2],
+    })
 }

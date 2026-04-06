@@ -9,6 +9,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -24,6 +25,27 @@ const JOB_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(750);
 
 static LAST_JOB_PROGRESS_EMIT: OnceLock<Mutex<HashMap<i64, Instant>>> = OnceLock::new();
 static ACTIVE_INDEXING_FOLDERS: OnceLock<Mutex<HashSet<i64>>> = OnceLock::new();
+
+static THUMBNAIL_WORKER_PAUSED: AtomicBool = AtomicBool::new(false);
+static METADATA_WORKER_PAUSED: AtomicBool = AtomicBool::new(false);
+static EMBEDDING_WORKER_PAUSED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_worker_paused(worker: &str, paused: bool) {
+    match worker {
+        "thumbnail" => THUMBNAIL_WORKER_PAUSED.store(paused, Ordering::Relaxed),
+        "metadata" => METADATA_WORKER_PAUSED.store(paused, Ordering::Relaxed),
+        "embedding" => EMBEDDING_WORKER_PAUSED.store(paused, Ordering::Relaxed),
+        _ => {}
+    }
+}
+
+pub fn get_worker_paused_states() -> [bool; 3] {
+    [
+        THUMBNAIL_WORKER_PAUSED.load(Ordering::Relaxed),
+        METADATA_WORKER_PAUSED.load(Ordering::Relaxed),
+        EMBEDDING_WORKER_PAUSED.load(Ordering::Relaxed),
+    ]
+}
 static FOLDER_STORAGE_PROFILES: OnceLock<Mutex<HashMap<i64, RuntimeAdaptiveProfile>>> =
     OnceLock::new();
 static DB_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -73,20 +95,26 @@ pub fn start_thumbnail_worker(
     cache_dir: PathBuf,
 ) {
     std::thread::spawn(move || loop {
+        if THUMBNAIL_WORKER_PAUSED.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            continue;
+        }
         if let Err(error) = process_thumbnail_batch(&app, &pool, &media_tools, &cache_dir) {
             eprintln!("Thumbnail worker error: {}", error);
         }
-
         std::thread::sleep(std::time::Duration::from_millis(250));
     });
 }
 
 pub fn start_metadata_worker(app: AppHandle, pool: DbPool, media_tools: MediaTools) {
     std::thread::spawn(move || loop {
+        if METADATA_WORKER_PAUSED.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            continue;
+        }
         if let Err(error) = process_metadata_batch(&app, &pool, &media_tools) {
             eprintln!("Metadata worker error: {}", error);
         }
-
         std::thread::sleep(std::time::Duration::from_millis(250));
     });
 }
@@ -96,10 +124,13 @@ pub fn start_embedding_worker(app: AppHandle, pool: DbPool) {
         let mut embedder: Option<ClipImageEmbedder> = None;
         println!("Embedding worker started.");
         loop {
+            if EMBEDDING_WORKER_PAUSED.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                continue;
+            }
             if let Err(error) = process_embedding_batch(&app, &pool, &mut embedder) {
                 eprintln!("Embedding worker error: {}", error);
             }
-
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
     });
@@ -319,7 +350,7 @@ fn process_thumbnail_batch(
         return Ok(());
     }
 
-    println!("Embedding batch claimed: {} items", jobs.len());
+    println!("Thumbnail batch claimed: {} items", jobs.len());
 
     let (image_jobs, video_jobs): (Vec<_>, Vec<_>) =
         jobs.into_iter().partition(|job| job.media_kind == "image");

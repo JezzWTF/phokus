@@ -4,9 +4,11 @@ use candle_nn::VarBuilder;
 use candle_transformers::models::clip::{self, ClipModel};
 use hf_hub::{api::sync::Api, Repo, RepoType};
 use std::path::{Path, PathBuf};
+use tokenizers::Tokenizer;
 
 pub struct ClipImageEmbedder {
     model: ClipModel,
+    tokenizer: Tokenizer,
     device: Device,
     image_size: usize,
 }
@@ -21,6 +23,11 @@ impl ClipImageEmbedder {
         ));
         println!("Resolving CLIP model weights from Hugging Face cache...");
         let model_path = repo.get("model.safetensors")?;
+        let tokenizer_repo = api.repo(Repo::new(
+            "openai/clip-vit-base-patch32".to_string(),
+            RepoType::Model,
+        ));
+        let tokenizer_path = tokenizer_repo.get("tokenizer.json")?;
 
         let config = clip::ClipConfig::vit_base_patch32();
         let device = resolve_device()?;
@@ -32,10 +39,12 @@ impl ClipImageEmbedder {
             )?
         };
         let model = ClipModel::new(vb, &config)?;
+        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(anyhow::Error::msg)?;
         println!("CLIP image embedder ready.");
 
         Ok(Self {
             model,
+            tokenizer,
             device,
             image_size: config.image_size,
         })
@@ -55,6 +64,22 @@ impl ClipImageEmbedder {
             embeddings.push(normalized.get(index)?.flatten_all()?.to_vec1::<f32>()?);
         }
         Ok(embeddings)
+    }
+
+    pub fn embed_text(&self, query: &str) -> Result<Vec<f32>> {
+        let encoding = self
+            .tokenizer
+            .encode(query, true)
+            .map_err(anyhow::Error::msg)?;
+        let token_ids = encoding
+            .get_ids()
+            .iter()
+            .map(|token| *token as u32)
+            .collect::<Vec<_>>();
+        let input_ids = Tensor::new(vec![token_ids], &self.device)?;
+        let features = self.model.get_text_features(&input_ids)?;
+        let normalized = clip::div_l2_norm(&features)?;
+        Ok(normalized.flatten_all()?.to_vec1::<f32>()?)
     }
 }
 
