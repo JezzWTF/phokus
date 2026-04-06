@@ -172,6 +172,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS tag_cloud_cache (
+            folder_scope    TEXT PRIMARY KEY,
+            image_ids_hash  INTEGER NOT NULL,
+            entries_json    TEXT NOT NULL,
+            created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_images_folder_id ON images(folder_id);
         CREATE INDEX IF NOT EXISTS idx_images_modified_at ON images(modified_at);
         CREATE INDEX IF NOT EXISTS idx_embedding_jobs_status ON embedding_jobs(status);
@@ -301,11 +308,16 @@ pub fn backfill_embedding_jobs(conn: &Connection) -> Result<usize> {
 }
 
 pub fn retry_failed_embedding_jobs(conn: &Connection, folder_id: i64) -> Result<usize> {
+    // Only re-queue images that are actually embeddable right now.
+    // Videos without a thumbnail would just fail again immediately, so skip them —
+    // they will be re-queued automatically once their thumbnail is generated.
     let updated = conn.execute(
         "INSERT INTO embedding_jobs (image_id, status, attempts, last_error, created_at, updated_at)
          SELECT id, 'pending', 0, NULL, datetime('now'), datetime('now')
          FROM images
-         WHERE folder_id = ?1 AND embedding_status = 'failed'
+         WHERE folder_id = ?1
+           AND embedding_status = 'failed'
+           AND NOT (media_kind = 'video' AND thumbnail_path IS NULL)
          ON CONFLICT(image_id) DO UPDATE SET
              status = 'pending',
              last_error = NULL,
@@ -315,7 +327,9 @@ pub fn retry_failed_embedding_jobs(conn: &Connection, folder_id: i64) -> Result<
     conn.execute(
         "UPDATE images
          SET embedding_status = 'pending', embedding_error = NULL
-         WHERE folder_id = ?1 AND embedding_status = 'failed'",
+         WHERE folder_id = ?1
+           AND embedding_status = 'failed'
+           AND NOT (media_kind = 'video' AND thumbnail_path IS NULL)",
         [folder_id],
     )?;
     Ok(updated)
@@ -802,6 +816,7 @@ pub fn get_images(
     search: Option<&str>,
     media_kind: Option<&str>,
     favorites_only: bool,
+    embedding_failed_only: bool,
     sort: &str,
     offset: i64,
     limit: i64,
@@ -820,6 +835,7 @@ pub fn get_images(
 
     let search_pattern = search.map(|value| format!("%{}%", value));
     let favorites_flag = i64::from(favorites_only);
+    let embedding_failed_flag = i64::from(embedding_failed_only);
     let sql = format!(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
@@ -829,8 +845,9 @@ pub fn get_images(
            AND (?2 IS NULL OR filename LIKE ?2)
            AND (?3 IS NULL OR media_kind = ?3)
            AND (?4 = 0 OR favorite = 1)
+           AND (?5 = 0 OR embedding_status = 'failed')
          ORDER BY {}
-         LIMIT ?5 OFFSET ?6",
+         LIMIT ?6 OFFSET ?7",
         order
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -840,6 +857,7 @@ pub fn get_images(
             search_pattern,
             media_kind,
             favorites_flag,
+            embedding_failed_flag,
             limit,
             offset
         ],
@@ -854,21 +872,50 @@ pub fn count_images(
     search: Option<&str>,
     media_kind: Option<&str>,
     favorites_only: bool,
+    embedding_failed_only: bool,
 ) -> Result<i64> {
     let search_pattern = search.map(|value| format!("%{}%", value));
 
     let favorites_flag = i64::from(favorites_only);
+    let embedding_failed_flag = i64::from(embedding_failed_only);
     let count = conn.query_row(
         "SELECT COUNT(*) FROM images
          WHERE (?1 IS NULL OR folder_id = ?1)
            AND (?2 IS NULL OR filename LIKE ?2)
            AND (?3 IS NULL OR media_kind = ?3)
-           AND (?4 = 0 OR favorite = 1)",
-        params![folder_id, search_pattern, media_kind, favorites_flag],
+           AND (?4 = 0 OR favorite = 1)
+           AND (?5 = 0 OR embedding_status = 'failed')",
+        params![
+            folder_id,
+            search_pattern,
+            media_kind,
+            favorites_flag,
+            embedding_failed_flag
+        ],
         |row| row.get(0),
     )?;
 
     Ok(count)
+}
+
+pub fn get_failed_embedding_images(
+    conn: &Connection,
+    folder_id: i64,
+) -> Result<Vec<(i64, String, Option<String>)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, filename, embedding_error
+         FROM images
+         WHERE folder_id = ?1 AND embedding_status = 'failed'
+         ORDER BY filename",
+    )?;
+    let rows = stmt.query_map([folder_id], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 pub fn delete_folder(conn: &Connection, folder_id: i64) -> Result<()> {
@@ -902,6 +949,44 @@ fn map_image_row(row: &Row<'_>) -> rusqlite::Result<ImageRecord> {
         embedding_updated_at: row.get(21)?,
         embedding_error: row.get(22)?,
     })
+}
+
+/// Returns cached tag-cloud entries if the stored hash matches `current_hash`.
+pub fn get_tag_cloud_cache(
+    conn: &Connection,
+    folder_scope: &str,
+    current_hash: u64,
+) -> Result<Option<String>> {
+    let result: rusqlite::Result<(i64, String)> = conn.query_row(
+        "SELECT image_ids_hash, entries_json FROM tag_cloud_cache WHERE folder_scope = ?1",
+        params![folder_scope],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    );
+    match result {
+        Ok((stored_hash, json)) if stored_hash as u64 == current_hash => Ok(Some(json)),
+        Ok(_) => Ok(None),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Upserts the tag-cloud cache for the given scope.
+pub fn set_tag_cloud_cache(
+    conn: &Connection,
+    folder_scope: &str,
+    image_ids_hash: u64,
+    entries_json: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO tag_cloud_cache (folder_scope, image_ids_hash, entries_json, created_at)
+         VALUES (?1, ?2, ?3, datetime('now'))
+         ON CONFLICT(folder_scope) DO UPDATE SET
+             image_ids_hash = excluded.image_ids_hash,
+             entries_json   = excluded.entries_json,
+             created_at     = excluded.created_at",
+        params![folder_scope, image_ids_hash as i64, entries_json],
+    )?;
+    Ok(())
 }
 
 fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {

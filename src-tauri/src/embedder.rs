@@ -1,173 +1,24 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::clip::{self, ClipModel};
 use hf_hub::{api::sync::Api, Repo, RepoType};
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use tokenizers::Tokenizer;
 
 static TEXT_SEARCH_EMBEDDER: OnceLock<Mutex<Option<ClipImageEmbedder>>> = OnceLock::new();
-/// In-process cache so the disk file is only read/written once per session.
-static VOCAB_EMBED_CACHE: OnceLock<Mutex<Option<Vec<Vec<f32>>>>> = OnceLock::new();
-
-/// Default vocabulary bundled with the binary.
-pub const DEFAULT_VOCABULARY: &str = include_str!("../data/vocabulary.txt");
 
 /// Embed a text query using a lazily-initialized, cached CLIP embedder.
 pub fn embed_text_query(query: &str) -> Result<Vec<f32>> {
     with_text_embedder(|e| e.embed_text(query))
 }
 
-/// Parse vocabulary text: strip comment lines (starting with `#`) and blank lines.
-pub fn parse_vocabulary(text: &str) -> Vec<String> {
-    text.lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(|l| l.to_string())
-        .collect()
-}
-
-/// Load the vocabulary from `{cache_dir}/vocabulary.txt` if it exists,
-/// otherwise fall back to the binary-bundled default.
-pub fn load_vocabulary(cache_dir: &Path) -> Vec<String> {
-    let custom_path = cache_dir.join("vocabulary.txt");
-    if custom_path.exists() {
-        if let Ok(text) = std::fs::read_to_string(&custom_path) {
-            let words = parse_vocabulary(&text);
-            if !words.is_empty() {
-                println!("Using custom vocabulary from {:?} ({} words)", custom_path, words.len());
-                return words;
-            }
-        }
-    }
-    parse_vocabulary(DEFAULT_VOCABULARY)
-}
-
-/// Embed the vocabulary, using a disk cache so CLIP is only called when the vocabulary
-/// actually changes.  Cache file: `{cache_dir}/vocab_embeddings.bin`.
-///
-/// Format: `[u64 hash][u32 n_words][u32 dim][(n_words × dim) × f32 LE]`
-pub fn embed_vocab_cached(vocab: &[String], cache_dir: &Path) -> Result<Vec<Vec<f32>>> {
-    // In-process cache hit
-    {
-        let guard = VOCAB_EMBED_CACHE
-            .get_or_init(|| Mutex::new(None))
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Vocab cache lock poisoned"))?;
-        if let Some(cached) = guard.as_ref() {
-            return Ok(cached.clone());
-        }
-    }
-
-    let vocab_hash = fnv_hash(vocab);
-    let disk_path = cache_dir.join("vocab_embeddings.bin");
-
-    // Try loading from disk
-    if let Ok(embeddings) = load_disk_cache(&disk_path, vocab_hash) {
-        let mut guard = VOCAB_EMBED_CACHE
-            .get_or_init(|| Mutex::new(None))
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Vocab cache lock poisoned"))?;
-        *guard = Some(embeddings.clone());
-        println!("Vocabulary embeddings loaded from disk cache ({} words).", embeddings.len());
-        return Ok(embeddings);
-    }
-
-    // Compute embeddings
-    println!("Computing vocabulary embeddings ({} words) — this is cached after the first run.", vocab.len());
-    let prompts: Vec<String> = vocab.iter().map(|w| format!("a photo of {}", w)).collect();
-    let prompt_refs: Vec<&str> = prompts.iter().map(|s| s.as_str()).collect();
-
-    let embeddings = with_text_embedder(|e| {
-        let mut all = Vec::with_capacity(vocab.len());
-        for chunk in prompt_refs.chunks(64) {
-            all.extend(e.embed_texts_batch(chunk)?);
-        }
-        Ok(all)
-    })?;
-
-    // Save to disk
-    if let Err(e) = save_disk_cache(&disk_path, vocab_hash, &embeddings) {
-        eprintln!("Warning: could not write vocab cache: {e}");
-    }
-
-    let mut guard = VOCAB_EMBED_CACHE
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .map_err(|_| anyhow::anyhow!("Vocab cache lock poisoned"))?;
-    *guard = Some(embeddings.clone());
-    Ok(embeddings)
-}
-
-fn fnv_hash(words: &[String]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for w in words {
-        for b in w.bytes() {
-            h = h.wrapping_mul(0x100000001b3) ^ (b as u64);
-        }
-        h = h.wrapping_mul(0x100000001b3) ^ 0x0A; // newline separator
-    }
-    h
-}
-
-fn load_disk_cache(path: &Path, expected_hash: u64) -> Result<Vec<Vec<f32>>> {
-    let mut f = std::fs::File::open(path).context("no cache file")?;
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf)?;
-
-    if buf.len() < 16 {
-        anyhow::bail!("cache too short");
-    }
-
-    let hash = u64::from_le_bytes(buf[0..8].try_into()?);
-    if hash != expected_hash {
-        anyhow::bail!("vocab hash mismatch — recomputing");
-    }
-    let n = u32::from_le_bytes(buf[8..12].try_into()?) as usize;
-    let dim = u32::from_le_bytes(buf[12..16].try_into()?) as usize;
-
-    let expected_len = 16 + n * dim * 4;
-    if buf.len() != expected_len {
-        anyhow::bail!("cache size mismatch");
-    }
-
-    let mut embeddings = Vec::with_capacity(n);
-    let data = &buf[16..];
-    for i in 0..n {
-        let start = i * dim * 4;
-        let emb: Vec<f32> = data[start..start + dim * 4]
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-            .collect();
-        embeddings.push(emb);
-    }
-    Ok(embeddings)
-}
-
-fn save_disk_cache(path: &Path, hash: u64, embeddings: &[Vec<f32>]) -> Result<()> {
-    let n = embeddings.len();
-    let dim = embeddings.first().map(|e| e.len()).unwrap_or(0);
-
-    let mut buf = Vec::with_capacity(16 + n * dim * 4);
-    buf.extend_from_slice(&hash.to_le_bytes());
-    buf.extend_from_slice(&(n as u32).to_le_bytes());
-    buf.extend_from_slice(&(dim as u32).to_le_bytes());
-    for emb in embeddings {
-        for &v in emb {
-            buf.extend_from_slice(&v.to_le_bytes());
-        }
-    }
-
-    std::fs::write(path, buf)?;
-    println!("Vocabulary embeddings cached to disk ({n} words, {dim} dims).");
-    Ok(())
-}
-
 fn with_text_embedder<T>(f: impl FnOnce(&ClipImageEmbedder) -> Result<T>) -> Result<T> {
     let lock = TEXT_SEARCH_EMBEDDER.get_or_init(|| Mutex::new(None));
-    let mut guard = lock.lock().map_err(|_| anyhow::anyhow!("Text embedder lock poisoned"))?;
+    let mut guard = lock
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Text embedder lock poisoned"))?;
     if guard.is_none() {
         println!("Initializing CLIP text embedder...");
         *guard = Some(ClipImageEmbedder::new()?);
@@ -319,16 +170,28 @@ fn load_images(paths: &[PathBuf], image_size: usize) -> Result<Tensor> {
     Ok(Tensor::stack(&images, 0)?)
 }
 
+/// Returns the path that should be fed to the CLIP image embedder for a given media file.
+///
+/// For videos the thumbnail image is used (because CLIP only understands still images).
+/// If a video has no thumbnail yet, an error is returned — the caller should mark the
+/// embedding job as failed rather than trying to decode the raw video file.
 pub fn embedding_source_path(
     path: &str,
     thumbnail_path: Option<&str>,
     media_kind: &str,
-) -> PathBuf {
+) -> Result<PathBuf> {
     if media_kind == "video" {
-        thumbnail_path
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(path))
+        match thumbnail_path {
+            Some(thumb) => Ok(PathBuf::from(thumb)),
+            None => Err(anyhow::anyhow!(
+                "No thumbnail available yet for video '{}' — embedding deferred until thumbnail is generated",
+                std::path::Path::new(path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or_default()
+            )),
+        }
     } else {
-        PathBuf::from(path)
+        Ok(PathBuf::from(path))
     }
 }

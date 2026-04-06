@@ -1,17 +1,18 @@
 import { useEffect } from "react";
 import { motion } from "framer-motion";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { useGalleryStore, TagCloudEntry } from "../store";
 
-// Accent color pairs: [rest, hover, glow]
-const ACCENTS: [string, string, string][] = [
-  ["rgba(96,165,250,0.5)",  "#93c5fd", "rgba(59,130,246,0.3)"],
-  ["rgba(192,132,252,0.5)", "#d8b4fe", "rgba(168,85,247,0.3)"],
-  ["rgba(52,211,153,0.5)",  "#6ee7b7", "rgba(16,185,129,0.3)"],
-  ["rgba(251,191,36,0.5)",  "#fcd34d", "rgba(245,158,11,0.3)"],
-  ["rgba(249,168,212,0.5)", "#fbcfe8", "rgba(236,72,153,0.3)"],
-  ["rgba(103,232,249,0.5)", "#a5f3fc", "rgba(6,182,212,0.3)"],
-  ["rgba(253,186,116,0.5)", "#fed7aa", "rgba(249,115,22,0.3)"],
-  ["rgba(167,243,208,0.5)", "#bbf7d0", "rgba(34,197,94,0.3)"],
+// Accent glow colours for the hover ring — cycled by index
+const GLOWS: string[] = [
+  "rgba(59,130,246,0.5)",
+  "rgba(168,85,247,0.5)",
+  "rgba(16,185,129,0.5)",
+  "rgba(245,158,11,0.5)",
+  "rgba(236,72,153,0.5)",
+  "rgba(6,182,212,0.5)",
+  "rgba(249,115,22,0.5)",
+  "rgba(34,197,94,0.5)",
 ];
 
 function pseudoRandom(seed: number): number {
@@ -19,23 +20,16 @@ function pseudoRandom(seed: number): number {
   return x - Math.floor(x);
 }
 
-function getWeight(count: number, maxCount: number): 1 | 2 | 3 | 4 | 5 {
-  if (maxCount === 0) return 1;
+// Map cluster size to a tile size bucket (px)
+function getTileSize(count: number, maxCount: number): number {
+  if (maxCount === 0) return 72;
   const ratio = count / maxCount;
-  if (ratio > 0.75) return 5;
-  if (ratio > 0.45) return 4;
-  if (ratio > 0.22) return 3;
-  if (ratio > 0.08) return 2;
-  return 1;
+  if (ratio > 0.75) return 160;
+  if (ratio > 0.45) return 128;
+  if (ratio > 0.22) return 104;
+  if (ratio > 0.08) return 88;
+  return 72;
 }
-
-const FONT_SIZE: Record<1 | 2 | 3 | 4 | 5, number> = { 1: 11, 2: 14, 3: 19, 4: 30, 5: 46 };
-const FONT_WEIGHT: Record<1 | 2 | 3 | 4 | 5, number> = { 1: 400, 2: 400, 3: 500, 4: 700, 5: 800 };
-const LETTER_SPACING: Record<1 | 2 | 3 | 4 | 5, number> = { 1: 0.8, 2: 0.4, 3: 0, 4: -0.5, 5: -1.5 };
-const PADDING: Record<1 | 2 | 3 | 4 | 5, string> = {
-  1: "3px 8px", 2: "4px 10px", 3: "5px 13px", 4: "8px 18px", 5: "10px 22px",
-};
-const MAX_ROTATION: Record<1 | 2 | 3 | 4 | 5, number> = { 1: 14, 2: 11, 3: 7, 4: 3, 5: 0 };
 
 function TagButton({
   entry,
@@ -46,66 +40,108 @@ function TagButton({
   entry: TagCloudEntry;
   index: number;
   maxCount: number;
-  onSearch: (label: string) => void;
+  onSearch: (imageId: number) => void;
 }) {
-  const weight = getWeight(entry.count, maxCount);
-  const accentIndex = (index * 3 + weight) % ACCENTS.length;
-  const [restColor, hoverColor, glowColor] = ACCENTS[accentIndex];
-  const rotation = (pseudoRandom(index * 7) - 0.5) * 2 * MAX_ROTATION[weight];
+  const size = getTileSize(entry.count, maxCount);
+  const glow = GLOWS[index % GLOWS.length];
 
-  const mt = Math.floor(pseudoRandom(index * 3) * 14) + 3;
-  const mr = Math.floor(pseudoRandom(index * 5) * 20) + 6;
-  const mb = Math.floor(pseudoRandom(index * 11) * 14) + 3;
-  const ml = Math.floor(pseudoRandom(index * 13) * 20) + 6;
+  // Small random rotation for organic feel — larger tiles stay flatter
+  const maxRot = size >= 128 ? 0 : size >= 104 ? 3 : size >= 88 ? 6 : 10;
+  const rotation = (pseudoRandom(index * 7) - 0.5) * 2 * maxRot;
+
+  const mt = Math.floor(pseudoRandom(index * 3) * 10) + 4;
+  const mr = Math.floor(pseudoRandom(index * 5) * 12) + 4;
+  const mb = Math.floor(pseudoRandom(index * 11) * 10) + 4;
+  const ml = Math.floor(pseudoRandom(index * 13) * 12) + 4;
+
+  const src = entry.thumbnail_path ? convertFileSrc(entry.thumbnail_path) : null;
 
   return (
     <motion.button
-      initial={{ opacity: 0, scale: 0.4, rotate: rotation * 2 }}
+      initial={{ opacity: 0, scale: 0.5, rotate: rotation * 2 }}
       animate={{ opacity: 1, scale: 1, rotate: rotation }}
       transition={{
-        delay: index * 0.014,
+        delay: index * 0.025,
         type: "spring",
-        stiffness: 180,
-        damping: 16,
+        stiffness: 200,
+        damping: 18,
       }}
       whileHover={{
-        scale: 1.2,
+        scale: 1.12,
         rotate: 0,
         transition: { type: "spring", stiffness: 400, damping: 22 },
       }}
-      whileTap={{ scale: 0.9 }}
+      whileTap={{ scale: 0.92 }}
+      onClick={() => onSearch(entry.representative_image_id)}
+      title={`${entry.count} similar ${entry.count === 1 ? "photo" : "photos"}`}
       style={{
-        fontSize: FONT_SIZE[weight],
-        fontWeight: FONT_WEIGHT[weight],
-        letterSpacing: LETTER_SPACING[weight],
-        padding: PADDING[weight],
+        width: size,
+        height: size,
         margin: `${mt}px ${mr}px ${mb}px ${ml}px`,
-        color: restColor,
-        borderRadius: 10,
-        border: "1px solid transparent",
-        background: "transparent",
+        borderRadius: 12,
+        border: "2px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.04)",
         cursor: "pointer",
-        userSelect: "none",
-        transition: "color 0.15s, text-shadow 0.15s, background 0.15s, border-color 0.15s",
+        padding: 0,
+        overflow: "hidden",
+        position: "relative",
+        flexShrink: 0,
+        boxShadow: "none",
+        transition: "border-color 0.15s, box-shadow 0.15s",
       }}
       onMouseEnter={(e) => {
         const el = e.currentTarget;
-        el.style.color = hoverColor;
-        el.style.textShadow = `0 0 20px ${glowColor}, 0 0 40px ${glowColor}`;
-        el.style.background = glowColor.replace("0.3", "0.1");
-        el.style.borderColor = glowColor.replace("0.3", "0.25");
+        el.style.borderColor = glow;
+        el.style.boxShadow = `0 0 16px ${glow}, 0 0 32px ${glow.replace("0.5", "0.25")}`;
       }}
       onMouseLeave={(e) => {
         const el = e.currentTarget;
-        el.style.color = restColor;
-        el.style.textShadow = "none";
-        el.style.background = "transparent";
-        el.style.borderColor = "transparent";
+        el.style.borderColor = "rgba(255,255,255,0.08)";
+        el.style.boxShadow = "none";
       }}
-      onClick={() => onSearch(entry.label)}
-      title={`${entry.count} matching ${entry.count === 1 ? "photo" : "photos"}`}
     >
-      {entry.label}
+      {src ? (
+        <img
+          src={src}
+          alt=""
+          draggable={false}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+          }}
+        />
+      ) : (
+        // Fallback placeholder when no thumbnail exists yet
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            background: "rgba(255,255,255,0.06)",
+          }}
+        />
+      )}
+
+      {/* Count badge — bottom-right corner */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 5,
+          right: 5,
+          background: "rgba(0,0,0,0.6)",
+          color: "rgba(255,255,255,0.85)",
+          fontSize: 10,
+          fontWeight: 600,
+          lineHeight: 1,
+          padding: "3px 6px",
+          borderRadius: 6,
+          backdropFilter: "blur(4px)",
+          pointerEvents: "none",
+        }}
+      >
+        {entry.count}
+      </div>
     </motion.button>
   );
 }
@@ -121,9 +157,10 @@ export function TagCloud() {
     void loadTagCloud();
   }, [selectedFolderId]);
 
-  const maxCount = tagCloudEntries.length > 0
-    ? Math.max(...tagCloudEntries.map((e) => e.count))
-    : 1;
+  const maxCount =
+    tagCloudEntries.length > 0
+      ? Math.max(...tagCloudEntries.map((e) => e.count))
+      : 1;
 
   return (
     <div className="flex-1 flex flex-col items-center min-h-0 overflow-y-auto">
@@ -138,7 +175,7 @@ export function TagCloud() {
           Explore your library
         </h2>
         <p className="text-[13px] text-white/25">
-          Topics found in your photos — sized by how many match
+          Visual clusters from your photos — sized by how many match
         </p>
       </motion.div>
 
@@ -152,10 +189,22 @@ export function TagCloud() {
             animate={{ rotate: 360 }}
             transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
           >
-            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeOpacity="0.2" />
-            <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            <circle
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeOpacity="0.2"
+            />
+            <path
+              d="M4 12a8 8 0 018-8"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
           </motion.svg>
-          <p className="text-[12px] text-white/20">Analysing your library with CLIP…</p>
+          <p className="text-[12px] text-white/20">Clustering your library…</p>
         </div>
       )}
 
@@ -163,18 +212,18 @@ export function TagCloud() {
       {!tagCloudLoading && tagCloudEntries.length === 0 && (
         <div className="flex-1 flex items-center justify-center">
           <p className="text-[13px] text-white/25 text-center max-w-xs leading-relaxed">
-            No embeddings yet. Add a folder and wait for the embedding worker to finish,
-            then come back here.
+            No embeddings yet. Add a folder and wait for the embedding worker to
+            finish, then come back here.
           </p>
         </div>
       )}
 
-      {/* Cloud */}
+      {/* Cluster grid */}
       {!tagCloudLoading && tagCloudEntries.length > 0 && (
         <div className="flex flex-wrap justify-center px-12 pb-16 max-w-5xl w-full">
           {tagCloudEntries.map((entry, index) => (
             <TagButton
-              key={entry.label}
+              key={entry.representative_image_id}
               entry={entry}
               index={index}
               maxCount={maxCount}
@@ -186,7 +235,7 @@ export function TagCloud() {
 
       {!tagCloudLoading && tagCloudEntries.length > 0 && (
         <p className="shrink-0 pb-8 text-[11px] text-white/12 text-center">
-          Ranked by visual similarity · CLIP ViT-B/32
+          Grouped by visual similarity · CLIP ViT-B/32
         </p>
       )}
     </div>

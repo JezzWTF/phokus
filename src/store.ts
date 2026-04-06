@@ -75,8 +75,9 @@ export interface ThumbnailBatch {
 export type ActiveView = "gallery" | "explore";
 
 export interface TagCloudEntry {
-  label: string;
   count: number;
+  representative_image_id: number;
+  thumbnail_path: string | null;
 }
 
 export type SortOrder =
@@ -101,12 +102,14 @@ interface GalleryState {
   sort: SortOrder;
   mediaFilter: MediaFilter;
   favoritesOnly: boolean;
+  failedEmbeddingsOnly: boolean;
   zoomPreset: ZoomPreset;
   selectedImage: ImageRecord | null;
   collectionTitle: string | null;
   activeView: ActiveView;
   tagCloudEntries: TagCloudEntry[];
   tagCloudLoading: boolean;
+  tagCloudFolderId: number | null | undefined; // undefined = never loaded
   indexingProgress: Record<number, IndexProgress>;
   mediaJobProgress: Record<number, FolderJobProgress>;
   cacheDir: string;
@@ -126,12 +129,13 @@ interface GalleryState {
   setSort: (sort: SortOrder) => void;
   setMediaFilter: (filter: MediaFilter) => void;
   setFavoritesOnly: (favoritesOnly: boolean) => void;
+  setFailedEmbeddingsOnly: (failedEmbeddingsOnly: boolean) => void;
   setZoomPreset: (zoomPreset: ZoomPreset) => void;
   openImage: (image: ImageRecord) => void;
   closeImage: () => void;
   setView: (view: ActiveView) => void;
   loadTagCloud: () => Promise<void>;
-  searchByTag: (tag: string) => void;
+  searchByTag: (imageId: number) => void;
   loadSimilarImages: (imageId: number) => Promise<void>;
   retryFailedEmbeddings: (folderId: number) => Promise<void>;
   updateImageDetails: (imageId: number, updates: { favorite?: boolean; rating?: number }) => Promise<void>;
@@ -161,12 +165,14 @@ function matchesFilters(
   selectedFolderId: number | null,
   mediaFilter: MediaFilter,
   favoritesOnly: boolean,
+  failedEmbeddingsOnly: boolean,
   search: string,
 ): boolean {
   const matchesFolder = selectedFolderId === null || image.folder_id === selectedFolderId;
   const matchesMedia = mediaFilter === "all" || image.media_kind === mediaFilter;
   const matchesFavorite = !favoritesOnly || image.favorite;
-  return matchesFolder && matchesMedia && matchesFavorite && matchesSearch(image, search);
+  const matchesFailedEmbedding = !failedEmbeddingsOnly || image.embedding_status === "failed";
+  return matchesFolder && matchesMedia && matchesFavorite && matchesFailedEmbedding && matchesSearch(image, search);
 }
 
 function compareNullableNumber(a: number | null, b: number | null): number {
@@ -265,12 +271,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   sort: "date_desc",
   mediaFilter: "all",
   favoritesOnly: false,
+  failedEmbeddingsOnly: false,
   zoomPreset: "comfortable",
   selectedImage: null,
   collectionTitle: null,
   activeView: "gallery",
   tagCloudEntries: [],
   tagCloudLoading: false,
+  tagCloudFolderId: undefined,
   indexingProgress: {},
   mediaJobProgress: {},
   cacheDir: "",
@@ -301,6 +309,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     const { selectedFolderId, loadFolders, loadImages, loadBackgroundJobProgress } = get();
     await loadFolders();
     await loadBackgroundJobProgress();
+    // Invalidate tag cloud cache since library content changed
+    set({ tagCloudFolderId: undefined, tagCloudEntries: [] });
     if (selectedFolderId === folderId) {
       set({ selectedFolderId: null });
       await loadImages(true);
@@ -311,16 +321,18 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     const { loadFolders, loadBackgroundJobProgress } = get();
     await invoke("reindex_folder", { folderId });
     await loadFolders();
+    // Invalidate tag cloud cache since embeddings will be regenerated
+    set({ tagCloudFolderId: undefined, tagCloudEntries: [] });
     await loadBackgroundJobProgress();
   },
 
   selectFolder: (folderId) => {
-    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, activeView: "gallery" });
+    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, activeView: "gallery", failedEmbeddingsOnly: false });
     void get().loadImages(true);
   },
 
   loadImages: async (reset = false) => {
-    const { selectedFolderId, search, searchMode, sort, loadedCount, mediaFilter, favoritesOnly } = get();
+    const { selectedFolderId, search, searchMode, sort, loadedCount, mediaFilter, favoritesOnly, failedEmbeddingsOnly } = get();
     set({ loadingImages: true });
 
     try {
@@ -357,6 +369,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           search: search || null,
           media_kind: mediaFilter === "all" ? null : mediaFilter,
           favorites_only: favoritesOnly,
+          embedding_failed_only: failedEmbeddingsOnly,
           sort,
           offset,
           limit: PAGE_SIZE,
@@ -417,6 +430,11 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     void get().loadImages(true);
   },
 
+  setFailedEmbeddingsOnly: (failedEmbeddingsOnly) => {
+    set({ failedEmbeddingsOnly, images: [], loadedCount: 0, collectionTitle: null });
+    void get().loadImages(true);
+  },
+
   setZoomPreset: (zoomPreset) => set({ zoomPreset }),
 
   openImage: (image) => set({ selectedImage: image }),
@@ -425,8 +443,12 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   setView: (activeView) => set({ activeView }),
 
   loadTagCloud: async () => {
-    const { selectedFolderId } = get();
-    set({ tagCloudLoading: true });
+    const { selectedFolderId, tagCloudFolderId, tagCloudLoading } = get();
+    // Skip if already loaded for this folder and not currently loading
+    if (!tagCloudLoading && tagCloudFolderId !== undefined && tagCloudFolderId === selectedFolderId) {
+      return;
+    }
+    set({ tagCloudLoading: true, tagCloudFolderId: selectedFolderId });
     try {
       const entries = await invoke<TagCloudEntry[]>("get_tag_cloud", {
         folderId: selectedFolderId,
@@ -438,19 +460,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     }
   },
 
-  searchByTag: (tag) => {
-    set({
-      activeView: "gallery",
-      search: tag,
-      searchMode: "semantic",
-      images: [],
-      loadedCount: 0,
-      collectionTitle: `Exploring: ${tag}`,
-    });
-    void get().loadImages(true);
+  searchByTag: (imageId) => {
+    set({ activeView: "gallery", images: [], loadedCount: 0, loadingImages: true, collectionTitle: "Similar Images" });
+    void get().loadSimilarImages(imageId);
   },
 
   loadSimilarImages: async (imageId) => {
+    set({ images: [], loadedCount: 0, loadingImages: true, collectionTitle: "Similar Images" });
     const images = await invoke<ImageRecord[]>("find_similar_images", {
       params: { image_id: imageId, limit: PAGE_SIZE },
     });
@@ -530,6 +546,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
             state.selectedFolderId,
             state.mediaFilter,
             state.favoritesOnly,
+            state.failedEmbeddingsOnly,
             state.search,
           ),
         );
@@ -559,6 +576,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
             state.selectedFolderId,
             state.mediaFilter,
             state.favoritesOnly,
+            state.failedEmbeddingsOnly,
             state.search,
           ),
         );

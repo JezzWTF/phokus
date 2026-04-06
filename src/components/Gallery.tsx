@@ -188,6 +188,21 @@ function ImageTile({
         )}
       </div>
 
+      {/* Embedding failed badge — top-left */}
+      {image.embedding_status === "failed" && (
+        <div
+          className="absolute top-2 left-2 pointer-events-none"
+          title={image.embedding_error ?? "Embedding failed"}
+        >
+          <div className="flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 backdrop-blur-sm">
+            <svg className="h-2.5 w-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+                d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+          </div>
+        </div>
+      )}
+
       {/* Hover overlay — slides up from bottom */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none" />
 

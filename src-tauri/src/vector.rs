@@ -78,32 +78,42 @@ pub fn find_similar_image_ids(conn: &Connection, image_id: i64, limit: usize) ->
     Ok(ids)
 }
 
-/// Returns all stored image embeddings, optionally filtered to one folder.
-/// Each embedding is returned as a normalized f32 vector.
-pub fn get_all_image_embeddings(conn: &Connection, folder_id: Option<i64>) -> Result<Vec<Vec<f32>>> {
-    let packed_rows: Vec<Vec<u8>> = match folder_id {
+/// Returns all stored image embeddings with their image IDs, optionally filtered to one folder.
+/// Each entry is `(image_id, normalized_f32_embedding)`.
+pub fn get_all_image_embeddings_with_ids(
+    conn: &Connection,
+    folder_id: Option<i64>,
+) -> Result<Vec<(i64, Vec<f32>)>> {
+    let packed_rows: Vec<(i64, Vec<u8>)> = match folder_id {
         Some(fid) => {
             let mut stmt = conn.prepare(
-                "SELECT embedding FROM image_vec
+                "SELECT image_id, embedding FROM image_vec
                  WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
             )?;
-            let rows: Vec<Vec<u8>> = stmt
-                .query_map([fid], |row| row.get::<_, Vec<u8>>(0))?
+            let rows: Vec<(i64, Vec<u8>)> = stmt
+                .query_map([fid], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+                })?
                 .filter_map(|r| r.ok())
                 .collect();
             rows
         }
         None => {
-            let mut stmt = conn.prepare("SELECT embedding FROM image_vec")?;
-            let rows: Vec<Vec<u8>> = stmt
-                .query_map([], |row| row.get::<_, Vec<u8>>(0))?
+            let mut stmt = conn.prepare("SELECT image_id, embedding FROM image_vec")?;
+            let rows: Vec<(i64, Vec<u8>)> = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+                })?
                 .filter_map(|r| r.ok())
                 .collect();
             rows
         }
     };
 
-    Ok(packed_rows.iter().map(|b| unpack_f32(b)).collect())
+    Ok(packed_rows
+        .into_iter()
+        .map(|(id, b)| (id, unpack_f32(&b)))
+        .collect())
 }
 
 fn unpack_f32(bytes: &[u8]) -> Vec<f32> {

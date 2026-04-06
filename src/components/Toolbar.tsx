@@ -91,16 +91,22 @@ function FilterPill({
   label,
   active,
   onClick,
+  variant = "default",
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
+  variant?: "default" | "amber";
 }) {
+  const activeClass =
+    variant === "amber"
+      ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
+      : "bg-white/10 text-white";
   return (
     <button
       className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-150 ${
         active
-          ? "bg-white/10 text-white"
+          ? activeClass
           : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
       }`}
       onClick={onClick}
@@ -127,12 +133,21 @@ export function Toolbar() {
   const setMediaFilter = useGalleryStore((state) => state.setMediaFilter);
   const favoritesOnly = useGalleryStore((state) => state.favoritesOnly);
   const setFavoritesOnly = useGalleryStore((state) => state.setFavoritesOnly);
+  const failedEmbeddingsOnly = useGalleryStore((state) => state.failedEmbeddingsOnly);
+  const setFailedEmbeddingsOnly = useGalleryStore((state) => state.setFailedEmbeddingsOnly);
+  const mediaJobProgress = useGalleryStore((state) => state.mediaJobProgress);
   const zoomPreset = useGalleryStore((state) => state.zoomPreset);
   const setZoomPreset = useGalleryStore((state) => state.setZoomPreset);
+
+  const hasAnyFailedEmbeddings = Object.values(mediaJobProgress).some((p) => p.embedding_failed > 0);
 
   const [searchValue, setSearchValue] = useState(search);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // Tracks whether the user has typed in the search box at least once.
+  // Prevents the debounce effect from dispatching setSearch on initial mount
+  // when searchValue === search (which would wipe a loadSimilarImages result).
+  const userHasTyped = useRef(false);
 
   const selectedFolder = folders.find((folder) => folder.id === selectedFolderId);
   const title = collectionTitle ?? (selectedFolder ? selectedFolder.name : "All Media");
@@ -153,6 +168,7 @@ export function Toolbar() {
   }, [mediaFilter, sort, setSort]);
 
   useEffect(() => {
+    if (!userHasTyped.current) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => { setSearch(searchValue); }, 200);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
@@ -233,7 +249,10 @@ export function Toolbar() {
               ref={searchInputRef}
               type="text"
               value={searchValue}
-              onChange={(event) => setSearchValue(event.target.value)}
+              onChange={(event) => {
+                userHasTyped.current = true;
+                setSearchValue(event.target.value);
+              }}
               placeholder={searchMode === "semantic" ? "Search by meaning..." : "Search filenames..."}
               className="w-64 bg-transparent py-1.5 pl-8 pr-9 text-sm text-white placeholder:text-gray-600 focus:outline-none transition-colors"
             />
@@ -283,10 +302,18 @@ export function Toolbar() {
 
       {/* Filter row */}
       <div className="flex items-center gap-1 px-4 pb-1.5">
-        <FilterPill label="All" active={mediaFilter === "all" && !favoritesOnly} onClick={() => { setMediaFilter("all"); setFavoritesOnly(false); }} />
-        <FilterPill label="Images" active={mediaFilter === "image" && !favoritesOnly} onClick={() => { setMediaFilter("image"); setFavoritesOnly(false); }} />
-        <FilterPill label="Videos" active={mediaFilter === "video" && !favoritesOnly} onClick={() => { setMediaFilter("video"); setFavoritesOnly(false); }} />
-        <FilterPill label="Favorites" active={favoritesOnly} onClick={() => setFavoritesOnly(!favoritesOnly)} />
+        <FilterPill label="All" active={mediaFilter === "all" && !favoritesOnly && !failedEmbeddingsOnly} onClick={() => { setMediaFilter("all"); setFavoritesOnly(false); setFailedEmbeddingsOnly(false); }} />
+        <FilterPill label="Images" active={mediaFilter === "image" && !favoritesOnly && !failedEmbeddingsOnly} onClick={() => { setMediaFilter("image"); setFavoritesOnly(false); setFailedEmbeddingsOnly(false); }} />
+        <FilterPill label="Videos" active={mediaFilter === "video" && !favoritesOnly && !failedEmbeddingsOnly} onClick={() => { setMediaFilter("video"); setFavoritesOnly(false); setFailedEmbeddingsOnly(false); }} />
+        <FilterPill label="Favorites" active={favoritesOnly} onClick={() => { setFavoritesOnly(!favoritesOnly); setFailedEmbeddingsOnly(false); }} />
+        {hasAnyFailedEmbeddings ? (
+          <FilterPill
+            label="Failed Embeddings"
+            active={failedEmbeddingsOnly}
+            variant="amber"
+            onClick={() => setFailedEmbeddingsOnly(!failedEmbeddingsOnly)}
+          />
+        ) : null}
       </div>
     </div>
   );

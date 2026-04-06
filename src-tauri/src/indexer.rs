@@ -1,4 +1,4 @@
-use crate::db::{self, DbPool, FolderJobProgress, ImageRecord, IndexedMediaEntry};
+use crate::db::{self, DbPool, EmbeddingJob, FolderJobProgress, ImageRecord, IndexedMediaEntry};
 use crate::embedder::{embedding_source_path, ClipImageEmbedder};
 use crate::media::{probe_video_metadata, MediaTools};
 use crate::storage::{detect_storage_profile, RuntimeAdaptiveProfile, StorageProfile};
@@ -539,27 +539,59 @@ fn process_embedding_batch(
     let embedder = embedder.as_ref().expect("embedder should be initialized");
 
     let infer_started_at = Instant::now();
-    let source_paths = jobs
+    // Resolve the source path for each job. Videos without a thumbnail produce an Err
+    // here — those jobs are marked failed immediately without going to the embedder.
+    let source_results: Vec<Result<PathBuf>> = jobs
         .iter()
         .map(|job| embedding_source_path(&job.path, job.thumbnail_path.as_deref(), &job.media_kind))
-        .collect::<Vec<_>>();
+        .collect();
 
-    let results = match embedder.embed_images(&source_paths) {
-        Ok(embeddings) => jobs
-            .into_iter()
-            .zip(embeddings.into_iter().map(Ok))
-            .collect::<Vec<_>>(),
-        Err(batch_error) => {
-            eprintln!(
-                "Embedding batch fallback to per-image mode: {}",
-                batch_error
-            );
-            jobs.into_iter()
-                .zip(source_paths.into_iter())
-                .map(|(job, source_path)| (job, embedder.embed_image(&source_path)))
-                .collect::<Vec<_>>()
+    // Separate jobs with a valid source from those that fail early (e.g. video with no thumbnail).
+    let mut embeddable_indices: Vec<usize> = Vec::new();
+    let mut embeddable_paths: Vec<PathBuf> = Vec::new();
+    // image_id -> early error message for jobs that cannot be embedded yet
+    let mut pre_failed: HashMap<i64, String> = HashMap::new();
+
+    for (i, (job, result)) in jobs.iter().zip(source_results.into_iter()).enumerate() {
+        match result {
+            Ok(path) => {
+                embeddable_indices.push(i);
+                embeddable_paths.push(path);
+            }
+            Err(e) => {
+                pre_failed.insert(job.image_id, e.to_string());
+            }
         }
-    };
+    }
+
+    // Run CLIP only on the jobs that have a valid source image.
+    // image_id -> embedding result
+    let mut embed_results: HashMap<i64, Result<Vec<f32>>> = HashMap::new();
+
+    if !embeddable_indices.is_empty() {
+        let embeddable_jobs: Vec<&EmbeddingJob> =
+            embeddable_indices.iter().map(|&i| &jobs[i]).collect();
+
+        match embedder.embed_images(&embeddable_paths) {
+            Ok(embeddings) => {
+                for (job, embedding) in embeddable_jobs.iter().zip(embeddings.into_iter()) {
+                    embed_results.insert(job.image_id, Ok(embedding));
+                }
+            }
+            Err(batch_error) => {
+                eprintln!(
+                    "Embedding batch fallback to per-image mode: {}",
+                    batch_error
+                );
+                for (job, source_path) in embeddable_jobs
+                    .into_iter()
+                    .zip(embeddable_paths.into_iter())
+                {
+                    embed_results.insert(job.image_id, embedder.embed_image(&source_path));
+                }
+            }
+        }
+    }
     let infer_elapsed = infer_started_at.elapsed();
 
     let write_started_at = Instant::now();
@@ -568,7 +600,16 @@ fn process_embedding_batch(
         let tx = conn.transaction()?;
         let mut updated_images = Vec::new();
 
-        for (job, embedding_result) in results {
+        for job in &jobs {
+            let embedding_result: Result<Vec<f32>> =
+                if let Some(err) = pre_failed.remove(&job.image_id) {
+                    Err(anyhow::anyhow!("{}", err))
+                } else if let Some(r) = embed_results.remove(&job.image_id) {
+                    r
+                } else {
+                    Err(anyhow::anyhow!("no result for image {}", job.image_id))
+                };
+
             match embedding_result {
                 Ok(embedding) => {
                     vector::upsert_embedding(&tx, job.image_id, &embedding)?;

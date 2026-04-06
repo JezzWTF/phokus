@@ -4,7 +4,7 @@ use crate::indexer;
 use crate::vector;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 pub type DbState = DbPool;
 
@@ -22,6 +22,7 @@ pub struct GetImagesParams {
     pub search: Option<String>,
     pub media_kind: Option<String>,
     pub favorites_only: Option<bool>,
+    pub embedding_failed_only: Option<bool>,
     pub sort: Option<String>,
     pub offset: Option<i64>,
     pub limit: Option<i64>,
@@ -124,8 +125,9 @@ pub async fn get_images(
     let search = params.search.as_deref();
     let media_kind = params.media_kind.as_deref();
     let favorites_only = params.favorites_only.unwrap_or(false);
+    let embedding_failed_only = params.embedding_failed_only.unwrap_or(false);
 
-    let total = db::count_images(&conn, params.folder_id, search, media_kind, favorites_only)
+    let total = db::count_images(&conn, params.folder_id, search, media_kind, favorites_only, embedding_failed_only)
         .map_err(|e| e.to_string())?;
 
     let images = db::get_images(
@@ -134,6 +136,7 @@ pub async fn get_images(
         search,
         media_kind,
         favorites_only,
+        embedding_failed_only,
         sort,
         offset,
         limit,
@@ -224,77 +227,109 @@ pub async fn semantic_search_images(
     Ok(images)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct TagCloudEntry {
-    pub label: String,
     pub count: usize,
+    pub representative_image_id: i64,
+    pub thumbnail_path: Option<String>,
 }
 
-/// Clusters the library's image embeddings with k-means, then labels each cluster by
-/// finding the closest word in the vocabulary.  The vocabulary is loaded from
-/// `{app_data_dir}/vocabulary.txt` if present, otherwise from the bundled default.
-/// Vocabulary embeddings are cached to disk — only recomputed when the vocabulary changes.
+fn fnv_hash_ids(ids: &[i64]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &id in ids {
+        for b in id.to_le_bytes() {
+            h = h.wrapping_mul(0x100000001b3) ^ (b as u64);
+        }
+    }
+    h
+}
+
+/// Clusters the library's image embeddings with k-means and returns one representative
+/// image per cluster — the member whose embedding is closest to its cluster centroid.
+/// Results are cached in SQLite keyed by a hash of the embedded image IDs, so repeated
+/// calls (including across app restarts) return instantly when the library hasn't changed.
 #[tauri::command]
 pub async fn get_tag_cloud(
-    app: AppHandle,
     db: State<'_, DbState>,
     folder_id: Option<i64>,
 ) -> Result<Vec<TagCloudEntry>, String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-
-    let image_embeddings = {
+    let embeddings_with_ids = {
         let conn = db.get().map_err(|e| e.to_string())?;
-        vector::get_all_image_embeddings(&conn, folder_id).map_err(|e| e.to_string())?
+        vector::get_all_image_embeddings_with_ids(&conn, folder_id).map_err(|e| e.to_string())?
     };
 
-    let n = image_embeddings.len();
+    let n = embeddings_with_ids.len();
     if n < 5 {
         return Ok(vec![]);
     }
 
-    // Load vocabulary (custom file > bundled default)
-    let vocab = embedder::load_vocabulary(&app_data_dir);
+    // Compute a hash of the current embedded image IDs (sorted for stability)
+    let mut sorted_ids: Vec<i64> = embeddings_with_ids.iter().map(|(id, _)| *id).collect();
+    sorted_ids.sort_unstable();
+    let current_hash = fnv_hash_ids(&sorted_ids);
 
-    // Embed vocabulary — disk-cached, only recomputes when vocabulary changes
-    let vocab_refs: Vec<&str> = vocab.iter().map(|s| s.as_str()).collect();
-    let vocab_embeddings = embedder::embed_vocab_cached(&vocab, &app_data_dir)
-        .map_err(|e| e.to_string())?;
+    let folder_scope = match folder_id {
+        Some(id) => format!("folder_{}", id),
+        None => "all".to_string(),
+    };
 
-    // Choose k proportional to library size, capped at 30
-    let k = (n / 20).clamp(5, 30);
-
-    // Cluster image embeddings
-    let (centroids, cluster_counts) = kmeans_cosine(&image_embeddings, k, 40);
-
-    // Label each cluster with the nearest vocabulary word
-    let mut entries: Vec<TagCloudEntry> = Vec::new();
-    let mut used_labels = std::collections::HashSet::new();
-
-    let mut order: Vec<usize> = (0..k).collect();
-    order.sort_unstable_by(|&a, &b| cluster_counts[b].cmp(&cluster_counts[a]));
-
-    for ci in order {
-        let count = cluster_counts[ci];
-        if count == 0 { continue; }
-
-        let centroid = &centroids[ci];
-        let label = vocab_refs
-            .iter()
-            .zip(vocab_embeddings.iter())
-            .map(|(&word, emb)| {
-                let sim: f32 = centroid.iter().zip(emb.iter()).map(|(a, b)| a * b).sum();
-                (word, sim)
-            })
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(word, _)| word.to_string())
-            .unwrap_or_else(|| "other".to_string());
-
-        if used_labels.insert(label.clone()) {
-            entries.push(TagCloudEntry { label, count });
+    // Try to return a valid SQLite cache
+    {
+        let conn = db.get().map_err(|e| e.to_string())?;
+        if let Some(json) = db::get_tag_cloud_cache(&conn, &folder_scope, current_hash)
+            .map_err(|e| e.to_string())?
+        {
+            if let Ok(entries) = serde_json::from_str::<Vec<TagCloudEntry>>(&json) {
+                return Ok(entries);
+            }
         }
     }
 
-    entries.sort_unstable_by(|a, b| b.count.cmp(&a.count));
+    // Cache miss — run k-means
+    let ids: Vec<i64> = embeddings_with_ids.iter().map(|(id, _)| *id).collect();
+    let points: Vec<Vec<f32>> = embeddings_with_ids.into_iter().map(|(_, emb)| emb).collect();
+
+    let k = (n / 20).clamp(5, 30);
+    let (centroids, cluster_counts, assignments) = kmeans_cosine(&points, k, 40);
+
+    let mut entries: Vec<TagCloudEntry> = Vec::new();
+    let mut order: Vec<usize> = (0..k).collect();
+    order.sort_unstable_by(|&a, &b| cluster_counts[b].cmp(&cluster_counts[a]));
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+
+    for ci in order {
+        let count = cluster_counts[ci];
+        if count == 0 {
+            continue;
+        }
+
+        let centroid = &centroids[ci];
+        let best_id = points
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| assignments[*i] == ci)
+            .map(|(i, p)| (ids[i], dot(centroid, p)))
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(id, _)| id)
+            .unwrap_or(0);
+
+        let thumbnail_path = db::get_image_by_id(&conn, best_id)
+            .ok()
+            .and_then(|img| img.thumbnail_path);
+
+        entries.push(TagCloudEntry {
+            count,
+            representative_image_id: best_id,
+            thumbnail_path,
+        });
+    }
+
+    // Persist to SQLite — ignore write errors (cache is best-effort)
+    if let Ok(json) = serde_json::to_string(&entries) {
+        let _ = db::set_tag_cloud_cache(&conn, &folder_scope, current_hash, &json);
+    }
+
     Ok(entries)
 }
 
@@ -315,7 +350,7 @@ fn kmeans_cosine(
     points: &[Vec<f32>],
     k: usize,
     max_iter: usize,
-) -> (Vec<Vec<f32>>, Vec<usize>) {
+) -> (Vec<Vec<f32>>, Vec<usize>, Vec<usize>) {
     let n = points.len();
     let dim = points[0].len();
 
@@ -375,7 +410,31 @@ fn kmeans_cosine(
     let mut counts = vec![0usize; k];
     for &a in &assignments { counts[a] += 1; }
 
-    (centroids, counts)
+    (centroids, counts, assignments)
+}
+
+#[derive(Serialize)]
+pub struct FailedEmbeddingItem {
+    pub image_id: i64,
+    pub filename: String,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_failed_embedding_images(
+    db: State<'_, DbState>,
+    folder_id: i64,
+) -> Result<Vec<FailedEmbeddingItem>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let rows = db::get_failed_embedding_images(&conn, folder_id).map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|(image_id, filename, error)| FailedEmbeddingItem {
+            image_id,
+            filename,
+            error,
+        })
+        .collect())
 }
 
 #[derive(Serialize)]

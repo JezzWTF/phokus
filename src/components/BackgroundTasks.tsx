@@ -29,6 +29,12 @@ interface Task {
   snapshot: string;
 }
 
+interface FailedEmbeddingItem {
+  image_id: number;
+  filename: string;
+  error: string | null;
+}
+
 export function BackgroundTasks() {
   const folders = useGalleryStore((state) => state.folders);
   const indexingProgress = useGalleryStore((state) => state.indexingProgress);
@@ -41,6 +47,7 @@ export function BackgroundTasks() {
     metadata: false,
     embedding: false,
   });
+  const [failedItems, setFailedItems] = useState<Record<number, FailedEmbeddingItem[]>>({});
 
   useEffect(() => {
     invoke<{ thumbnail_paused: boolean; metadata_paused: boolean; embedding_paused: boolean }>(
@@ -53,6 +60,28 @@ export function BackgroundTasks() {
       });
     });
   }, []);
+
+  // Fetch failed embedding filenames whenever the expanded panel opens or failure counts change.
+  const failedCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(mediaJobProgress).map(([id, p]) => [id, p?.embedding_failed ?? 0]),
+      ),
+    [mediaJobProgress],
+  );
+
+  useEffect(() => {
+    if (!expanded) return;
+    for (const [folderId, count] of Object.entries(failedCounts)) {
+      if (count > 0) {
+        invoke<FailedEmbeddingItem[]>("get_failed_embedding_images", {
+          folderId: Number(folderId),
+        })
+          .then((items) => setFailedItems((prev) => ({ ...prev, [folderId]: items })))
+          .catch(() => undefined);
+      }
+    }
+  }, [expanded, failedCounts]);
 
   const toggleWorker = (worker: WorkerKey) => {
     const next = !paused[worker];
@@ -373,6 +402,26 @@ export function BackgroundTasks() {
                   <p className="text-[10px] text-gray-600 truncate mt-1 pl-[calc(7rem+0.75rem)]">
                     {task.currentFile}
                   </p>
+                )}
+
+                {/* Failed embedding file list */}
+                {taskHasFailed && failedItems[task.id] && failedItems[task.id].length > 0 && (
+                  <div className="mt-2 pl-[calc(7rem+0.75rem)] space-y-0.5">
+                    {failedItems[task.id].map((item) => (
+                      <div key={item.image_id} className="flex items-start gap-1.5 min-w-0">
+                        <svg className="h-2.5 w-2.5 text-amber-500 shrink-0 mt-px" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+                            d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                        </svg>
+                        <div className="min-w-0">
+                          <p className="text-[10px] text-amber-400/80 truncate font-medium">{item.filename}</p>
+                          {item.error && (
+                            <p className="text-[9px] text-gray-600 truncate">{item.error}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             );

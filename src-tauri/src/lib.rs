@@ -78,6 +78,7 @@ pub fn run() {
             commands::set_worker_paused,
             commands::get_worker_states,
             commands::get_tag_cloud,
+            commands::get_failed_embedding_images,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
