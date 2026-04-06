@@ -58,7 +58,10 @@ export function TitleBar() {
   const handleClose = () => appWindow.close();
 
   return (
+    // data-tauri-drag-region is the recommended Tauri approach for drag regions.
+    // WebkitAppRegion is kept as a CSS fallback for compatibility.
     <div
+      data-tauri-drag-region
       className="titlebar relative z-50 flex h-9 shrink-0 items-center bg-gray-950 select-none"
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     >
@@ -75,7 +78,7 @@ export function TitleBar() {
       </div>
 
       {/* Spacer — draggable region fills here */}
-      <div className="flex-1" />
+      <div data-tauri-drag-region className="flex-1" />
 
       {/* Window control buttons — right side, non-draggable */}
       <div
