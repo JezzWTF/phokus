@@ -1,3 +1,4 @@
+mod captioner;
 mod commands;
 mod db;
 mod embedder;
@@ -7,8 +8,8 @@ mod storage;
 mod thumbnail;
 mod vector;
 
-use tauri::Manager;
 use crate::storage::StorageProfile;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -34,10 +35,18 @@ pub fn run() {
                 let conn = pool.get().expect("Failed to get connection for migration");
                 db::migrate(&conn).expect("Failed to run migrations");
                 db::reset_inflight_jobs(&conn).expect("Failed to reset inflight jobs");
-                let backfilled = db::backfill_embedding_jobs(&conn)
-                    .expect("Failed to backfill embedding jobs");
+                let backfilled =
+                    db::backfill_embedding_jobs(&conn).expect("Failed to backfill embedding jobs");
                 if backfilled > 0 {
                     println!("Backfilled {} embedding jobs.", backfilled);
+                }
+                let (orphaned_vectors, missing_vectors) = db::repair_embedding_consistency(&conn)
+                    .expect("Failed to repair embedding consistency");
+                if orphaned_vectors > 0 || missing_vectors > 0 {
+                    println!(
+                        "Repaired embedding consistency: removed {} orphaned vectors, requeued {} missing vectors.",
+                        orphaned_vectors, missing_vectors
+                    );
                 }
             }
 
@@ -58,6 +67,7 @@ pub fn run() {
             }
             indexer::start_metadata_worker(app.handle().clone(), pool.clone(), media_tools.clone());
             indexer::start_embedding_worker(app.handle().clone(), pool.clone());
+            indexer::start_caption_worker(app.handle().clone(), pool.clone(), app_dir.clone());
 
             app.manage(pool);
             app.manage(media_tools);
@@ -73,8 +83,18 @@ pub fn run() {
             commands::reindex_folder,
             commands::update_image_details,
             commands::find_similar_images,
+            commands::debug_similar_images,
             commands::retry_failed_embeddings,
             commands::semantic_search_images,
+            commands::get_caption_model_status,
+            commands::prepare_caption_model,
+            commands::delete_caption_model,
+            commands::probe_caption_runtime,
+            commands::probe_caption_image,
+            commands::generate_caption_for_image,
+            commands::queue_caption_jobs,
+            commands::set_generated_caption,
+            commands::suggest_image_tags,
             commands::set_worker_paused,
             commands::get_worker_states,
             commands::get_tag_cloud,

@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use rusqlite::{ffi::sqlite3_auto_extension, Connection};
+use rusqlite::{ffi::sqlite3_auto_extension, Connection, Error as SqliteError};
 use sqlite_vec::sqlite3_vec_init;
 use std::sync::Once;
 
@@ -19,8 +19,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         "CREATE VIRTUAL TABLE IF NOT EXISTS image_vec USING vec0(
             image_id INTEGER PRIMARY KEY,
             embedding FLOAT[{}] distance_metric=cosine
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS caption_vec USING vec0(
+            image_id INTEGER PRIMARY KEY,
+            embedding FLOAT[{}] distance_metric=cosine
         );",
-        CLIP_VECTOR_DIM
+        CLIP_VECTOR_DIM, CLIP_VECTOR_DIM
     ))?;
     Ok(())
 }
@@ -28,6 +33,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 #[allow(dead_code)]
 pub fn delete_embedding(conn: &Connection, image_id: i64) -> Result<()> {
     conn.execute("DELETE FROM image_vec WHERE image_id = ?1", [image_id])?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub fn delete_caption_embedding(conn: &Connection, image_id: i64) -> Result<()> {
+    conn.execute("DELETE FROM caption_vec WHERE image_id = ?1", [image_id])?;
     Ok(())
 }
 
@@ -50,12 +61,35 @@ pub fn upsert_embedding(conn: &Connection, image_id: i64, embedding: &[f32]) -> 
     Ok(())
 }
 
+#[allow(dead_code)]
+pub fn upsert_caption_embedding(conn: &Connection, image_id: i64, embedding: &[f32]) -> Result<()> {
+    if embedding.len() != CLIP_VECTOR_DIM {
+        return Err(anyhow!(
+            "expected {}-dimensional embedding, got {}",
+            CLIP_VECTOR_DIM,
+            embedding.len()
+        ));
+    }
+
+    let packed = pack_f32(embedding);
+    conn.execute("DELETE FROM caption_vec WHERE image_id = ?1", [image_id])?;
+    conn.execute(
+        "INSERT INTO caption_vec (image_id, embedding) VALUES (?1, ?2)",
+        (&image_id, &packed),
+    )?;
+    Ok(())
+}
+
 pub fn find_similar_image_ids(conn: &Connection, image_id: i64, limit: usize) -> Result<Vec<i64>> {
-    let embedding: Vec<u8> = conn.query_row(
+    let embedding: Vec<u8> = match conn.query_row(
         "SELECT embedding FROM image_vec WHERE image_id = ?1",
         [image_id],
         |row| row.get(0),
-    )?;
+    ) {
+        Ok(embedding) => embedding,
+        Err(SqliteError::QueryReturnedNoRows) => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
 
     let mut stmt = conn.prepare(
         "SELECT image_id
@@ -153,6 +187,115 @@ pub fn search_image_ids_by_embedding(
         }
     }
     Ok(ids)
+}
+
+#[allow(dead_code)]
+pub fn search_caption_ids_by_embedding(
+    conn: &Connection,
+    embedding: &[f32],
+    limit: usize,
+) -> Result<Vec<i64>> {
+    if embedding.len() != CLIP_VECTOR_DIM {
+        return Err(anyhow!(
+            "expected {}-dimensional embedding, got {}",
+            CLIP_VECTOR_DIM,
+            embedding.len()
+        ));
+    }
+
+    let packed = pack_f32(embedding);
+    let mut stmt = conn.prepare(
+        "SELECT image_id
+         FROM caption_vec
+         WHERE embedding MATCH vec_f32(?1)
+           AND k = ?2",
+    )?;
+    let rows = stmt.query_map((&packed, limit as i64), |row| row.get::<_, i64>(0))?;
+
+    let mut ids = Vec::new();
+    for row in rows {
+        ids.push(row?);
+        if ids.len() >= limit {
+            break;
+        }
+    }
+    Ok(ids)
+}
+
+pub fn count_image_vectors(conn: &Connection) -> Result<i64> {
+    conn.query_row("SELECT COUNT(*) FROM image_vec", [], |row| row.get(0))
+        .map_err(Into::into)
+}
+
+#[allow(dead_code)]
+pub fn count_caption_vectors(conn: &Connection) -> Result<i64> {
+    conn.query_row("SELECT COUNT(*) FROM caption_vec", [], |row| row.get(0))
+        .map_err(Into::into)
+}
+
+pub fn delete_orphaned_embeddings(conn: &Connection) -> Result<usize> {
+    let image_ids = {
+        let mut stmt = conn.prepare("SELECT id FROM images")?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<std::collections::HashSet<_>>>()?;
+        rows
+    };
+    let vector_ids = {
+        let mut stmt = conn.prepare("SELECT image_id FROM image_vec")?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+    let orphaned_ids = vector_ids
+        .into_iter()
+        .filter(|image_id| !image_ids.contains(image_id))
+        .collect::<Vec<_>>();
+
+    for image_id in &orphaned_ids {
+        delete_embedding(conn, *image_id)?;
+    }
+
+    Ok(orphaned_ids.len())
+}
+
+#[allow(dead_code)]
+pub fn delete_orphaned_caption_embeddings(conn: &Connection) -> Result<usize> {
+    let image_ids = {
+        let mut stmt = conn.prepare("SELECT id FROM images")?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<std::collections::HashSet<_>>>()?;
+        rows
+    };
+    let vector_ids = {
+        let mut stmt = conn.prepare("SELECT image_id FROM caption_vec")?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+    let orphaned_ids = vector_ids
+        .into_iter()
+        .filter(|image_id| !image_ids.contains(image_id))
+        .collect::<Vec<_>>();
+
+    for image_id in &orphaned_ids {
+        delete_caption_embedding(conn, *image_id)?;
+    }
+
+    Ok(orphaned_ids.len())
+}
+
+pub fn has_image_vector(conn: &Connection, image_id: i64) -> Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM image_vec WHERE image_id = ?1)",
+        [image_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|value| value != 0)
+    .map_err(Into::into)
 }
 
 #[allow(dead_code)]

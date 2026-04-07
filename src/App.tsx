@@ -7,17 +7,20 @@ import { Gallery } from "./components/Gallery";
 import { Lightbox } from "./components/Lightbox";
 import { TagCloud } from "./components/TagCloud";
 import { TitleBar } from "./components/TitleBar";
+import { SettingsModal } from "./components/SettingsModal";
 
 export default function App() {
   const loadFolders = useGalleryStore((state) => state.loadFolders);
   const loadBackgroundJobProgress = useGalleryStore((state) => state.loadBackgroundJobProgress);
   const loadImages = useGalleryStore((state) => state.loadImages);
+  const loadCaptionModelStatus = useGalleryStore((state) => state.loadCaptionModelStatus);
   const subscribeToProgress = useGalleryStore((state) => state.subscribeToProgress);
   const activeView = useGalleryStore((state) => state.activeView);
 
   useEffect(() => {
     loadFolders().then(() => {
       void loadBackgroundJobProgress();
+      void loadCaptionModelStatus();
       return loadImages(true);
     });
     let unlisten: (() => void) | undefined;
@@ -54,6 +57,7 @@ export default function App() {
       </div>
 
       <Lightbox />
+      <SettingsModal />
     </div>
   );
 }

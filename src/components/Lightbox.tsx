@@ -47,12 +47,27 @@ function embeddingLabel(status: string, model: string | null): string {
 
 export function Lightbox() {
   const selectedImage = useGalleryStore((state) => state.selectedImage);
+  const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
   const closeImage = useGalleryStore((state) => state.closeImage);
   const images = useGalleryStore((state) => state.images);
   const openImage = useGalleryStore((state) => state.openImage);
   const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
   const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
+  const suggestImageTags = useGalleryStore((state) => state.suggestImageTags);
+  const captionModelStatus = useGalleryStore((state) => state.captionModelStatus);
+  const captionModelPreparing = useGalleryStore((state) => state.captionModelPreparing);
+  const captionModelError = useGalleryStore((state) => state.captionModelError);
+  const captionModelProgress = useGalleryStore((state) => state.captionModelProgress);
+  const aiCaptionsEnabled = useGalleryStore((state) => state.aiCaptionsEnabled);
+  const setAiCaptionsEnabled = useGalleryStore((state) => state.setAiCaptionsEnabled);
+  const setSettingsOpen = useGalleryStore((state) => state.setSettingsOpen);
+  const prepareCaptionModel = useGalleryStore((state) => state.prepareCaptionModel);
+  const queueCaptionForImage = useGalleryStore((state) => state.queueCaptionForImage);
+  const queueCaptionJobs = useGalleryStore((state) => state.queueCaptionJobs);
   const [zoom, setZoom] = useState(1);
+  const [suggestedTags, setSuggestedTags] = useState<string[]>([]);
+  const [captionQueueing, setCaptionQueueing] = useState(false);
+  const [captionQueueStatus, setCaptionQueueStatus] = useState<string | null>(null);
   const imageViewportRef = useRef<HTMLDivElement>(null);
 
   const currentIndex = selectedImage ? images.findIndex((image) => image.id === selectedImage.id) : -1;
@@ -68,7 +83,16 @@ export function Lightbox() {
 
   useEffect(() => {
     setZoom(1);
+    setSuggestedTags([]);
+    setCaptionQueueStatus(null);
   }, [selectedImage?.id]);
+
+  useEffect(() => {
+    if (!selectedImage?.generated_caption) return;
+    void suggestImageTags(selectedImage.id)
+      .then(setSuggestedTags)
+      .catch(() => setSuggestedTags([]));
+  }, [selectedImage?.id, selectedImage?.generated_caption, suggestImageTags]);
 
   useEffect(() => {
     const viewport = imageViewportRef.current;
@@ -314,6 +338,119 @@ export function Lightbox() {
                     {selectedImage.embedding_error ? (
                       <p className="mt-1 text-xs text-amber-300">{selectedImage.embedding_error}</p>
                     ) : null}
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">AI Caption</p>
+                    {selectedImage.generated_caption ? (
+                      <>
+                        <p className="text-white">{selectedImage.generated_caption}</p>
+                        {suggestedTags.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {suggestedTags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-gray-300"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                        {selectedImage.caption_model ? (
+                          <p className="mt-1 text-xs text-gray-600">{selectedImage.caption_model}</p>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-gray-600">
+                          {selectedImage.caption_error ?? "Not generated"}
+                        </p>
+                        {captionModelStatus?.ready ? (
+                          <>
+                            <p className={`mt-2 text-xs ${aiCaptionsEnabled ? "text-emerald-400/70" : "text-gray-600"}`}>
+                              {aiCaptionsEnabled ? "Florence-2 enabled locally" : "Florence-2 downloaded but disabled"}
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <button
+                                className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                                onClick={() => setAiCaptionsEnabled(!aiCaptionsEnabled)}
+                              >
+                                {aiCaptionsEnabled ? "Disable captions" : "Enable captions"}
+                              </button>
+                              {selectedImage.media_kind === "image" && aiCaptionsEnabled ? (
+                                <button
+                                  className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  onClick={() => {
+                                    setCaptionQueueing(true);
+                                    setCaptionQueueStatus(null);
+                                    void queueCaptionForImage(selectedImage.id)
+                                      .then(() => setCaptionQueueStatus("Queued for background captions."))
+                                      .catch((error) => setCaptionQueueStatus(String(error)))
+                                      .finally(() => setCaptionQueueing(false));
+                                  }}
+                                  disabled={captionQueueing}
+                                >
+                                  {captionQueueing ? "Queueing..." : "Queue caption"}
+                                </button>
+                              ) : null}
+                              {aiCaptionsEnabled ? (
+                                <button
+                                  className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  onClick={() => {
+                                    setCaptionQueueing(true);
+                                    setCaptionQueueStatus(null);
+                                    void queueCaptionJobs(selectedFolderId)
+                                      .then((queued) =>
+                                        setCaptionQueueStatus(
+                                          queued === 0
+                                            ? "No missing captions found."
+                                            : `Queued ${queued.toLocaleString()} image${queued === 1 ? "" : "s"} for background captions.`,
+                                        ),
+                                      )
+                                      .catch((error) => setCaptionQueueStatus(String(error)))
+                                      .finally(() => setCaptionQueueing(false));
+                                  }}
+                                  disabled={captionQueueing}
+                                >
+                                  {selectedFolderId === null ? "Queue all" : "Queue folder"}
+                                </button>
+                              ) : null}
+                            </div>
+                            {captionQueueStatus ? (
+                              <p className="mt-2 break-all text-xs text-gray-500">{captionQueueStatus}</p>
+                            ) : null}
+                          </>
+                        ) : (
+                          <button
+                            className="mt-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={() => void prepareCaptionModel()}
+                            disabled={captionModelPreparing}
+                          >
+                            {captionModelProgress
+                              ? `Downloading ${captionModelProgress.completed_files}/${captionModelProgress.total_files}`
+                              : captionModelPreparing
+                              ? "Preparing Florence-2..."
+                              : "Enable local captions"}
+                          </button>
+                        )}
+                        {captionModelProgress?.current_file ? (
+                          <p className="mt-2 break-all text-xs text-gray-600">{captionModelProgress.current_file}</p>
+                        ) : null}
+                        {captionModelError ? (
+                          <p className="mt-2 text-xs text-amber-300">{captionModelError}</p>
+                        ) : null}
+                        {!captionModelStatus?.ready && !captionModelError ? (
+                          <p className="mt-2 text-xs text-gray-600">Downloads Florence-2 on demand for offline captions.</p>
+                        ) : null}
+                        <button
+                          className="mt-2 block text-xs text-gray-500 transition-colors hover:text-gray-300"
+                          onClick={() => setSettingsOpen(true)}
+                        >
+                          Open settings
+                        </button>
+                      </>
+                    )}
                   </div>
 
                   <div>

@@ -1,10 +1,11 @@
+use crate::captioner::{self, CaptionModelStatus, CaptionRuntimeProbe, CaptionVisionProbe};
 use crate::db::{self, DbPool, Folder, FolderJobProgress, ImageRecord};
 use crate::embedder;
 use crate::indexer;
 use crate::vector;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 pub type DbState = DbPool;
 
@@ -42,8 +43,43 @@ pub struct FindSimilarImagesParams {
 }
 
 #[derive(Deserialize)]
+pub struct DebugSimilarImagesParams {
+    pub image_id: i64,
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
 pub struct RetryFailedEmbeddingsParams {
     pub folder_id: i64,
+}
+
+#[derive(Deserialize)]
+pub struct SetGeneratedCaptionParams {
+    pub image_id: i64,
+    pub caption: String,
+    pub model: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SuggestImageTagsParams {
+    pub image_id: i64,
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct QueueCaptionJobsParams {
+    pub folder_id: Option<i64>,
+    pub image_id: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct ProbeCaptionImageParams {
+    pub image_id: i64,
+}
+
+#[derive(Deserialize)]
+pub struct GenerateCaptionParams {
+    pub image_id: i64,
 }
 
 #[derive(Deserialize)]
@@ -127,8 +163,15 @@ pub async fn get_images(
     let favorites_only = params.favorites_only.unwrap_or(false);
     let embedding_failed_only = params.embedding_failed_only.unwrap_or(false);
 
-    let total = db::count_images(&conn, params.folder_id, search, media_kind, favorites_only, embedding_failed_only)
-        .map_err(|e| e.to_string())?;
+    let total = db::count_images(
+        &conn,
+        params.folder_id,
+        search,
+        media_kind,
+        favorites_only,
+        embedding_failed_only,
+    )
+    .map_err(|e| e.to_string())?;
 
     let images = db::get_images(
         &conn,
@@ -188,9 +231,43 @@ pub async fn find_similar_images(
 ) -> Result<Vec<ImageRecord>, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     let limit = params.limit.unwrap_or(32);
-    let image_ids = vector::find_similar_image_ids(&conn, params.image_id, limit)
-        .map_err(|e| e.to_string())?;
+    if !vector::has_image_vector(&conn, params.image_id).map_err(|e| e.to_string())? {
+        db::repair_embedding_consistency(&conn).map_err(|e| e.to_string())?;
+        return Ok(Vec::new());
+    }
+    let image_ids =
+        vector::find_similar_image_ids(&conn, params.image_id, limit).map_err(|e| e.to_string())?;
     db::get_images_by_ids(&conn, &image_ids).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+pub struct SimilarImagesDebug {
+    pub image_id: i64,
+    pub vector_count: i64,
+    pub has_vector: bool,
+    pub similar_ids: Vec<i64>,
+}
+
+#[tauri::command]
+pub async fn debug_similar_images(
+    db: State<'_, DbState>,
+    params: DebugSimilarImagesParams,
+) -> Result<SimilarImagesDebug, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let limit = params.limit.unwrap_or(32);
+    let vector_count = vector::count_image_vectors(&conn).map_err(|e| e.to_string())?;
+    let has_vector = vector::has_image_vector(&conn, params.image_id).map_err(|e| e.to_string())?;
+    let similar_ids = if has_vector {
+        vector::find_similar_image_ids(&conn, params.image_id, limit).map_err(|e| e.to_string())?
+    } else {
+        Vec::new()
+    };
+    Ok(SimilarImagesDebug {
+        image_id: params.image_id,
+        vector_count,
+        has_vector,
+        similar_ids,
+    })
 }
 
 #[tauri::command]
@@ -211,7 +288,8 @@ pub async fn semantic_search_images(
 
     let conn = db.get().map_err(|e| e.to_string())?;
     let limit = params.limit.unwrap_or(64);
-    let ids = vector::search_image_ids_by_embedding(&conn, &embedding, limit).map_err(|e| e.to_string())?;
+    let ids = vector::search_image_ids_by_embedding(&conn, &embedding, limit)
+        .map_err(|e| e.to_string())?;
     let mut images = db::get_images_by_ids(&conn, &ids).map_err(|e| e.to_string())?;
 
     if let Some(folder_id) = params.folder_id {
@@ -225,6 +303,142 @@ pub async fn semantic_search_images(
     }
 
     Ok(images)
+}
+
+#[tauri::command]
+pub async fn set_generated_caption(
+    db: State<'_, DbState>,
+    params: SetGeneratedCaptionParams,
+) -> Result<ImageRecord, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let model = params.model.as_deref().unwrap_or("manual");
+    db::update_generated_caption(&conn, params.image_id, &params.caption, model)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn suggest_image_tags(
+    db: State<'_, DbState>,
+    params: SuggestImageTagsParams,
+) -> Result<Vec<String>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::suggest_tags_from_caption(&conn, params.image_id, params.limit.unwrap_or(2))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_caption_model_status(app: AppHandle) -> Result<CaptionModelStatus, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(captioner::caption_model_status(&app_dir))
+}
+
+#[tauri::command]
+pub async fn prepare_caption_model(app: AppHandle) -> Result<CaptionModelStatus, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let app = app.clone();
+        captioner::prepare_caption_model_with_progress(&app_dir, move |progress| {
+            let _ = app.emit("caption-model-progress", progress);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_caption_model(app: AppHandle) -> Result<CaptionModelStatus, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || captioner::delete_caption_model(&app_dir))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn probe_caption_runtime(app: AppHandle) -> Result<CaptionRuntimeProbe, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || captioner::probe_caption_runtime(&app_dir))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn probe_caption_image(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    params: ProbeCaptionImageParams,
+) -> Result<CaptionVisionProbe, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let image_path = {
+        let conn = db.get().map_err(|e| e.to_string())?;
+        db::get_image_by_id(&conn, params.image_id)
+            .map(|image| image.path)
+            .map_err(|e| e.to_string())?
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        captioner::probe_caption_vision(&app_dir, std::path::Path::new(&image_path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn generate_caption_for_image(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    params: GenerateCaptionParams,
+) -> Result<ImageRecord, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let image_path = {
+        let conn = db.get().map_err(|e| e.to_string())?;
+        let image = db::get_image_by_id(&conn, params.image_id).map_err(|e| e.to_string())?;
+        if image.media_kind != "image" {
+            return Err("AI captions can only be generated for images".to_string());
+        }
+        image.path
+    };
+
+    let caption = tauri::async_runtime::spawn_blocking(move || {
+        captioner::generate_caption(&app_dir, std::path::Path::new(&image_path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|error| {
+        if let Ok(conn) = db.get() {
+            let _ = db::mark_caption_failed(&conn, params.image_id, &error.to_string());
+        }
+        error.to_string()
+    })?;
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::update_generated_caption(
+        &conn,
+        params.image_id,
+        &caption,
+        captioner::FLORENCE_CAPTION_MODEL_NAME,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn queue_caption_jobs(
+    db: State<'_, DbState>,
+    params: QueueCaptionJobsParams,
+) -> Result<usize, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    match (params.folder_id, params.image_id) {
+        (_, Some(image_id)) => {
+            db::enqueue_caption_job(&conn, image_id).map_err(|e| e.to_string())?;
+            Ok(1)
+        }
+        (Some(folder_id), None) => {
+            db::enqueue_missing_caption_jobs_for_folder(&conn, folder_id).map_err(|e| e.to_string())
+        }
+        (None, None) => db::enqueue_missing_caption_jobs(&conn).map_err(|e| e.to_string()),
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -287,7 +501,10 @@ pub async fn get_tag_cloud(
 
     // Cache miss — run k-means
     let ids: Vec<i64> = embeddings_with_ids.iter().map(|(id, _)| *id).collect();
-    let points: Vec<Vec<f32>> = embeddings_with_ids.into_iter().map(|(_, emb)| emb).collect();
+    let points: Vec<Vec<f32>> = embeddings_with_ids
+        .into_iter()
+        .map(|(_, emb)| emb)
+        .collect();
 
     let k = (n / 20).clamp(5, 30);
     let (centroids, cluster_counts, assignments) = kmeans_cosine(&points, k, 40);
@@ -361,7 +578,10 @@ fn kmeans_cosine(
         let next = points
             .iter()
             .map(|p| {
-                let best_sim = centroids.iter().map(|c| dot(p, c)).fold(f32::NEG_INFINITY, f32::max);
+                let best_sim = centroids
+                    .iter()
+                    .map(|c| dot(p, c))
+                    .fold(f32::NEG_INFINITY, f32::max);
                 1.0 - best_sim // distance = 1 - cosine_similarity
             })
             .enumerate()
@@ -389,7 +609,9 @@ fn kmeans_cosine(
                 changed = true;
             }
         }
-        if !changed { break; }
+        if !changed {
+            break;
+        }
 
         // Update step: mean of assigned points, then normalize
         let mut sums = vec![vec![0.0f32; dim]; k];
@@ -398,7 +620,9 @@ fn kmeans_cosine(
             sums[c].iter_mut().zip(p.iter()).for_each(|(s, v)| *s += v);
             counts[c] += 1;
         }
-        for (centroid, (sum, &count)) in centroids.iter_mut().zip(sums.iter_mut().zip(counts.iter())) {
+        for (centroid, (sum, &count)) in
+            centroids.iter_mut().zip(sums.iter_mut().zip(counts.iter()))
+        {
             if count > 0 {
                 sum.iter_mut().for_each(|v| *v /= count as f32);
                 normalize(sum);
@@ -408,7 +632,9 @@ fn kmeans_cosine(
     }
 
     let mut counts = vec![0usize; k];
-    for &a in &assignments { counts[a] += 1; }
+    for &a in &assignments {
+        counts[a] += 1;
+    }
 
     (centroids, counts, assignments)
 }
@@ -438,24 +664,43 @@ pub async fn get_failed_embedding_images(
 }
 
 #[derive(Serialize)]
-pub struct WorkerStates {
+pub struct FolderWorkerStates {
+    pub folder_id: i64,
     pub thumbnail_paused: bool,
     pub metadata_paused: bool,
     pub embedding_paused: bool,
+    pub caption_paused: bool,
 }
 
 #[tauri::command]
-pub async fn set_worker_paused(worker: String, paused: bool) -> Result<(), String> {
-    indexer::set_worker_paused(&worker, paused);
+pub async fn set_worker_paused(worker: String, folder_id: i64, paused: bool) -> Result<(), String> {
+    indexer::set_worker_paused(&worker, folder_id, paused);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn get_worker_states() -> Result<WorkerStates, String> {
-    let states = indexer::get_worker_paused_states();
-    Ok(WorkerStates {
-        thumbnail_paused: states[0],
-        metadata_paused: states[1],
-        embedding_paused: states[2],
-    })
+pub async fn get_worker_states(folder_ids: Vec<i64>) -> Result<Vec<FolderWorkerStates>, String> {
+    let states = indexer::get_worker_paused_states(&folder_ids);
+    Ok(folder_ids
+        .into_iter()
+        .map(|folder_id| {
+            let state =
+                states
+                    .get(&folder_id)
+                    .copied()
+                    .unwrap_or(indexer::FolderWorkerPausedState {
+                        thumbnail: false,
+                        metadata: false,
+                        embedding: false,
+                        caption: false,
+                    });
+            FolderWorkerStates {
+                folder_id,
+                thumbnail_paused: state.thumbnail,
+                metadata_paused: state.metadata,
+                embedding_paused: state.embedding,
+                caption_paused: state.caption,
+            }
+        })
+        .collect())
 }

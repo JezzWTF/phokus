@@ -40,6 +40,10 @@ export interface ImageRecord {
   embedding_model: string | null;
   embedding_updated_at: string | null;
   embedding_error: string | null;
+  generated_caption: string | null;
+  caption_model: string | null;
+  caption_updated_at: string | null;
+  caption_error: string | null;
 }
 
 export interface IndexProgress {
@@ -57,6 +61,9 @@ export interface FolderJobProgress {
   embedding_pending: number;
   embedding_ready: number;
   embedding_failed: number;
+  caption_pending: number;
+  caption_ready: number;
+  caption_failed: number;
 }
 
 export interface MediaJobProgressEvent {
@@ -80,6 +87,39 @@ export interface TagCloudEntry {
   thumbnail_path: string | null;
 }
 
+export interface CaptionModelStatus {
+  model_id: string;
+  model_name: string;
+  local_dir: string;
+  ready: boolean;
+  missing_files: string[];
+}
+
+export interface CaptionModelProgress {
+  total_files: number;
+  completed_files: number;
+  current_file: string | null;
+  done: boolean;
+}
+
+export interface CaptionRuntimeSessionProbe {
+  file: string;
+  inputs: string[];
+  outputs: string[];
+}
+
+export interface CaptionRuntimeProbe {
+  ready: boolean;
+  tokenizer_vocab_size: number;
+  sessions: CaptionRuntimeSessionProbe[];
+}
+
+export interface CaptionVisionProbe {
+  input_shape: number[];
+  output_shape: number[];
+  output_values: number;
+}
+
 export type SortOrder =
   | "date_desc"
   | "date_asc"
@@ -97,6 +137,7 @@ interface GalleryState {
   totalImages: number;
   loadedCount: number;
   loadingImages: boolean;
+  imageLoadError: string | null;
   search: string;
   searchMode: SearchMode;
   sort: SortOrder;
@@ -106,6 +147,9 @@ interface GalleryState {
   zoomPreset: ZoomPreset;
   selectedImage: ImageRecord | null;
   collectionTitle: string | null;
+  similarSourceImageId: number | null;
+  similarHasMore: boolean;
+  galleryScrollResetKey: number;
   activeView: ActiveView;
   tagCloudEntries: TagCloudEntry[];
   tagCloudLoading: boolean;
@@ -113,6 +157,14 @@ interface GalleryState {
   indexingProgress: Record<number, IndexProgress>;
   mediaJobProgress: Record<number, FolderJobProgress>;
   cacheDir: string;
+  captionModelStatus: CaptionModelStatus | null;
+  captionModelPreparing: boolean;
+  captionModelError: string | null;
+  captionModelProgress: CaptionModelProgress | null;
+  captionRuntimeProbe: CaptionRuntimeProbe | null;
+  captionRuntimeChecking: boolean;
+  aiCaptionsEnabled: boolean;
+  settingsOpen: boolean;
 
   loadFolders: () => Promise<void>;
   loadBackgroundJobProgress: () => Promise<void>;
@@ -136,7 +188,18 @@ interface GalleryState {
   setView: (view: ActiveView) => void;
   loadTagCloud: () => Promise<void>;
   searchByTag: (imageId: number) => void;
-  loadSimilarImages: (imageId: number) => Promise<void>;
+  loadSimilarImages: (imageId: number, folderId?: number | null, reset?: boolean) => Promise<void>;
+  suggestImageTags: (imageId: number) => Promise<string[]>;
+  loadCaptionModelStatus: () => Promise<void>;
+  prepareCaptionModel: () => Promise<void>;
+  deleteCaptionModel: () => Promise<void>;
+  probeCaptionRuntime: () => Promise<void>;
+  probeCaptionImage: (imageId: number) => Promise<CaptionVisionProbe>;
+  generateCaptionForImage: (imageId: number) => Promise<ImageRecord>;
+  queueCaptionJobs: (folderId?: number | null) => Promise<number>;
+  queueCaptionForImage: (imageId: number) => Promise<number>;
+  setAiCaptionsEnabled: (enabled: boolean) => void;
+  setSettingsOpen: (open: boolean) => void;
   retryFailedEmbeddings: (folderId: number) => Promise<void>;
   updateImageDetails: (imageId: number, updates: { favorite?: boolean; rating?: number }) => Promise<void>;
   setCacheDir: (dir: string) => void;
@@ -144,6 +207,12 @@ interface GalleryState {
 }
 
 const PAGE_SIZE = 200;
+const AI_CAPTIONS_ENABLED_KEY = "phokus.aiCaptionsEnabled";
+
+function initialAiCaptionsEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(AI_CAPTIONS_ENABLED_KEY) === "true";
+}
 
 function mergeIntoVisibleWindow(
   currentImages: ImageRecord[],
@@ -266,6 +335,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   totalImages: 0,
   loadedCount: 0,
   loadingImages: false,
+  imageLoadError: null,
   search: "",
   searchMode: "filename",
   sort: "date_desc",
@@ -275,6 +345,9 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   zoomPreset: "comfortable",
   selectedImage: null,
   collectionTitle: null,
+  similarSourceImageId: null,
+  similarHasMore: false,
+  galleryScrollResetKey: 0,
   activeView: "gallery",
   tagCloudEntries: [],
   tagCloudLoading: false,
@@ -282,6 +355,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   indexingProgress: {},
   mediaJobProgress: {},
   cacheDir: "",
+  captionModelStatus: null,
+  captionModelPreparing: false,
+  captionModelError: null,
+  captionModelProgress: null,
+  captionRuntimeProbe: null,
+  captionRuntimeChecking: false,
+  aiCaptionsEnabled: initialAiCaptionsEnabled(),
+  settingsOpen: false,
 
   setCacheDir: (cacheDir) => set({ cacheDir }),
 
@@ -327,13 +408,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   selectFolder: (folderId) => {
-    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, activeView: "gallery", failedEmbeddingsOnly: false });
+    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, activeView: "gallery", failedEmbeddingsOnly: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
   loadImages: async (reset = false) => {
     const { selectedFolderId, search, searchMode, sort, loadedCount, mediaFilter, favoritesOnly, failedEmbeddingsOnly } = get();
-    set({ loadingImages: true });
+    set({ loadingImages: true, imageLoadError: null });
 
     try {
       if (searchMode === "semantic" && search.trim()) {
@@ -353,6 +434,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           loadedCount: images.length,
           loadingImages: false,
           collectionTitle: `Semantic search: ${search}`,
+          similarSourceImageId: null,
+          similarHasMore: false,
         });
         return;
       }
@@ -382,56 +465,63 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         loadedCount: reset ? result.images.length : state.loadedCount + result.images.length,
         loadingImages: false,
         collectionTitle: reset ? null : state.collectionTitle,
+        similarSourceImageId: null,
+        similarHasMore: false,
       }));
     } catch (error) {
       console.error("Failed to load media:", error);
-      set({ loadingImages: false });
+      set({ loadingImages: false, imageLoadError: String(error) });
     }
   },
 
   loadMoreImages: async () => {
-    const { loadedCount, totalImages, loadingImages } = get();
+    const { loadedCount, totalImages, loadingImages, collectionTitle, similarSourceImageId, similarHasMore, selectedFolderId } = get();
     if (loadingImages || loadedCount >= totalImages) return;
+    if (collectionTitle === "Similar Images" && similarSourceImageId !== null) {
+      if (!similarHasMore) return;
+      await get().loadSimilarImages(similarSourceImageId, selectedFolderId, false);
+      return;
+    }
     await get().loadImages(false);
   },
 
   setSearch: (search) => {
-    set({ search, images: [], loadedCount: 0, collectionTitle: null });
+    set({ search, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
   clearSearch: () => {
-    set({ search: "", images: [], loadedCount: 0, collectionTitle: null });
+    set({ search: "", images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
   resetSearch: () => {
-    set({ search: "", searchMode: "filename", images: [], loadedCount: 0, collectionTitle: null });
+    set({ search: "", searchMode: "filename", images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
   setSearchMode: (searchMode) => {
-    set({ searchMode, images: [], loadedCount: 0, collectionTitle: null });
+    set({ searchMode, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
   setSort: (sort) => {
-    set({ sort, images: [], loadedCount: 0, collectionTitle: null });
+    set({ sort, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
   setMediaFilter: (mediaFilter) => {
-    set({ mediaFilter, images: [], loadedCount: 0, collectionTitle: null });
+    set({ mediaFilter, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
   setFavoritesOnly: (favoritesOnly) => {
-    set({ favoritesOnly, images: [], loadedCount: 0, collectionTitle: null });
+    set({ favoritesOnly, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
   setFailedEmbeddingsOnly: (failedEmbeddingsOnly) => {
-    set({ failedEmbeddingsOnly, images: [], loadedCount: 0, collectionTitle: null });
+    set({ failedEmbeddingsOnly, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
@@ -461,25 +551,144 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   searchByTag: (imageId) => {
-    set({ activeView: "gallery", images: [], loadedCount: 0, loadingImages: true, collectionTitle: "Similar Images" });
-    void get().loadSimilarImages(imageId);
+    const { selectedFolderId } = get();
+    set((state) => ({ activeView: "gallery", images: [], loadedCount: 0, loadingImages: true, collectionTitle: "Similar Images", imageLoadError: null, galleryScrollResetKey: state.galleryScrollResetKey + 1 }));
+    void get().loadSimilarImages(imageId, selectedFolderId);
   },
 
-  loadSimilarImages: async (imageId) => {
-    set({ images: [], loadedCount: 0, loadingImages: true, collectionTitle: "Similar Images" });
-    const images = await invoke<ImageRecord[]>("find_similar_images", {
-      params: { image_id: imageId, limit: PAGE_SIZE },
-    });
-    set({
-      images,
-      totalImages: images.length,
-      loadedCount: images.length,
-      loadingImages: false,
+  loadSimilarImages: async (imageId, folderId = get().selectedFolderId, reset = true) => {
+    const requestedLimit = reset ? PAGE_SIZE : get().loadedCount + PAGE_SIZE;
+    set((state) => ({
+      images: reset ? [] : get().images,
+      loadedCount: reset ? 0 : get().loadedCount,
+      loadingImages: true,
       collectionTitle: "Similar Images",
-      selectedFolderId: null,
-      selectedImage: null,
+      imageLoadError: null,
+      similarSourceImageId: imageId,
+      galleryScrollResetKey: reset ? state.galleryScrollResetKey + 1 : state.galleryScrollResetKey,
+    }));
+    try {
+      const images = await invoke<ImageRecord[]>("find_similar_images", {
+        params: { image_id: imageId, limit: requestedLimit },
+      });
+      const hasMore = images.length >= requestedLimit;
+      set({
+        images,
+        totalImages: hasMore ? images.length + PAGE_SIZE : images.length,
+        loadedCount: images.length,
+        loadingImages: false,
+        imageLoadError: null,
+        collectionTitle: "Similar Images",
+        similarSourceImageId: imageId,
+        similarHasMore: hasMore,
+        selectedFolderId: folderId ?? null,
+        selectedImage: reset ? null : get().selectedImage,
+      });
+    } catch (error) {
+      console.error("Failed to load similar images:", error);
+      set({
+        images: [],
+        totalImages: 0,
+        loadedCount: 0,
+        loadingImages: false,
+        imageLoadError: String(error),
+        collectionTitle: "Similar Images",
+        similarSourceImageId: imageId,
+        similarHasMore: false,
+        selectedFolderId: folderId ?? null,
+        selectedImage: null,
+      });
+    }
+  },
+
+  suggestImageTags: async (imageId) => {
+    return invoke<string[]>("suggest_image_tags", {
+      params: { image_id: imageId, limit: 2 },
     });
   },
+
+  loadCaptionModelStatus: async () => {
+    try {
+      const captionModelStatus = await invoke<CaptionModelStatus>("get_caption_model_status");
+      set({ captionModelStatus, captionModelError: null });
+    } catch (error) {
+      set({ captionModelError: String(error) });
+    }
+  },
+
+  prepareCaptionModel: async () => {
+    set({ captionModelPreparing: true, captionModelError: null, captionModelProgress: null });
+    try {
+      const captionModelStatus = await invoke<CaptionModelStatus>("prepare_caption_model");
+      window.localStorage.setItem(AI_CAPTIONS_ENABLED_KEY, String(captionModelStatus.ready));
+      set({ captionModelStatus, captionModelPreparing: false, captionModelError: null, captionModelProgress: null, aiCaptionsEnabled: captionModelStatus.ready });
+    } catch (error) {
+      set({ captionModelPreparing: false, captionModelError: String(error), captionModelProgress: null });
+    }
+  },
+
+  deleteCaptionModel: async () => {
+    set({ captionModelPreparing: true, captionModelError: null, captionModelProgress: null });
+    try {
+      const captionModelStatus = await invoke<CaptionModelStatus>("delete_caption_model");
+      window.localStorage.setItem(AI_CAPTIONS_ENABLED_KEY, "false");
+      set({ captionModelStatus, captionModelPreparing: false, captionModelError: null, captionModelProgress: null, captionRuntimeProbe: null, aiCaptionsEnabled: false });
+    } catch (error) {
+      set({ captionModelPreparing: false, captionModelError: String(error), captionModelProgress: null });
+    }
+  },
+
+  probeCaptionRuntime: async () => {
+    set({ captionRuntimeChecking: true, captionModelError: null });
+    try {
+      const captionRuntimeProbe = await invoke<CaptionRuntimeProbe>("probe_caption_runtime");
+      set({ captionRuntimeProbe, captionRuntimeChecking: false, captionModelError: null });
+    } catch (error) {
+      set({ captionRuntimeChecking: false, captionModelError: String(error), captionRuntimeProbe: null });
+    }
+  },
+
+  probeCaptionImage: async (imageId) => {
+    return invoke<CaptionVisionProbe>("probe_caption_image", {
+      params: { image_id: imageId },
+    });
+  },
+
+  generateCaptionForImage: async (imageId) => {
+    const updatedImage = await invoke<ImageRecord>("generate_caption_for_image", {
+      params: { image_id: imageId },
+    });
+
+    set((state) => ({
+      images: replaceImage(state.images, updatedImage, state.sort),
+      selectedImage: state.selectedImage?.id === updatedImage.id ? updatedImage : state.selectedImage,
+    }));
+
+    return updatedImage;
+  },
+
+  queueCaptionJobs: async (folderId = get().selectedFolderId) => {
+    const queued = await invoke<number>("queue_caption_jobs", {
+      params: { folder_id: folderId ?? null, image_id: null },
+    });
+    await get().loadBackgroundJobProgress();
+    return queued;
+  },
+
+  queueCaptionForImage: async (imageId) => {
+    const queued = await invoke<number>("queue_caption_jobs", {
+      params: { folder_id: null, image_id: imageId },
+    });
+    await get().loadBackgroundJobProgress();
+    return queued;
+  },
+
+  setAiCaptionsEnabled: (aiCaptionsEnabled) => {
+    window.localStorage.setItem(AI_CAPTIONS_ENABLED_KEY, String(aiCaptionsEnabled));
+    set({ aiCaptionsEnabled });
+  },
+
+  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
 
   retryFailedEmbeddings: async (folderId) => {
     await invoke("retry_failed_embeddings", { params: { folder_id: folderId } });
@@ -533,6 +742,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           next[progress.folder_id] = progress;
         }
         return { mediaJobProgress: next };
+      });
+    });
+
+    const unlistenCaptionModelProgress = await listen<CaptionModelProgress>("caption-model-progress", (event) => {
+      set({
+        captionModelProgress: event.payload.done ? null : event.payload,
+        captionModelPreparing: !event.payload.done,
       });
     });
 
@@ -600,6 +816,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     return () => {
       unlistenProgress();
       unlistenMediaJobs();
+      unlistenCaptionModelProgress();
       unlistenImages();
       unlistenThumbnails();
     };

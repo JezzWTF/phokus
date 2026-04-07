@@ -57,6 +57,10 @@ pub struct ImageRecord {
     pub embedding_model: Option<String>,
     pub embedding_updated_at: Option<String>,
     pub embedding_error: Option<String>,
+    pub generated_caption: Option<String>,
+    pub caption_model: Option<String>,
+    pub caption_updated_at: Option<String>,
+    pub caption_error: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -90,6 +94,13 @@ pub struct MetadataJob {
 }
 
 #[derive(Debug, Clone)]
+pub struct CaptionJob {
+    pub image_id: i64,
+    pub folder_id: i64,
+    pub path: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct IndexedMediaEntry {
     pub id: i64,
     pub path: String,
@@ -106,6 +117,9 @@ pub struct FolderJobProgress {
     pub embedding_pending: i64,
     pub embedding_ready: i64,
     pub embedding_failed: i64,
+    pub caption_pending: i64,
+    pub caption_ready: i64,
+    pub caption_failed: i64,
 }
 
 pub fn create_pool(db_path: &Path) -> Result<DbPool> {
@@ -172,6 +186,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS caption_jobs (
+            image_id    INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            attempts    INTEGER NOT NULL DEFAULT 0,
+            last_error  TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
         CREATE TABLE IF NOT EXISTS tag_cloud_cache (
             folder_scope    TEXT PRIMARY KEY,
             image_ids_hash  INTEGER NOT NULL,
@@ -184,6 +207,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_embedding_jobs_status ON embedding_jobs(status);
         CREATE INDEX IF NOT EXISTS idx_thumbnail_jobs_status ON thumbnail_jobs(status);
         CREATE INDEX IF NOT EXISTS idx_metadata_jobs_status ON metadata_jobs(status);
+        CREATE INDEX IF NOT EXISTS idx_caption_jobs_status ON caption_jobs(status);
         ",
     )?;
 
@@ -209,6 +233,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     ensure_column(conn, "images", "audio_codec", "TEXT")?;
     ensure_column(conn, "images", "metadata_updated_at", "TEXT")?;
     ensure_column(conn, "images", "metadata_error", "TEXT")?;
+    ensure_column(conn, "images", "generated_caption", "TEXT")?;
+    ensure_column(conn, "images", "caption_model", "TEXT")?;
+    ensure_column(conn, "images", "caption_updated_at", "TEXT")?;
+    ensure_column(conn, "images", "caption_error", "TEXT")?;
 
     vector::migrate(conn)?;
     Ok(())
@@ -229,8 +257,8 @@ pub fn insert_folder(conn: &Connection, path: &str, name: &str) -> Result<i64> {
 
 pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
     let id = conn.query_row(
-        "INSERT INTO images (folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type, media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+        "INSERT INTO images (folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type, media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error, generated_caption, caption_model, caption_updated_at, caption_error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
          ON CONFLICT(path) DO UPDATE SET
             folder_id = excluded.folder_id,
             filename = excluded.filename,
@@ -250,7 +278,11 @@ pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
             embedding_status = excluded.embedding_status,
             embedding_model = excluded.embedding_model,
             embedding_updated_at = excluded.embedding_updated_at,
-            embedding_error = excluded.embedding_error
+            embedding_error = excluded.embedding_error,
+            generated_caption = excluded.generated_caption,
+            caption_model = excluded.caption_model,
+            caption_updated_at = excluded.caption_updated_at,
+            caption_error = excluded.caption_error
          RETURNING id",
         params![
             img.folder_id,
@@ -275,6 +307,10 @@ pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
             img.embedding_model,
             img.embedding_updated_at,
             img.embedding_error,
+            img.generated_caption,
+            img.caption_model,
+            img.caption_updated_at,
+            img.caption_error,
         ],
         |row| row.get(0),
     )?;
@@ -305,6 +341,51 @@ pub fn backfill_embedding_jobs(conn: &Connection) -> Result<usize> {
         [],
     )?;
     Ok(inserted)
+}
+
+pub fn repair_embedding_consistency(conn: &Connection) -> Result<(usize, usize)> {
+    let orphaned_vectors = vector::delete_orphaned_embeddings(conn)?;
+    let ready_ids = {
+        let mut stmt = conn.prepare(
+            "SELECT id
+             FROM images
+             WHERE embedding_status = 'ready'",
+        )?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+
+    let mut missing_vector_ids = Vec::new();
+    for image_id in ready_ids {
+        if !vector::has_image_vector(conn, image_id)? {
+            missing_vector_ids.push(image_id);
+        }
+    }
+
+    let tx = conn.unchecked_transaction()?;
+    for image_id in &missing_vector_ids {
+        tx.execute(
+            "INSERT INTO embedding_jobs (image_id, status, attempts, last_error, created_at, updated_at)
+             VALUES (?1, 'pending', 0, NULL, datetime('now'), datetime('now'))
+             ON CONFLICT(image_id) DO UPDATE SET
+                status = 'pending',
+                last_error = NULL,
+                updated_at = datetime('now')",
+            [image_id],
+        )?;
+        tx.execute(
+            "UPDATE images
+             SET embedding_status = 'pending',
+                 embedding_error = NULL
+             WHERE id = ?1",
+            [image_id],
+        )?;
+    }
+    tx.commit()?;
+
+    Ok((orphaned_vectors, missing_vector_ids.len()))
 }
 
 pub fn retry_failed_embedding_jobs(conn: &Connection, folder_id: i64) -> Result<usize> {
@@ -348,6 +429,10 @@ pub fn reset_inflight_jobs(conn: &Connection) -> Result<()> {
         "UPDATE embedding_jobs SET status = 'pending' WHERE status = 'processing'",
         [],
     )?;
+    conn.execute(
+        "UPDATE caption_jobs SET status = 'pending' WHERE status = 'processing'",
+        [],
+    )?;
     Ok(())
 }
 
@@ -377,16 +462,102 @@ pub fn enqueue_metadata_job(conn: &Connection, image_id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn get_pending_embedding_jobs(conn: &Connection, limit: usize) -> Result<Vec<EmbeddingJob>> {
-    let mut stmt = conn.prepare(
+pub fn enqueue_caption_job(conn: &Connection, image_id: i64) -> Result<()> {
+    conn.execute(
+        "INSERT INTO caption_jobs (image_id, status, attempts, last_error, created_at, updated_at)
+         VALUES (?1, 'pending', 0, NULL, datetime('now'), datetime('now'))
+         ON CONFLICT(image_id) DO UPDATE SET
+            status = 'pending',
+            last_error = NULL,
+            updated_at = datetime('now')",
+        [image_id],
+    )?;
+    conn.execute(
+        "UPDATE images
+         SET caption_error = NULL
+         WHERE id = ?1",
+        [image_id],
+    )?;
+    Ok(())
+}
+
+pub fn requeue_caption_jobs(conn: &Connection, image_ids: &[i64]) -> Result<()> {
+    for image_id in image_ids {
+        conn.execute(
+            "UPDATE caption_jobs
+             SET status = 'pending', updated_at = datetime('now')
+             WHERE image_id = ?1 AND status = 'processing'",
+            [image_id],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn enqueue_missing_caption_jobs_for_folder(conn: &Connection, folder_id: i64) -> Result<usize> {
+    let inserted = conn.execute(
+        "INSERT INTO caption_jobs (image_id, status, attempts, last_error, created_at, updated_at)
+         SELECT id, 'pending', 0, NULL, datetime('now'), datetime('now')
+         FROM images
+         WHERE folder_id = ?1
+           AND media_kind = 'image'
+           AND generated_caption IS NULL
+         ON CONFLICT(image_id) DO UPDATE SET
+            status = 'pending',
+            last_error = NULL,
+            updated_at = datetime('now')",
+        [folder_id],
+    )?;
+    conn.execute(
+        "UPDATE images
+         SET caption_error = NULL
+         WHERE folder_id = ?1
+           AND media_kind = 'image'
+           AND generated_caption IS NULL",
+        [folder_id],
+    )?;
+    Ok(inserted)
+}
+
+pub fn enqueue_missing_caption_jobs(conn: &Connection) -> Result<usize> {
+    let inserted = conn.execute(
+        "INSERT INTO caption_jobs (image_id, status, attempts, last_error, created_at, updated_at)
+         SELECT id, 'pending', 0, NULL, datetime('now'), datetime('now')
+         FROM images
+         WHERE media_kind = 'image'
+           AND generated_caption IS NULL
+         ON CONFLICT(image_id) DO UPDATE SET
+            status = 'pending',
+            last_error = NULL,
+            updated_at = datetime('now')",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE images
+         SET caption_error = NULL
+         WHERE media_kind = 'image'
+           AND generated_caption IS NULL",
+        [],
+    )?;
+    Ok(inserted)
+}
+
+pub fn get_pending_embedding_jobs(
+    conn: &Connection,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+    limit: usize,
+) -> Result<Vec<EmbeddingJob>> {
+    let sql = format!(
         "SELECT j.image_id, i.folder_id, i.path, i.thumbnail_path, i.media_kind,
                 j.status, j.attempts, j.last_error, j.created_at, j.updated_at
          FROM embedding_jobs j
          JOIN images i ON i.id = j.image_id
          WHERE status = 'pending'
+           {}
          ORDER BY j.updated_at, j.image_id
          LIMIT ?1",
-    )?;
+        folder_exclusion_clause("i", excluded_folder_ids)
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([limit as i64], |row| {
         Ok(EmbeddingJob {
             image_id: row.get(0)?,
@@ -404,14 +575,76 @@ pub fn get_pending_embedding_jobs(conn: &Connection, limit: usize) -> Result<Vec
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-pub fn claim_embedding_jobs(conn: &mut Connection, limit: usize) -> Result<Vec<EmbeddingJob>> {
+pub fn claim_embedding_jobs(
+    conn: &mut Connection,
+    paused_folder_ids: &std::collections::HashSet<i64>,
+    limit: usize,
+) -> Result<Vec<EmbeddingJob>> {
     let tx = conn.transaction()?;
-    let candidates = get_pending_embedding_jobs(&tx, limit * 2)?;
+    let candidates = get_pending_embedding_jobs(&tx, paused_folder_ids, limit * 2)?;
     let mut claimed = Vec::with_capacity(limit);
 
     for job in candidates {
         let updated = tx.execute(
             "UPDATE embedding_jobs
+             SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
+             WHERE image_id = ?1 AND status = 'pending'",
+            [job.image_id],
+        )?;
+
+        if updated == 1 {
+            claimed.push(job);
+        }
+
+        if claimed.len() >= limit {
+            break;
+        }
+    }
+
+    tx.commit()?;
+    Ok(claimed)
+}
+
+fn get_pending_caption_jobs_excluding(
+    conn: &Connection,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+    limit: usize,
+) -> Result<Vec<CaptionJob>> {
+    let sql = format!(
+        "SELECT j.image_id, i.folder_id, i.path
+         FROM caption_jobs j
+         JOIN images i ON i.id = j.image_id
+         WHERE j.status = 'pending'
+           AND i.media_kind = 'image'
+           AND i.generated_caption IS NULL
+           {}
+         ORDER BY j.updated_at, j.image_id
+         LIMIT ?1",
+        folder_exclusion_clause("i", excluded_folder_ids)
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([limit as i64], |row| {
+        Ok(CaptionJob {
+            image_id: row.get(0)?,
+            folder_id: row.get(1)?,
+            path: row.get(2)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub fn claim_caption_jobs(
+    conn: &mut Connection,
+    paused_folder_ids: &std::collections::HashSet<i64>,
+    limit: usize,
+) -> Result<Vec<CaptionJob>> {
+    let tx = conn.transaction()?;
+    let candidates = get_pending_caption_jobs_excluding(&tx, paused_folder_ids, limit * 2)?;
+    let mut claimed = Vec::with_capacity(limit);
+
+    for job in candidates {
+        let updated = tx.execute(
+            "UPDATE caption_jobs
              SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
              WHERE image_id = ?1 AND status = 'pending'",
             [job.image_id],
@@ -489,6 +722,7 @@ pub fn delete_images_by_ids(conn: &Connection, image_ids: &[i64]) -> Result<()> 
     let tx = conn.unchecked_transaction()?;
     for image_id in image_ids {
         vector::delete_embedding(&tx, *image_id)?;
+        vector::delete_caption_embedding(&tx, *image_id)?;
         tx.execute("DELETE FROM images WHERE id = ?1", [image_id])?;
     }
     tx.commit()?;
@@ -539,6 +773,31 @@ pub fn get_folder_job_progress(conn: &Connection, folder_id: i64) -> Result<Fold
         |row| row.get(0),
     )?;
 
+    let caption_pending = conn.query_row(
+        "SELECT COUNT(*)
+         FROM caption_jobs j
+         JOIN images i ON i.id = j.image_id
+         WHERE i.folder_id = ?1 AND j.status IN ('pending', 'processing')",
+        [folder_id],
+        |row| row.get(0),
+    )?;
+
+    let caption_ready = conn.query_row(
+        "SELECT COUNT(*)
+         FROM images
+         WHERE folder_id = ?1 AND generated_caption IS NOT NULL",
+        [folder_id],
+        |row| row.get(0),
+    )?;
+
+    let caption_failed = conn.query_row(
+        "SELECT COUNT(*)
+         FROM images
+         WHERE folder_id = ?1 AND caption_error IS NOT NULL",
+        [folder_id],
+        |row| row.get(0),
+    )?;
+
     Ok(FolderJobProgress {
         folder_id,
         thumbnail_pending,
@@ -546,6 +805,9 @@ pub fn get_folder_job_progress(conn: &Connection, folder_id: i64) -> Result<Fold
         embedding_pending,
         embedding_ready,
         embedding_failed,
+        caption_pending,
+        caption_ready,
+        caption_failed,
     })
 }
 
@@ -562,15 +824,22 @@ pub fn get_all_folder_job_progress(conn: &Connection) -> Result<Vec<FolderJobPro
     Ok(progress)
 }
 
-pub fn get_pending_thumbnail_jobs(conn: &Connection, limit: usize) -> Result<Vec<ThumbnailJob>> {
-    let mut stmt = conn.prepare(
+fn get_pending_thumbnail_jobs_excluding(
+    conn: &Connection,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+    limit: usize,
+) -> Result<Vec<ThumbnailJob>> {
+    let sql = format!(
         "SELECT j.image_id, i.folder_id, i.path, i.media_kind
          FROM thumbnail_jobs j
          JOIN images i ON i.id = j.image_id
          WHERE j.status = 'pending'
+           {}
          ORDER BY j.updated_at, j.image_id
          LIMIT ?1",
-    )?;
+        folder_exclusion_clause("i", excluded_folder_ids)
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([limit as i64], |row| {
         Ok(ThumbnailJob {
             image_id: row.get(0)?,
@@ -585,18 +854,20 @@ pub fn get_pending_thumbnail_jobs(conn: &Connection, limit: usize) -> Result<Vec
 pub fn claim_thumbnail_jobs(
     conn: &mut Connection,
     active_folder_ids: &std::collections::HashSet<i64>,
+    paused_folder_ids: &std::collections::HashSet<i64>,
     fetch_limit: usize,
     claim_limit: usize,
 ) -> Result<Vec<ThumbnailJob>> {
     let tx = conn.transaction()?;
-    let candidates = get_pending_thumbnail_jobs(&tx, fetch_limit)?;
+    let excluded_folder_ids = active_folder_ids
+        .union(paused_folder_ids)
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    let candidates = get_pending_thumbnail_jobs_excluding(&tx, &excluded_folder_ids, fetch_limit)?;
     let mut claimed = Vec::with_capacity(claim_limit);
 
     for job in candidates {
-        if active_folder_ids.contains(&job.folder_id) {
-            continue;
-        }
-
+        debug_assert!(!excluded_folder_ids.contains(&job.folder_id));
         let updated = tx.execute(
             "UPDATE thumbnail_jobs
              SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
@@ -617,15 +888,22 @@ pub fn claim_thumbnail_jobs(
     Ok(claimed)
 }
 
-pub fn get_pending_metadata_jobs(conn: &Connection, limit: usize) -> Result<Vec<MetadataJob>> {
-    let mut stmt = conn.prepare(
+fn get_pending_metadata_jobs_excluding(
+    conn: &Connection,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+    limit: usize,
+) -> Result<Vec<MetadataJob>> {
+    let sql = format!(
         "SELECT j.image_id, i.folder_id, i.path
          FROM metadata_jobs j
          JOIN images i ON i.id = j.image_id
          WHERE j.status = 'pending' AND i.media_kind = 'video'
+           {}
          ORDER BY j.updated_at, j.image_id
          LIMIT ?1",
-    )?;
+        folder_exclusion_clause("i", excluded_folder_ids)
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([limit as i64], |row| {
         Ok(MetadataJob {
             image_id: row.get(0)?,
@@ -639,18 +917,20 @@ pub fn get_pending_metadata_jobs(conn: &Connection, limit: usize) -> Result<Vec<
 pub fn claim_metadata_jobs(
     conn: &mut Connection,
     active_folder_ids: &std::collections::HashSet<i64>,
+    paused_folder_ids: &std::collections::HashSet<i64>,
     fetch_limit: usize,
     claim_limit: usize,
 ) -> Result<Vec<MetadataJob>> {
     let tx = conn.transaction()?;
-    let candidates = get_pending_metadata_jobs(&tx, fetch_limit)?;
+    let excluded_folder_ids = active_folder_ids
+        .union(paused_folder_ids)
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    let candidates = get_pending_metadata_jobs_excluding(&tx, &excluded_folder_ids, fetch_limit)?;
     let mut claimed = Vec::with_capacity(claim_limit);
 
     for job in candidates {
-        if active_folder_ids.contains(&job.folder_id) {
-            continue;
-        }
-
+        debug_assert!(!excluded_folder_ids.contains(&job.folder_id));
         let updated = tx.execute(
             "UPDATE metadata_jobs
              SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
@@ -765,7 +1045,8 @@ pub fn update_image_details(
     conn.query_row(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
-                favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error
+                favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error,
+                generated_caption, caption_model, caption_updated_at, caption_error
          FROM images
          WHERE id = ?1",
         [image_id],
@@ -778,7 +1059,8 @@ pub fn get_image_by_id(conn: &Connection, image_id: i64) -> Result<ImageRecord> 
     conn.query_row(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
-                favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error
+                favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error,
+                generated_caption, caption_model, caption_updated_at, caption_error
          FROM images
          WHERE id = ?1",
         [image_id],
@@ -790,7 +1072,11 @@ pub fn get_image_by_id(conn: &Connection, image_id: i64) -> Result<ImageRecord> 
 pub fn get_images_by_ids(conn: &Connection, image_ids: &[i64]) -> Result<Vec<ImageRecord>> {
     let mut images = Vec::with_capacity(image_ids.len());
     for image_id in image_ids {
-        images.push(get_image_by_id(conn, *image_id)?);
+        match get_image_by_id(conn, *image_id) {
+            Ok(image) => images.push(image),
+            Err(error) if is_query_returned_no_rows(&error) => {}
+            Err(error) => return Err(error),
+        }
     }
     Ok(images)
 }
@@ -839,7 +1125,8 @@ pub fn get_images(
     let sql = format!(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
-                favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error
+                favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error,
+                generated_caption, caption_model, caption_updated_at, caption_error
          FROM images
          WHERE (?1 IS NULL OR folder_id = ?1)
            AND (?2 IS NULL OR filename LIKE ?2)
@@ -918,9 +1205,102 @@ pub fn get_failed_embedding_images(
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-pub fn delete_folder(conn: &Connection, folder_id: i64) -> Result<()> {
-    conn.execute("DELETE FROM folders WHERE id = ?1", params![folder_id])?;
+pub fn update_generated_caption(
+    conn: &Connection,
+    image_id: i64,
+    caption: &str,
+    model: &str,
+) -> Result<ImageRecord> {
+    conn.execute(
+        "UPDATE images
+         SET generated_caption = ?2,
+             caption_model = ?3,
+             caption_updated_at = datetime('now'),
+             caption_error = NULL
+         WHERE id = ?1",
+        params![image_id, caption, model],
+    )?;
+    conn.execute("DELETE FROM caption_jobs WHERE image_id = ?1", [image_id])?;
+    get_image_by_id(conn, image_id)
+}
+
+pub fn mark_caption_failed(conn: &Connection, image_id: i64, error: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE images
+         SET caption_error = ?2
+         WHERE id = ?1",
+        params![image_id, error],
+    )?;
+    conn.execute(
+        "UPDATE caption_jobs
+         SET status = 'failed', last_error = ?2, updated_at = datetime('now')
+         WHERE image_id = ?1",
+        params![image_id, error],
+    )?;
     Ok(())
+}
+
+pub fn suggest_tags_from_caption(
+    conn: &Connection,
+    image_id: i64,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let caption = conn.query_row(
+        "SELECT generated_caption FROM images WHERE id = ?1",
+        [image_id],
+        |row| row.get::<_, Option<String>>(0),
+    )?;
+
+    Ok(caption
+        .as_deref()
+        .map(|caption| derive_caption_tags(caption, limit))
+        .unwrap_or_default())
+}
+
+pub fn delete_folder(conn: &Connection, folder_id: i64) -> Result<()> {
+    let image_ids = {
+        let mut stmt = conn.prepare("SELECT id FROM images WHERE folder_id = ?1")?;
+        let rows = stmt
+            .query_map([folder_id], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+
+    let tx = conn.unchecked_transaction()?;
+    for image_id in image_ids {
+        vector::delete_embedding(&tx, image_id)?;
+        vector::delete_caption_embedding(&tx, image_id)?;
+    }
+    tx.execute("DELETE FROM folders WHERE id = ?1", params![folder_id])?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn derive_caption_tags(caption: &str, limit: usize) -> Vec<String> {
+    const STOPWORDS: &[&str] = &[
+        "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "into", "is", "it",
+        "near", "of", "on", "or", "the", "to", "with", "without", "image", "photo", "picture",
+        "showing", "shows", "there", "this", "that", "over", "under",
+    ];
+
+    let stopwords = STOPWORDS
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    let mut tags = Vec::new();
+    for word in caption
+        .split(|ch: char| !ch.is_alphanumeric())
+        .map(|word| word.trim().to_lowercase())
+        .filter(|word| word.len() >= 3 && !stopwords.contains(word.as_str()))
+    {
+        if !tags.contains(&word) {
+            tags.push(word);
+        }
+        if tags.len() >= limit {
+            break;
+        }
+    }
+    tags
 }
 
 fn map_image_row(row: &Row<'_>) -> rusqlite::Result<ImageRecord> {
@@ -948,6 +1328,10 @@ fn map_image_row(row: &Row<'_>) -> rusqlite::Result<ImageRecord> {
         embedding_model: row.get(20)?,
         embedding_updated_at: row.get(21)?,
         embedding_error: row.get(22)?,
+        generated_caption: row.get(23)?,
+        caption_model: row.get(24)?,
+        caption_updated_at: row.get(25)?,
+        caption_error: row.get(26)?,
     })
 }
 
@@ -1004,4 +1388,28 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
         [],
     )?;
     Ok(())
+}
+
+fn is_query_returned_no_rows(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<rusqlite::Error>()
+        .is_some_and(|error| matches!(error, rusqlite::Error::QueryReturnedNoRows))
+}
+
+fn folder_exclusion_clause(
+    image_alias: &str,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+) -> String {
+    if excluded_folder_ids.is_empty() {
+        return String::new();
+    }
+
+    let mut ids = excluded_folder_ids.iter().copied().collect::<Vec<_>>();
+    ids.sort_unstable();
+    let id_list = ids
+        .into_iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("AND {}.folder_id NOT IN ({})", image_alias, id_list)
 }
