@@ -5,6 +5,7 @@ mod embedder;
 mod indexer;
 mod media;
 mod storage;
+mod tagger;
 mod thumbnail;
 mod vector;
 
@@ -67,7 +68,9 @@ pub fn run() {
             }
             indexer::start_metadata_worker(app.handle().clone(), pool.clone(), media_tools.clone());
             indexer::start_embedding_worker(app.handle().clone(), pool.clone());
-            indexer::start_caption_worker(app.handle().clone(), pool.clone(), app_dir.clone());
+            // Caption worker disabled — UI removed; keeping backend code intact for future use.
+            // indexer::start_caption_worker(app.handle().clone(), pool.clone(), app_dir.clone());
+            indexer::start_tagging_worker(app.handle().clone(), pool.clone(), app_dir.clone());
 
             app.manage(pool);
             app.manage(media_tools);
@@ -87,18 +90,37 @@ pub fn run() {
             commands::retry_failed_embeddings,
             commands::semantic_search_images,
             commands::get_caption_model_status,
+            commands::get_caption_acceleration,
+            commands::set_caption_acceleration,
+            commands::get_caption_detail,
+            commands::set_caption_detail,
             commands::prepare_caption_model,
             commands::delete_caption_model,
             commands::probe_caption_runtime,
             commands::probe_caption_image,
             commands::generate_caption_for_image,
             commands::queue_caption_jobs,
+            commands::clear_caption_jobs,
+            commands::reset_generated_captions,
             commands::set_generated_caption,
             commands::suggest_image_tags,
             commands::set_worker_paused,
             commands::get_worker_states,
             commands::get_tag_cloud,
             commands::get_failed_embedding_images,
+            commands::get_tagger_model_status,
+            commands::get_tagger_acceleration,
+            commands::set_tagger_acceleration,
+            commands::probe_tagger_runtime,
+            commands::get_tagger_threshold,
+            commands::set_tagger_threshold,
+            commands::prepare_tagger_model,
+            commands::delete_tagger_model,
+            commands::queue_tagging_jobs,
+            commands::clear_tagging_jobs,
+            commands::get_image_tags,
+            commands::add_user_tag,
+            commands::remove_tag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

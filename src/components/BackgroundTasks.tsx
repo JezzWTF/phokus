@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useGalleryStore } from "../store";
 
-type WorkerKey = "thumbnail" | "metadata" | "embedding" | "caption";
+type WorkerKey = "thumbnail" | "metadata" | "embedding" | "tagging";
 
 const WORKER_FOR_STAGE: Record<string, WorkerKey> = {
   Thumbnails: "thumbnail",
   Metadata: "metadata",
   Embeddings: "embedding",
-  Captions: "caption",
+  Tags: "tagging",
 };
 
 interface TaskStage {
@@ -23,7 +23,7 @@ interface Task {
   name: string;
   stages: TaskStage[];
   hasFailedEmbeddings: boolean;
-  hasFailedCaptions: boolean;
+  hasFailedTagging: boolean;
   pendingMediaWork: number;
   embeddingProcessed: number;
   embeddingTotal: number;
@@ -42,14 +42,14 @@ interface FolderWorkerStates {
   thumbnail_paused: boolean;
   metadata_paused: boolean;
   embedding_paused: boolean;
-  caption_paused: boolean;
+  tagging_paused: boolean;
 }
 
 const DEFAULT_PAUSED_STATE: Record<WorkerKey, boolean> = {
   thumbnail: false,
   metadata: false,
   embedding: false,
-  caption: false,
+  tagging: false,
 };
 
 export function BackgroundTasks() {
@@ -57,6 +57,7 @@ export function BackgroundTasks() {
   const indexingProgress = useGalleryStore((state) => state.indexingProgress);
   const mediaJobProgress = useGalleryStore((state) => state.mediaJobProgress);
   const retryFailedEmbeddings = useGalleryStore((state) => state.retryFailedEmbeddings);
+  const clearTaggingJobs = useGalleryStore((state) => state.clearTaggingJobs);
   const [expanded, setExpanded] = useState(false);
   const [dismissed, setDismissed] = useState<Record<number, string>>({});
   const [paused, setPaused] = useState<Record<number, Record<WorkerKey, boolean>>>({});
@@ -78,7 +79,7 @@ export function BackgroundTasks() {
               thumbnail: state.thumbnail_paused,
               metadata: state.metadata_paused,
               embedding: state.embedding_paused,
-              caption: state.caption_paused,
+              tagging: state.tagging_paused,
             },
           ]),
         ),
@@ -126,6 +127,7 @@ export function BackgroundTasks() {
   };
 
   const dismissTask = (id: number, snapshot: string) => {
+    void clearTaggingJobs(id);
     setDismissed((prev) => ({ ...prev, [id]: snapshot }));
     setExpanded(false);
   };
@@ -141,16 +143,19 @@ export function BackgroundTasks() {
         const embeddingPending = jobs?.embedding_pending ?? 0;
         const embeddingReady = jobs?.embedding_ready ?? 0;
         const embeddingFailed = jobs?.embedding_failed ?? 0;
-        const captionPending = jobs?.caption_pending ?? 0;
-        const captionFailed = jobs?.caption_failed ?? 0;
+        const taggingPending = jobs?.tagging_pending ?? 0;
+        const taggingReady = jobs?.tagging_ready ?? 0;
+        const taggingFailed = jobs?.tagging_failed ?? 0;
 
-        const pendingMediaWork = thumbnailPending + metadataPending + embeddingPending + captionPending;
+        const pendingMediaWork = thumbnailPending + metadataPending + embeddingPending + taggingPending;
         const embeddingProcessed = embeddingReady + embeddingFailed;
         const embeddingTotal = embeddingProcessed + embeddingPending;
+        const taggingProcessed = taggingReady + taggingFailed;
+        const taggingTotal = taggingProcessed + taggingPending;
         const hasFailedEmbeddings = embeddingFailed > 0;
-        const hasFailedCaptions = captionFailed > 0;
+        const hasFailedTagging = taggingFailed > 0;
 
-        if (!index && pendingMediaWork === 0 && !hasFailedEmbeddings && !hasFailedCaptions) return null;
+        if (!index && pendingMediaWork === 0 && !hasFailedEmbeddings && !hasFailedTagging) return null;
 
         const stages: TaskStage[] = [];
 
@@ -192,11 +197,12 @@ export function BackgroundTasks() {
           });
         }
 
-        if (captionPending > 0) {
+        if (taggingPending > 0) {
+          const pct = taggingTotal > 0 ? (taggingProcessed / taggingTotal) * 100 : 0;
           stages.push({
-            label: "Captions",
-            detail: captionPending.toLocaleString(),
-            progress: null,
+            label: "Tags",
+            detail: `${taggingProcessed.toLocaleString()} / ${taggingTotal.toLocaleString()}`,
+            progress: pct,
             failed: false,
           });
         }
@@ -210,23 +216,23 @@ export function BackgroundTasks() {
           });
         }
 
-        if (hasFailedCaptions && pendingMediaWork === 0) {
+        if (hasFailedTagging && pendingMediaWork === 0) {
           stages.push({
             label: "Failed",
-            detail: `${captionFailed.toLocaleString()} captions`,
+            detail: `${taggingFailed.toLocaleString()} tags`,
             progress: null,
             failed: true,
           });
         }
 
-        const snapshot = `${pendingMediaWork}:${embeddingFailed}:${captionFailed}`;
+        const snapshot = `${pendingMediaWork}:${embeddingFailed}:${taggingFailed}`;
 
         return {
           id: folder.id,
           name: folder.name,
           stages,
           hasFailedEmbeddings,
-          hasFailedCaptions,
+          hasFailedTagging,
           pendingMediaWork,
           embeddingProcessed,
           embeddingTotal,
@@ -242,13 +248,14 @@ export function BackgroundTasks() {
 
   const primary = tasks[0];
   const extraCount = tasks.length - 1;
-  const hasFailed = tasks.some((t) => (t.hasFailedEmbeddings || t.hasFailedCaptions) && t.pendingMediaWork === 0);
+  const hasFailed = tasks.some((t) => (t.hasFailedEmbeddings || t.hasFailedTagging) && t.pendingMediaWork === 0);
 
   // Best progress bar value: use embedding progress if available (most informative),
-  // otherwise fall back to scanning progress, otherwise indeterminate.
+  // otherwise tagging progress, otherwise fall back to scanning progress, otherwise indeterminate.
   const embeddingStage = primary.stages.find((s) => s.label === "Embeddings");
+  const taggingStage = primary.stages.find((s) => s.label === "Tags");
   const scanningStage = primary.stages.find((s) => s.label === "Scanning");
-  const barProgress = embeddingStage?.progress ?? scanningStage?.progress ?? null;
+  const barProgress = embeddingStage?.progress ?? taggingStage?.progress ?? scanningStage?.progress ?? null;
 
   return (
     <div className="shrink-0 border-b border-white/[0.06]">
@@ -368,9 +375,10 @@ export function BackgroundTasks() {
         <div className="border-t border-white/[0.06] bg-white/[0.02] px-5 py-3 space-y-3">
           {tasks.map((task) => {
             const taskEmbeddingStage = task.stages.find((s) => s.label === "Embeddings");
+            const taskTaggingStage = task.stages.find((s) => s.label === "Tags");
             const taskScanningStage = task.stages.find((s) => s.label === "Scanning");
-            const taskBarProgress = taskEmbeddingStage?.progress ?? taskScanningStage?.progress ?? null;
-            const taskHasFailed = (task.hasFailedEmbeddings || task.hasFailedCaptions) && task.pendingMediaWork === 0;
+            const taskBarProgress = taskEmbeddingStage?.progress ?? taskTaggingStage?.progress ?? taskScanningStage?.progress ?? null;
+            const taskHasFailed = (task.hasFailedEmbeddings || task.hasFailedTagging) && task.pendingMediaWork === 0;
 
             return (
               <div key={task.id}>

@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { useGalleryStore } from "../store";
+import { useGalleryStore, ImageTag, AiRating } from "../store";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -45,29 +45,37 @@ function embeddingLabel(status: string, model: string | null): string {
   return "Queued";
 }
 
+function ratingPill(rating: AiRating): { label: string; className: string } {
+  switch (rating) {
+    case "general":
+      return { label: "General", className: "border-emerald-400/25 bg-emerald-500/10 text-emerald-300" };
+    case "sensitive":
+      return { label: "Sensitive", className: "border-sky-400/25 bg-sky-500/10 text-sky-300" };
+    case "questionable":
+      return { label: "Questionable", className: "border-amber-400/25 bg-amber-500/10 text-amber-300" };
+    case "explicit":
+      return { label: "Explicit", className: "border-red-400/25 bg-red-500/10 text-red-300" };
+  }
+}
+
 export function Lightbox() {
   const selectedImage = useGalleryStore((state) => state.selectedImage);
-  const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
   const closeImage = useGalleryStore((state) => state.closeImage);
   const images = useGalleryStore((state) => state.images);
   const openImage = useGalleryStore((state) => state.openImage);
   const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
   const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
-  const suggestImageTags = useGalleryStore((state) => state.suggestImageTags);
-  const captionModelStatus = useGalleryStore((state) => state.captionModelStatus);
-  const captionModelPreparing = useGalleryStore((state) => state.captionModelPreparing);
-  const captionModelError = useGalleryStore((state) => state.captionModelError);
-  const captionModelProgress = useGalleryStore((state) => state.captionModelProgress);
-  const aiCaptionsEnabled = useGalleryStore((state) => state.aiCaptionsEnabled);
-  const setAiCaptionsEnabled = useGalleryStore((state) => state.setAiCaptionsEnabled);
-  const setSettingsOpen = useGalleryStore((state) => state.setSettingsOpen);
-  const prepareCaptionModel = useGalleryStore((state) => state.prepareCaptionModel);
-  const queueCaptionForImage = useGalleryStore((state) => state.queueCaptionForImage);
-  const queueCaptionJobs = useGalleryStore((state) => state.queueCaptionJobs);
+  const getImageTags = useGalleryStore((state) => state.getImageTags);
+  const addUserTag = useGalleryStore((state) => state.addUserTag);
+  const removeTag = useGalleryStore((state) => state.removeTag);
+  const taggerModelStatus = useGalleryStore((state) => state.taggerModelStatus);
+  const queueTaggingForImage = useGalleryStore((state) => state.queueTaggingForImage);
   const [zoom, setZoom] = useState(1);
-  const [suggestedTags, setSuggestedTags] = useState<string[]>([]);
-  const [captionQueueing, setCaptionQueueing] = useState(false);
-  const [captionQueueStatus, setCaptionQueueStatus] = useState<string | null>(null);
+  const [imageTags, setImageTags] = useState<ImageTag[]>([]);
+  const [tagInput, setTagInput] = useState("");
+  const [tagAdding, setTagAdding] = useState(false);
+  const [tagsExpanded, setTagsExpanded] = useState(false);
+  const [taggingQueued, setTaggingQueued] = useState(false);
   const imageViewportRef = useRef<HTMLDivElement>(null);
 
   const currentIndex = selectedImage ? images.findIndex((image) => image.id === selectedImage.id) : -1;
@@ -83,16 +91,18 @@ export function Lightbox() {
 
   useEffect(() => {
     setZoom(1);
-    setSuggestedTags([]);
-    setCaptionQueueStatus(null);
+    setImageTags([]);
+    setTagInput("");
+    setTagsExpanded(false);
+    setTaggingQueued(false);
   }, [selectedImage?.id]);
 
   useEffect(() => {
-    if (!selectedImage?.generated_caption) return;
-    void suggestImageTags(selectedImage.id)
-      .then(setSuggestedTags)
-      .catch(() => setSuggestedTags([]));
-  }, [selectedImage?.id, selectedImage?.generated_caption, suggestImageTags]);
+    if (!selectedImage) return;
+    void getImageTags(selectedImage.id)
+      .then(setImageTags)
+      .catch(() => setImageTags([]));
+  }, [selectedImage?.id, getImageTags]);
 
   useEffect(() => {
     const viewport = imageViewportRef.current;
@@ -207,8 +217,8 @@ export function Lightbox() {
                 </AnimatePresence>
               </div>
 
-              <div className="flex w-72 shrink-0 flex-col border-l border-white/5 bg-gray-900/95 p-5">
-                <div className="mb-5 flex items-center justify-between">
+              <div className="flex w-72 shrink-0 flex-col border-l border-white/5 bg-gray-900/95">
+                <div className="flex shrink-0 items-center justify-between px-5 pt-5 pb-4">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-white">{selectedImage.filename}</p>
                     <p className="text-xs text-gray-500">Details</p>
@@ -245,7 +255,7 @@ export function Lightbox() {
                   </button>
                 </div>
 
-                <div className="space-y-4 text-sm">
+                <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 space-y-4 text-sm">
                   <div>
                     <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">Rating</p>
                     <div className="flex items-center gap-1">
@@ -341,116 +351,102 @@ export function Lightbox() {
                   </div>
 
                   <div>
-                    <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">AI Caption</p>
-                    {selectedImage.generated_caption ? (
-                      <>
-                        <p className="text-white">{selectedImage.generated_caption}</p>
-                        {suggestedTags.length > 0 ? (
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {suggestedTags.map((tag) => (
-                              <span
-                                key={tag}
-                                className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-gray-300"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                        {selectedImage.caption_model ? (
-                          <p className="mt-1 text-xs text-gray-600">{selectedImage.caption_model}</p>
-                        ) : null}
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-gray-600">
-                          {selectedImage.caption_error ?? "Not generated"}
-                        </p>
-                        {captionModelStatus?.ready ? (
-                          <>
-                            <p className={`mt-2 text-xs ${aiCaptionsEnabled ? "text-emerald-400/70" : "text-gray-600"}`}>
-                              {aiCaptionsEnabled ? "Florence-2 enabled locally" : "Florence-2 downloaded but disabled"}
-                            </p>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              <button
-                                className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
-                                onClick={() => setAiCaptionsEnabled(!aiCaptionsEnabled)}
-                              >
-                                {aiCaptionsEnabled ? "Disable captions" : "Enable captions"}
-                              </button>
-                              {selectedImage.media_kind === "image" && aiCaptionsEnabled ? (
-                                <button
-                                  className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                                  onClick={() => {
-                                    setCaptionQueueing(true);
-                                    setCaptionQueueStatus(null);
-                                    void queueCaptionForImage(selectedImage.id)
-                                      .then(() => setCaptionQueueStatus("Queued for background captions."))
-                                      .catch((error) => setCaptionQueueStatus(String(error)))
-                                      .finally(() => setCaptionQueueing(false));
-                                  }}
-                                  disabled={captionQueueing}
-                                >
-                                  {captionQueueing ? "Queueing..." : "Queue caption"}
-                                </button>
-                              ) : null}
-                              {aiCaptionsEnabled ? (
-                                <button
-                                  className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                                  onClick={() => {
-                                    setCaptionQueueing(true);
-                                    setCaptionQueueStatus(null);
-                                    void queueCaptionJobs(selectedFolderId)
-                                      .then((queued) =>
-                                        setCaptionQueueStatus(
-                                          queued === 0
-                                            ? "No missing captions found."
-                                            : `Queued ${queued.toLocaleString()} image${queued === 1 ? "" : "s"} for background captions.`,
-                                        ),
-                                      )
-                                      .catch((error) => setCaptionQueueStatus(String(error)))
-                                      .finally(() => setCaptionQueueing(false));
-                                  }}
-                                  disabled={captionQueueing}
-                                >
-                                  {selectedFolderId === null ? "Queue all" : "Queue folder"}
-                                </button>
-                              ) : null}
-                            </div>
-                            {captionQueueStatus ? (
-                              <p className="mt-2 break-all text-xs text-gray-500">{captionQueueStatus}</p>
-                            ) : null}
-                          </>
-                        ) : (
-                          <button
-                            className="mt-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                            onClick={() => void prepareCaptionModel()}
-                            disabled={captionModelPreparing}
-                          >
-                            {captionModelProgress
-                              ? `Downloading ${captionModelProgress.completed_files}/${captionModelProgress.total_files}`
-                              : captionModelPreparing
-                              ? "Preparing Florence-2..."
-                              : "Enable local captions"}
-                          </button>
-                        )}
-                        {captionModelProgress?.current_file ? (
-                          <p className="mt-2 break-all text-xs text-gray-600">{captionModelProgress.current_file}</p>
-                        ) : null}
-                        {captionModelError ? (
-                          <p className="mt-2 text-xs text-amber-300">{captionModelError}</p>
-                        ) : null}
-                        {!captionModelStatus?.ready && !captionModelError ? (
-                          <p className="mt-2 text-xs text-gray-600">Downloads Florence-2 on demand for offline captions.</p>
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="text-xs uppercase tracking-wider text-gray-500">Tags</p>
+                      <div className="flex items-center gap-1.5">
+                        {selectedImage.ai_rating ? (
+                          <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${ratingPill(selectedImage.ai_rating).className}`}>
+                            {ratingPill(selectedImage.ai_rating).label}
+                          </span>
                         ) : null}
                         <button
-                          className="mt-2 block text-xs text-gray-500 transition-colors hover:text-gray-300"
-                          onClick={() => setSettingsOpen(true)}
+                          className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={!(taggerModelStatus?.ready ?? false) || taggingQueued}
+                          title={!(taggerModelStatus?.ready ?? false) ? "WD Tagger model not downloaded" : "Queue AI tagging for this image"}
+                          onClick={() => {
+                            setTaggingQueued(true);
+                            void queueTaggingForImage(selectedImage.id).catch(() => undefined);
+                          }}
                         >
-                          Open settings
+                          {taggingQueued ? "Queued" : "AI tags"}
                         </button>
+                      </div>
+                    </div>
+
+                    {imageTags.length > 0 ? (
+                      <>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(tagsExpanded ? imageTags : imageTags.slice(0, 8)).map((t) => (
+                            <span
+                              key={t.id}
+                              className={`group flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs ${
+                                t.source === "ai"
+                                  ? "border-sky-400/20 bg-sky-500/8 text-sky-300"
+                                  : "border-white/10 bg-white/5 text-gray-300"
+                              }`}
+                              title={t.source === "ai" && t.confidence !== null ? `AI confidence: ${(t.confidence * 100).toFixed(0)}%` : undefined}
+                            >
+                              {t.tag}
+                              <button
+                                className="text-gray-600 opacity-0 transition-opacity hover:text-white group-hover:opacity-100"
+                                onClick={() => {
+                                  void removeTag(t.id).then(() =>
+                                    setImageTags((prev) => prev.filter((x) => x.id !== t.id)),
+                                  );
+                                }}
+                                title="Remove tag"
+                              >
+                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                        {imageTags.length > 8 && (
+                          <button
+                            className="mt-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                            onClick={() => setTagsExpanded((v) => !v)}
+                          >
+                            {tagsExpanded ? "Show less" : `+${imageTags.length - 8} more`}
+                          </button>
+                        )}
                       </>
+                    ) : (
+                      <p className="text-xs text-gray-600">No tags yet</p>
                     )}
+
+                    <form
+                      className="mt-2 flex gap-1.5"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const raw = tagInput.trim();
+                        if (!raw || tagAdding) return;
+                        setTagAdding(true);
+                        void addUserTag(selectedImage.id, raw)
+                          .then((newTag) => {
+                            setImageTags((prev) => [...prev, newTag]);
+                            setTagInput("");
+                          })
+                          .catch(() => undefined)
+                          .finally(() => setTagAdding(false));
+                      }}
+                    >
+                      <input
+                        className="min-w-0 flex-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-white placeholder-gray-600 focus:border-white/20 focus:outline-none"
+                        placeholder="Add tag…"
+                        value={tagInput}
+                        onChange={(e) => setTagInput(e.target.value)}
+                        disabled={tagAdding}
+                      />
+                      <button
+                        type="submit"
+                        className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={tagAdding || !tagInput.trim()}
+                      >
+                        Add
+                      </button>
+                    </form>
                   </div>
 
                   <div>
@@ -459,7 +455,7 @@ export function Lightbox() {
                   </div>
                 </div>
 
-                <div className="mt-auto pt-4 text-center text-xs text-gray-600">
+                <div className="shrink-0 mt-auto px-5 pb-4 pt-2 text-center text-xs text-gray-600">
                   {currentIndex + 1} / {images.length}
                 </div>
               </div>

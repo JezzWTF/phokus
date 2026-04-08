@@ -15,6 +15,10 @@ export type MediaKind = "image" | "video";
 export type MediaFilter = "all" | MediaKind;
 export type ZoomPreset = "compact" | "comfortable" | "detail";
 export type SearchMode = "filename" | "semantic";
+export type CaptionAcceleration = "auto" | "cpu" | "directml";
+export type CaptionDetail = "short" | "detailed" | "paragraph";
+export type TaggerAcceleration = "auto" | "cpu" | "directml";
+export type AiRating = "general" | "sensitive" | "questionable" | "explicit";
 
 export interface ImageRecord {
   id: number;
@@ -44,6 +48,35 @@ export interface ImageRecord {
   caption_model: string | null;
   caption_updated_at: string | null;
   caption_error: string | null;
+  ai_rating: AiRating | null;
+  ai_tagger_model: string | null;
+  ai_tagged_at: string | null;
+  ai_tagger_error: string | null;
+}
+
+export interface ImageTag {
+  id: number;
+  image_id: number;
+  tag: string;
+  source: "user" | "ai";
+  ai_model: string | null;
+  confidence: number | null;
+  created_at: string;
+}
+
+export interface TaggerModelStatus {
+  model_id: string;
+  model_name: string;
+  local_dir: string;
+  ready: boolean;
+  missing_files: string[];
+}
+
+export interface TaggerModelProgress {
+  total_files: number;
+  completed_files: number;
+  current_file: string | null;
+  done: boolean;
 }
 
 export interface IndexProgress {
@@ -64,6 +97,9 @@ export interface FolderJobProgress {
   caption_pending: number;
   caption_ready: number;
   caption_failed: number;
+  tagging_pending: number;
+  tagging_ready: number;
+  tagging_failed: number;
 }
 
 export interface MediaJobProgressEvent {
@@ -110,6 +146,8 @@ export interface CaptionRuntimeSessionProbe {
 
 export interface CaptionRuntimeProbe {
   ready: boolean;
+  acceleration: CaptionAcceleration;
+  detail: CaptionDetail;
   tokenizer_vocab_size: number;
   sessions: CaptionRuntimeSessionProbe[];
 }
@@ -118,6 +156,19 @@ export interface CaptionVisionProbe {
   input_shape: number[];
   output_shape: number[];
   output_values: number;
+  acceleration: CaptionAcceleration;
+}
+
+export interface TaggerRuntimeSessionProbe {
+  file: string;
+  inputs: string[];
+  outputs: string[];
+}
+
+export interface TaggerRuntimeProbe {
+  ready: boolean;
+  acceleration: TaggerAcceleration;
+  session: TaggerRuntimeSessionProbe;
 }
 
 export type SortOrder =
@@ -163,8 +214,19 @@ interface GalleryState {
   captionModelProgress: CaptionModelProgress | null;
   captionRuntimeProbe: CaptionRuntimeProbe | null;
   captionRuntimeChecking: boolean;
+  captionAcceleration: CaptionAcceleration;
+  captionDetail: CaptionDetail;
   aiCaptionsEnabled: boolean;
   settingsOpen: boolean;
+
+  taggerModelStatus: TaggerModelStatus | null;
+  taggerModelPreparing: boolean;
+  taggerModelError: string | null;
+  taggerModelProgress: TaggerModelProgress | null;
+  taggerAcceleration: TaggerAcceleration;
+  taggerThreshold: number;
+  taggerRuntimeProbe: TaggerRuntimeProbe | null;
+  taggerRuntimeChecking: boolean;
 
   loadFolders: () => Promise<void>;
   loadBackgroundJobProgress: () => Promise<void>;
@@ -198,12 +260,33 @@ interface GalleryState {
   generateCaptionForImage: (imageId: number) => Promise<ImageRecord>;
   queueCaptionJobs: (folderId?: number | null) => Promise<number>;
   queueCaptionForImage: (imageId: number) => Promise<number>;
+  clearCaptionJobs: (folderId?: number | null) => Promise<number>;
+  resetGeneratedCaptions: (folderId?: number | null) => Promise<number>;
+  loadCaptionAcceleration: () => Promise<void>;
+  setCaptionAcceleration: (acceleration: CaptionAcceleration) => Promise<void>;
+  loadCaptionDetail: () => Promise<void>;
+  setCaptionDetail: (detail: CaptionDetail) => Promise<void>;
   setAiCaptionsEnabled: (enabled: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   retryFailedEmbeddings: (folderId: number) => Promise<void>;
   updateImageDetails: (imageId: number, updates: { favorite?: boolean; rating?: number }) => Promise<void>;
   setCacheDir: (dir: string) => void;
   subscribeToProgress: () => Promise<UnlistenFn>;
+
+  loadTaggerModelStatus: () => Promise<void>;
+  prepareTaggerModel: () => Promise<void>;
+  deleteTaggerModel: () => Promise<void>;
+  loadTaggerAcceleration: () => Promise<void>;
+  setTaggerAcceleration: (acceleration: TaggerAcceleration) => Promise<void>;
+  loadTaggerThreshold: () => Promise<void>;
+  setTaggerThreshold: (threshold: number) => Promise<void>;
+  probeTaggerRuntime: () => Promise<void>;
+  queueTaggingJobs: (folderId?: number | null) => Promise<number>;
+  queueTaggingForImage: (imageId: number) => Promise<number>;
+  clearTaggingJobs: (folderId?: number | null) => Promise<number>;
+  getImageTags: (imageId: number) => Promise<ImageTag[]>;
+  addUserTag: (imageId: number, tag: string) => Promise<ImageTag>;
+  removeTag: (tagId: number) => Promise<void>;
 }
 
 const PAGE_SIZE = 200;
@@ -361,8 +444,19 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   captionModelProgress: null,
   captionRuntimeProbe: null,
   captionRuntimeChecking: false,
+  captionAcceleration: "auto",
+  captionDetail: "paragraph",
   aiCaptionsEnabled: initialAiCaptionsEnabled(),
   settingsOpen: false,
+
+  taggerModelStatus: null,
+  taggerModelPreparing: false,
+  taggerModelError: null,
+  taggerModelProgress: null,
+  taggerAcceleration: "auto",
+  taggerThreshold: 0.35,
+  taggerRuntimeProbe: null,
+  taggerRuntimeChecking: false,
 
   setCacheDir: (cacheDir) => set({ cacheDir }),
 
@@ -567,10 +661,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       similarSourceImageId: imageId,
       galleryScrollResetKey: reset ? state.galleryScrollResetKey + 1 : state.galleryScrollResetKey,
     }));
-    try {
-      const images = await invoke<ImageRecord[]>("find_similar_images", {
-        params: { image_id: imageId, limit: requestedLimit },
-      });
+      try {
+        const images = await invoke<ImageRecord[]>("find_similar_images", {
+          params: { image_id: imageId, folder_id: folderId ?? null, limit: requestedLimit },
+        });
       const hasMore = images.length >= requestedLimit;
       set({
         images,
@@ -614,6 +708,38 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     } catch (error) {
       set({ captionModelError: String(error) });
     }
+  },
+
+  loadCaptionAcceleration: async () => {
+    try {
+      const captionAcceleration = await invoke<CaptionAcceleration>("get_caption_acceleration");
+      set({ captionAcceleration });
+    } catch (error) {
+      set({ captionModelError: String(error) });
+    }
+  },
+
+  setCaptionAcceleration: async (acceleration) => {
+    const captionAcceleration = await invoke<CaptionAcceleration>("set_caption_acceleration", {
+      params: { acceleration },
+    });
+    set({ captionAcceleration, captionRuntimeProbe: null });
+  },
+
+  loadCaptionDetail: async () => {
+    try {
+      const captionDetail = await invoke<CaptionDetail>("get_caption_detail");
+      set({ captionDetail });
+    } catch (error) {
+      set({ captionModelError: String(error) });
+    }
+  },
+
+  setCaptionDetail: async (detail) => {
+    const captionDetail = await invoke<CaptionDetail>("set_caption_detail", {
+      params: { detail },
+    });
+    set({ captionDetail, captionRuntimeProbe: null });
   },
 
   prepareCaptionModel: async () => {
@@ -683,12 +809,142 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     return queued;
   },
 
+  clearCaptionJobs: async (folderId = get().selectedFolderId) => {
+    const cleared = await invoke<number>("clear_caption_jobs", {
+      params: { folder_id: folderId ?? null },
+    });
+    await get().loadBackgroundJobProgress();
+    return cleared;
+  },
+
+  resetGeneratedCaptions: async (folderId = get().selectedFolderId) => {
+    const reset = await invoke<number>("reset_generated_captions", {
+      params: { folder_id: folderId ?? null },
+    });
+    await get().loadBackgroundJobProgress();
+    await get().loadImages(true);
+    return reset;
+  },
+
   setAiCaptionsEnabled: (aiCaptionsEnabled) => {
     window.localStorage.setItem(AI_CAPTIONS_ENABLED_KEY, String(aiCaptionsEnabled));
     set({ aiCaptionsEnabled });
   },
 
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+
+  loadTaggerModelStatus: async () => {
+    try {
+      const taggerModelStatus = await invoke<TaggerModelStatus>("get_tagger_model_status");
+      set({ taggerModelStatus, taggerModelError: null });
+    } catch (error) {
+      set({ taggerModelError: String(error) });
+    }
+  },
+
+  loadTaggerAcceleration: async () => {
+    try {
+      const taggerAcceleration = await invoke<TaggerAcceleration>("get_tagger_acceleration");
+      set({ taggerAcceleration });
+    } catch (error) {
+      set({ taggerModelError: String(error) });
+    }
+  },
+
+  setTaggerAcceleration: async (acceleration) => {
+    const taggerAcceleration = await invoke<TaggerAcceleration>("set_tagger_acceleration", {
+      params: { acceleration },
+    });
+    set({ taggerAcceleration, taggerRuntimeProbe: null });
+  },
+
+  loadTaggerThreshold: async () => {
+    try {
+      const taggerThreshold = await invoke<number>("get_tagger_threshold");
+      set({ taggerThreshold });
+    } catch (error) {
+      set({ taggerModelError: String(error) });
+    }
+  },
+
+  setTaggerThreshold: async (threshold) => {
+    const taggerThreshold = await invoke<number>("set_tagger_threshold", {
+      params: { threshold },
+    });
+    set({ taggerThreshold });
+  },
+
+  prepareTaggerModel: async () => {
+    set({ taggerModelPreparing: true, taggerModelError: null, taggerModelProgress: null });
+    try {
+      const taggerModelStatus = await invoke<TaggerModelStatus>("prepare_tagger_model");
+      set({ taggerModelStatus, taggerModelPreparing: false, taggerModelError: null, taggerModelProgress: null });
+    } catch (error) {
+      set({ taggerModelPreparing: false, taggerModelError: String(error), taggerModelProgress: null });
+    }
+  },
+
+  deleteTaggerModel: async () => {
+    set({ taggerModelPreparing: true, taggerModelError: null, taggerModelProgress: null });
+    try {
+      const taggerModelStatus = await invoke<TaggerModelStatus>("delete_tagger_model");
+      set({ taggerModelStatus, taggerModelPreparing: false, taggerModelError: null, taggerModelProgress: null, taggerRuntimeProbe: null });
+    } catch (error) {
+      set({ taggerModelPreparing: false, taggerModelError: String(error), taggerModelProgress: null });
+    }
+  },
+
+  probeTaggerRuntime: async () => {
+    set({ taggerRuntimeChecking: true, taggerModelError: null });
+    try {
+      const taggerRuntimeProbe = await invoke<TaggerRuntimeProbe>("probe_tagger_runtime");
+      set({ taggerRuntimeProbe, taggerRuntimeChecking: false, taggerModelError: null });
+    } catch (error) {
+      set({ taggerRuntimeChecking: false, taggerModelError: String(error), taggerRuntimeProbe: null });
+    }
+  },
+
+  queueTaggingJobs: async (folderId = get().selectedFolderId) => {
+    const queued = await invoke<number>("queue_tagging_jobs", {
+      params: { folder_id: folderId ?? null, image_id: null },
+    });
+    await get().loadBackgroundJobProgress();
+    return queued;
+  },
+
+  queueTaggingForImage: async (imageId) => {
+    const queued = await invoke<number>("queue_tagging_jobs", {
+      params: { folder_id: null, image_id: imageId },
+    });
+    await get().loadBackgroundJobProgress();
+    return queued;
+  },
+
+  clearTaggingJobs: async (folderId = get().selectedFolderId) => {
+    const cleared = await invoke<number>("clear_tagging_jobs", {
+      params: { folder_id: folderId ?? null },
+    });
+    await get().loadBackgroundJobProgress();
+    return cleared;
+  },
+
+  getImageTags: async (imageId) => {
+    return invoke<ImageTag[]>("get_image_tags", {
+      params: { image_id: imageId },
+    });
+  },
+
+  addUserTag: async (imageId, tag) => {
+    return invoke<ImageTag>("add_user_tag", {
+      params: { image_id: imageId, tag },
+    });
+  },
+
+  removeTag: async (tagId) => {
+    await invoke<void>("remove_tag", {
+      params: { tag_id: tagId },
+    });
+  },
 
   retryFailedEmbeddings: async (folderId) => {
     await invoke("retry_failed_embeddings", { params: { folder_id: folderId } });
@@ -749,6 +1005,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       set({
         captionModelProgress: event.payload.done ? null : event.payload,
         captionModelPreparing: !event.payload.done,
+      });
+    });
+
+    const unlistenTaggerModelProgress = await listen<TaggerModelProgress>("tagger-model-progress", (event) => {
+      set({
+        taggerModelProgress: event.payload.done ? null : event.payload,
+        taggerModelPreparing: !event.payload.done,
       });
     });
 
@@ -817,6 +1080,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       unlistenProgress();
       unlistenMediaJobs();
       unlistenCaptionModelProgress();
+      unlistenTaggerModelProgress();
       unlistenImages();
       unlistenThumbnails();
     };
