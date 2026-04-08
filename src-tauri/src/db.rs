@@ -61,6 +61,10 @@ pub struct ImageRecord {
     pub caption_model: Option<String>,
     pub caption_updated_at: Option<String>,
     pub caption_error: Option<String>,
+    pub ai_rating: Option<String>,
+    pub ai_tagger_model: Option<String>,
+    pub ai_tagged_at: Option<String>,
+    pub ai_tagger_error: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -101,6 +105,24 @@ pub struct CaptionJob {
 }
 
 #[derive(Debug, Clone)]
+pub struct TaggingJob {
+    pub image_id: i64,
+    pub folder_id: i64,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageTag {
+    pub id: i64,
+    pub image_id: i64,
+    pub tag: String,
+    pub source: String,
+    pub ai_model: Option<String>,
+    pub confidence: Option<f64>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct IndexedMediaEntry {
     pub id: i64,
     pub path: String,
@@ -120,6 +142,9 @@ pub struct FolderJobProgress {
     pub caption_pending: i64,
     pub caption_ready: i64,
     pub caption_failed: i64,
+    pub tagging_pending: i64,
+    pub tagging_ready: i64,
+    pub tagging_failed: i64,
 }
 
 pub fn create_pool(db_path: &Path) -> Result<DbPool> {
@@ -195,6 +220,26 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS tagging_jobs (
+            image_id    INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            attempts    INTEGER NOT NULL DEFAULT 0,
+            last_error  TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS image_tags (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            image_id   INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+            tag        TEXT NOT NULL,
+            source     TEXT NOT NULL DEFAULT 'user',
+            ai_model   TEXT,
+            confidence REAL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(image_id, tag)
+        );
+
         CREATE TABLE IF NOT EXISTS tag_cloud_cache (
             folder_scope    TEXT PRIMARY KEY,
             image_ids_hash  INTEGER NOT NULL,
@@ -208,6 +253,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_thumbnail_jobs_status ON thumbnail_jobs(status);
         CREATE INDEX IF NOT EXISTS idx_metadata_jobs_status ON metadata_jobs(status);
         CREATE INDEX IF NOT EXISTS idx_caption_jobs_status ON caption_jobs(status);
+        CREATE INDEX IF NOT EXISTS idx_tagging_jobs_status ON tagging_jobs(status);
+        CREATE INDEX IF NOT EXISTS idx_image_tags_image_id ON image_tags(image_id);
+        CREATE INDEX IF NOT EXISTS idx_image_tags_source ON image_tags(source);
+        CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags(tag);
         ",
     )?;
 
@@ -237,6 +286,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     ensure_column(conn, "images", "caption_model", "TEXT")?;
     ensure_column(conn, "images", "caption_updated_at", "TEXT")?;
     ensure_column(conn, "images", "caption_error", "TEXT")?;
+    ensure_column(conn, "images", "ai_rating", "TEXT")?;
+    ensure_column(conn, "images", "ai_tagger_model", "TEXT")?;
+    ensure_column(conn, "images", "ai_tagged_at", "TEXT")?;
+    ensure_column(conn, "images", "ai_tagger_error", "TEXT")?;
 
     vector::migrate(conn)?;
     Ok(())
@@ -257,8 +310,8 @@ pub fn insert_folder(conn: &Connection, path: &str, name: &str) -> Result<i64> {
 
 pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
     let id = conn.query_row(
-        "INSERT INTO images (folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type, media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error, generated_caption, caption_model, caption_updated_at, caption_error)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
+        "INSERT INTO images (folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type, media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error, generated_caption, caption_model, caption_updated_at, caption_error, ai_rating, ai_tagger_model, ai_tagged_at, ai_tagger_error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)
          ON CONFLICT(path) DO UPDATE SET
             folder_id = excluded.folder_id,
             filename = excluded.filename,
@@ -311,6 +364,10 @@ pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
             img.caption_model,
             img.caption_updated_at,
             img.caption_error,
+            img.ai_rating,
+            img.ai_tagger_model,
+            img.ai_tagged_at,
+            img.ai_tagger_error,
         ],
         |row| row.get(0),
     )?;
@@ -433,6 +490,13 @@ pub fn reset_inflight_jobs(conn: &Connection) -> Result<()> {
         "UPDATE caption_jobs SET status = 'pending' WHERE status = 'processing'",
         [],
     )?;
+    conn.execute(
+        "UPDATE tagging_jobs SET status = 'pending' WHERE status = 'processing'",
+        [],
+    )?;
+    // Delete any rows that were cancelled before the previous shutdown so
+    // they don't silently linger in the DB across restarts.
+    conn.execute("DELETE FROM tagging_jobs WHERE status = 'cancelled'", [])?;
     Ok(())
 }
 
@@ -491,6 +555,110 @@ pub fn requeue_caption_jobs(conn: &Connection, image_ids: &[i64]) -> Result<()> 
         )?;
     }
     Ok(())
+}
+
+pub fn requeue_processing_caption_jobs_for_folder(
+    conn: &Connection,
+    folder_id: i64,
+) -> Result<usize> {
+    conn.execute(
+        "UPDATE caption_jobs
+         SET status = 'pending', updated_at = datetime('now')
+         WHERE status = 'processing'
+           AND image_id IN (
+               SELECT id FROM images WHERE folder_id = ?1
+           )",
+        [folder_id],
+    )
+    .map_err(Into::into)
+}
+
+pub fn clear_caption_jobs(conn: &Connection, folder_id: Option<i64>) -> Result<usize> {
+    match folder_id {
+        Some(folder_id) => {
+            let deleted = conn.execute(
+                "DELETE FROM caption_jobs
+                 WHERE image_id IN (
+                    SELECT id FROM images WHERE folder_id = ?1
+                 )",
+                [folder_id],
+            )?;
+            conn.execute(
+                "UPDATE images
+                 SET caption_error = NULL
+                 WHERE folder_id = ?1
+                   AND generated_caption IS NULL",
+                [folder_id],
+            )?;
+            Ok(deleted)
+        }
+        None => {
+            let deleted = conn.execute("DELETE FROM caption_jobs", [])?;
+            conn.execute(
+                "UPDATE images
+                 SET caption_error = NULL
+                 WHERE generated_caption IS NULL",
+                [],
+            )?;
+            Ok(deleted)
+        }
+    }
+}
+
+pub fn reset_generated_captions(conn: &Connection, folder_id: Option<i64>) -> Result<usize> {
+    let image_ids = match folder_id {
+        Some(folder_id) => {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM images WHERE folder_id = ?1 AND generated_caption IS NOT NULL",
+            )?;
+            let rows = stmt.query_map([folder_id], |row| row.get::<_, i64>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        }
+        None => {
+            let mut stmt =
+                conn.prepare("SELECT id FROM images WHERE generated_caption IS NOT NULL")?;
+            let rows = stmt.query_map([], |row| row.get::<_, i64>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        }
+    };
+
+    let tx = conn.unchecked_transaction()?;
+    for image_id in &image_ids {
+        vector::delete_caption_embedding(&tx, *image_id)?;
+    }
+
+    match folder_id {
+        Some(folder_id) => {
+            tx.execute(
+                "UPDATE images
+                 SET generated_caption = NULL,
+                     caption_model = NULL,
+                     caption_updated_at = NULL,
+                     caption_error = NULL
+                 WHERE folder_id = ?1",
+                [folder_id],
+            )?;
+            tx.execute(
+                "DELETE FROM caption_jobs
+                 WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
+                [folder_id],
+            )?;
+        }
+        None => {
+            tx.execute(
+                "UPDATE images
+                 SET generated_caption = NULL,
+                     caption_model = NULL,
+                     caption_updated_at = NULL,
+                     caption_error = NULL",
+                [],
+            )?;
+            tx.execute("DELETE FROM caption_jobs", [])?;
+        }
+    }
+
+    tx.commit()?;
+    Ok(image_ids.len())
 }
 
 pub fn enqueue_missing_caption_jobs_for_folder(conn: &Connection, folder_id: i64) -> Result<usize> {
@@ -792,8 +960,35 @@ pub fn get_folder_job_progress(conn: &Connection, folder_id: i64) -> Result<Fold
 
     let caption_failed = conn.query_row(
         "SELECT COUNT(*)
+         FROM caption_jobs j
+         JOIN images i ON i.id = j.image_id
+         WHERE i.folder_id = ?1 AND j.status = 'failed'",
+        [folder_id],
+        |row| row.get(0),
+    )?;
+
+    let tagging_pending = conn.query_row(
+        "SELECT COUNT(*)
+         FROM tagging_jobs j
+         JOIN images i ON i.id = j.image_id
+         WHERE i.folder_id = ?1 AND j.status IN ('pending', 'processing')",
+        [folder_id],
+        |row| row.get(0),
+    )?;
+
+    let tagging_ready = conn.query_row(
+        "SELECT COUNT(*)
          FROM images
-         WHERE folder_id = ?1 AND caption_error IS NOT NULL",
+         WHERE folder_id = ?1 AND ai_tagged_at IS NOT NULL",
+        [folder_id],
+        |row| row.get(0),
+    )?;
+
+    let tagging_failed = conn.query_row(
+        "SELECT COUNT(*)
+         FROM tagging_jobs j
+         JOIN images i ON i.id = j.image_id
+         WHERE i.folder_id = ?1 AND j.status = 'failed'",
         [folder_id],
         |row| row.get(0),
     )?;
@@ -808,6 +1003,9 @@ pub fn get_folder_job_progress(conn: &Connection, folder_id: i64) -> Result<Fold
         caption_pending,
         caption_ready,
         caption_failed,
+        tagging_pending,
+        tagging_ready,
+        tagging_failed,
     })
 }
 
@@ -1046,7 +1244,8 @@ pub fn update_image_details(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
                 favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error,
-                generated_caption, caption_model, caption_updated_at, caption_error
+                generated_caption, caption_model, caption_updated_at, caption_error,
+                ai_rating, ai_tagger_model, ai_tagged_at, ai_tagger_error
          FROM images
          WHERE id = ?1",
         [image_id],
@@ -1060,7 +1259,8 @@ pub fn get_image_by_id(conn: &Connection, image_id: i64) -> Result<ImageRecord> 
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
                 favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error,
-                generated_caption, caption_model, caption_updated_at, caption_error
+                generated_caption, caption_model, caption_updated_at, caption_error,
+                ai_rating, ai_tagger_model, ai_tagged_at, ai_tagger_error
          FROM images
          WHERE id = ?1",
         [image_id],
@@ -1126,7 +1326,8 @@ pub fn get_images(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
                 favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error,
-                generated_caption, caption_model, caption_updated_at, caption_error
+                generated_caption, caption_model, caption_updated_at, caption_error,
+                ai_rating, ai_tagger_model, ai_tagged_at, ai_tagger_error
          FROM images
          WHERE (?1 IS NULL OR folder_id = ?1)
            AND (?2 IS NULL OR filename LIKE ?2)
@@ -1240,6 +1441,299 @@ pub fn mark_caption_failed(conn: &Connection, image_id: i64, error: &str) -> Res
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Tagging jobs
+// ---------------------------------------------------------------------------
+
+pub fn enqueue_tagging_job(conn: &Connection, image_id: i64) -> Result<()> {
+    conn.execute(
+        "INSERT INTO tagging_jobs (image_id, status, attempts, last_error, created_at, updated_at)
+         VALUES (?1, 'pending', 0, NULL, datetime('now'), datetime('now'))
+         ON CONFLICT(image_id) DO UPDATE SET
+            status = CASE WHEN status != 'processing' THEN 'pending' ELSE status END,
+            last_error = CASE WHEN status != 'processing' THEN NULL ELSE last_error END,
+            updated_at = datetime('now')",
+        [image_id],
+    )?;
+    Ok(())
+}
+
+pub fn claim_tagging_jobs(
+    conn: &mut Connection,
+    paused_folder_ids: &std::collections::HashSet<i64>,
+    limit: usize,
+) -> Result<Vec<TaggingJob>> {
+    let tx = conn.transaction()?;
+    let candidates = get_pending_tagging_jobs_excluding(&tx, paused_folder_ids, limit * 2)?;
+    let mut claimed = Vec::new();
+    for job in candidates {
+        let updated = tx.execute(
+            "UPDATE tagging_jobs
+             SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
+             WHERE image_id = ?1 AND status = 'pending'",
+            [job.image_id],
+        )?;
+        if updated > 0 {
+            claimed.push(job);
+            if claimed.len() >= limit {
+                break;
+            }
+        }
+    }
+    tx.commit()?;
+    Ok(claimed)
+}
+
+fn get_pending_tagging_jobs_excluding(
+    conn: &Connection,
+    paused_folder_ids: &std::collections::HashSet<i64>,
+    limit: usize,
+) -> Result<Vec<TaggingJob>> {
+    let mut stmt = conn.prepare(
+        "SELECT j.image_id, i.folder_id, i.path
+         FROM tagging_jobs j
+         JOIN images i ON i.id = j.image_id
+         WHERE j.status = 'pending'
+         ORDER BY j.created_at ASC
+         LIMIT ?1",
+    )?;
+    let rows = stmt
+        .query_map([limit as i64], |row| {
+            Ok(TaggingJob {
+                image_id: row.get(0)?,
+                folder_id: row.get(1)?,
+                path: row.get(2)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows
+        .into_iter()
+        .filter(|job| !paused_folder_ids.contains(&job.folder_id))
+        .collect())
+}
+
+pub fn update_ai_tags(
+    conn: &Connection,
+    image_id: i64,
+    tags: &[(String, f64)],
+    rating: &str,
+    model: &str,
+) -> Result<()> {
+    // NOTE: callers are responsible for wrapping this in a transaction.
+    // Do NOT open a nested transaction here — rusqlite/SQLite do not support
+    // nested transactions and will error with "cannot start a transaction
+    // within a transaction".
+
+    // Remove previous AI tags for this image before inserting fresh ones
+    conn.execute(
+        "DELETE FROM image_tags WHERE image_id = ?1 AND source = 'ai'",
+        [image_id],
+    )?;
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO image_tags (image_id, tag, source, ai_model, confidence, created_at)
+         VALUES (?1, ?2, 'ai', ?3, ?4, datetime('now'))
+         ON CONFLICT(image_id, tag) DO UPDATE SET
+            source = 'ai',
+            ai_model = excluded.ai_model,
+            confidence = excluded.confidence",
+    )?;
+    for (tag, confidence) in tags {
+        stmt.execute(params![image_id, tag, model, confidence])?;
+    }
+    drop(stmt);
+
+    conn.execute(
+        "UPDATE images
+         SET ai_rating = ?2,
+             ai_tagger_model = ?3,
+             ai_tagged_at = datetime('now'),
+             ai_tagger_error = NULL
+         WHERE id = ?1",
+        params![image_id, rating, model],
+    )?;
+    conn.execute("DELETE FROM tagging_jobs WHERE image_id = ?1", [image_id])?;
+    Ok(())
+}
+
+pub fn mark_tagging_failed(conn: &Connection, image_id: i64, error: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE images SET ai_tagger_error = ?2 WHERE id = ?1",
+        params![image_id, error],
+    )?;
+    conn.execute(
+        "UPDATE tagging_jobs
+         SET status = 'failed', last_error = ?2, updated_at = datetime('now')
+         WHERE image_id = ?1",
+        params![image_id, error],
+    )?;
+    Ok(())
+}
+
+pub fn clear_tagging_jobs(conn: &Connection, folder_id: Option<i64>) -> Result<usize> {
+    // Rows currently being processed by the worker must not be deleted mid-flight
+    // — the worker holds a reference and will write results back after inference.
+    // Mark them 'cancelled' so the worker discards the result instead of saving it,
+    // then delete every non-processing row.  On the next poll the worker will find
+    // no pending work and the queue will appear empty.
+    let deleted = match folder_id {
+        Some(fid) => {
+            conn.execute(
+                "UPDATE tagging_jobs
+                 SET status = 'cancelled', last_error = NULL, updated_at = datetime('now')
+                 WHERE status = 'processing'
+                   AND image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
+                [fid],
+            )?;
+            let n = conn.execute(
+                "DELETE FROM tagging_jobs
+                 WHERE status != 'processing'
+                   AND image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
+                [fid],
+            )?;
+            conn.execute(
+                "UPDATE images
+                 SET ai_tagger_error = NULL
+                 WHERE folder_id = ?1 AND ai_tagged_at IS NULL",
+                [fid],
+            )?;
+            n
+        }
+        None => {
+            conn.execute(
+                "UPDATE tagging_jobs
+                 SET status = 'cancelled', last_error = NULL, updated_at = datetime('now')
+                 WHERE status = 'processing'",
+                [],
+            )?;
+            let n = conn.execute("DELETE FROM tagging_jobs WHERE status != 'processing'", [])?;
+            conn.execute(
+                "UPDATE images SET ai_tagger_error = NULL WHERE ai_tagged_at IS NULL",
+                [],
+            )?;
+            n
+        }
+    };
+    Ok(deleted)
+}
+
+pub fn get_image_tags(conn: &Connection, image_id: i64) -> Result<Vec<ImageTag>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, image_id, tag, source, ai_model, confidence, created_at
+         FROM image_tags
+         WHERE image_id = ?1
+         ORDER BY source DESC, confidence DESC NULLS LAST, tag ASC",
+    )?;
+    let rows = stmt
+        .query_map([image_id], |row| {
+            Ok(ImageTag {
+                id: row.get(0)?,
+                image_id: row.get(1)?,
+                tag: row.get(2)?,
+                source: row.get(3)?,
+                ai_model: row.get(4)?,
+                confidence: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+pub fn add_user_tag(conn: &Connection, image_id: i64, tag: &str) -> Result<ImageTag> {
+    conn.execute(
+        "INSERT INTO image_tags (image_id, tag, source, ai_model, confidence, created_at)
+         VALUES (?1, ?2, 'user', NULL, NULL, datetime('now'))
+         ON CONFLICT(image_id, tag) DO NOTHING",
+        params![image_id, tag],
+    )?;
+    let row = conn.query_row(
+        "SELECT id, image_id, tag, source, ai_model, confidence, created_at
+         FROM image_tags WHERE image_id = ?1 AND tag = ?2",
+        params![image_id, tag],
+        |row| {
+            Ok(ImageTag {
+                id: row.get(0)?,
+                image_id: row.get(1)?,
+                tag: row.get(2)?,
+                source: row.get(3)?,
+                ai_model: row.get(4)?,
+                confidence: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        },
+    )?;
+    Ok(row)
+}
+
+pub fn remove_tag(conn: &Connection, tag_id: i64) -> Result<()> {
+    conn.execute("DELETE FROM image_tags WHERE id = ?1", [tag_id])?;
+    Ok(())
+}
+
+pub fn enqueue_missing_tagging_jobs_for_folder(conn: &Connection, folder_id: i64) -> Result<usize> {
+    let inserted = conn.execute(
+        "INSERT INTO tagging_jobs (image_id, status, attempts, last_error, created_at, updated_at)
+         SELECT id, 'pending', 0, NULL, datetime('now'), datetime('now')
+         FROM images
+         WHERE folder_id = ?1
+           AND media_kind = 'image'
+           AND ai_tagged_at IS NULL
+         ON CONFLICT(image_id) DO UPDATE SET
+            -- Only reset to 'pending' if the row is not currently being
+            -- processed or cancelled; leave 'processing' rows untouched so
+            -- the worker can complete them and clean up normally.
+            status = CASE WHEN status NOT IN ('processing', 'cancelled') THEN 'pending' ELSE status END,
+            last_error = CASE WHEN status != 'processing' THEN NULL ELSE last_error END,
+            updated_at = datetime('now')",
+        [folder_id],
+    )?;
+    conn.execute(
+        "UPDATE images
+         SET ai_tagger_error = NULL
+         WHERE folder_id = ?1
+           AND media_kind = 'image'
+           AND ai_tagged_at IS NULL",
+        [folder_id],
+    )?;
+    Ok(inserted)
+}
+
+pub fn requeue_processing_tagging_jobs_for_folder(conn: &Connection, folder_id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE tagging_jobs
+         SET status = 'pending', updated_at = datetime('now')
+         WHERE status = 'processing'
+           AND image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
+        [folder_id],
+    )?;
+    Ok(())
+}
+
+/// Returns `true` when the job row for `image_id` currently has status = 'cancelled'.
+/// Used by the worker to discard inference results for jobs that were cancelled
+/// while inference was running.
+pub fn is_tagging_job_cancelled(conn: &Connection, image_id: i64) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM tagging_jobs WHERE image_id = ?1 AND status = 'cancelled'",
+        [image_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+pub fn requeue_tagging_jobs(conn: &Connection, image_ids: &[i64]) -> Result<()> {
+    for image_id in image_ids {
+        conn.execute(
+            "UPDATE tagging_jobs
+             SET status = 'pending', updated_at = datetime('now')
+             WHERE image_id = ?1 AND status = 'processing'",
+            [image_id],
+        )?;
+    }
+    Ok(())
+}
+
 pub fn suggest_tags_from_caption(
     conn: &Connection,
     image_id: i64,
@@ -1332,6 +1826,10 @@ fn map_image_row(row: &Row<'_>) -> rusqlite::Result<ImageRecord> {
         caption_model: row.get(24)?,
         caption_updated_at: row.get(25)?,
         caption_error: row.get(26)?,
+        ai_rating: row.get(27)?,
+        ai_tagger_model: row.get(28)?,
+        ai_tagged_at: row.get(29)?,
+        ai_tagger_error: row.get(30)?,
     })
 }
 

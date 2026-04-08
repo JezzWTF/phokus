@@ -1,7 +1,11 @@
-use crate::captioner::{self, CaptionModelStatus, CaptionRuntimeProbe, CaptionVisionProbe};
-use crate::db::{self, DbPool, Folder, FolderJobProgress, ImageRecord};
+use crate::captioner::{
+    self, CaptionAcceleration, CaptionDetail, CaptionModelStatus, CaptionRuntimeProbe,
+    CaptionVisionProbe,
+};
+use crate::db::{self, DbPool, Folder, FolderJobProgress, ImageRecord, ImageTag};
 use crate::embedder;
 use crate::indexer;
+use crate::tagger::{self, TaggerAcceleration, TaggerModelStatus, TaggerRuntimeProbe};
 use crate::vector;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -39,12 +43,14 @@ pub struct UpdateImageDetailsParams {
 #[derive(Deserialize)]
 pub struct FindSimilarImagesParams {
     pub image_id: i64,
+    pub folder_id: Option<i64>,
     pub limit: Option<usize>,
 }
 
 #[derive(Deserialize)]
 pub struct DebugSimilarImagesParams {
     pub image_id: i64,
+    pub folder_id: Option<i64>,
     pub limit: Option<usize>,
 }
 
@@ -70,6 +76,26 @@ pub struct SuggestImageTagsParams {
 pub struct QueueCaptionJobsParams {
     pub folder_id: Option<i64>,
     pub image_id: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct ClearCaptionJobsParams {
+    pub folder_id: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct ResetCaptionsParams {
+    pub folder_id: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct SetCaptionAccelerationParams {
+    pub acceleration: CaptionAcceleration,
+}
+
+#[derive(Deserialize)]
+pub struct SetCaptionDetailParams {
+    pub detail: CaptionDetail,
 }
 
 #[derive(Deserialize)]
@@ -235,8 +261,8 @@ pub async fn find_similar_images(
         db::repair_embedding_consistency(&conn).map_err(|e| e.to_string())?;
         return Ok(Vec::new());
     }
-    let image_ids =
-        vector::find_similar_image_ids(&conn, params.image_id, limit).map_err(|e| e.to_string())?;
+    let image_ids = vector::find_similar_image_ids(&conn, params.image_id, limit, params.folder_id)
+        .map_err(|e| e.to_string())?;
     db::get_images_by_ids(&conn, &image_ids).map_err(|e| e.to_string())
 }
 
@@ -258,7 +284,8 @@ pub async fn debug_similar_images(
     let vector_count = vector::count_image_vectors(&conn).map_err(|e| e.to_string())?;
     let has_vector = vector::has_image_vector(&conn, params.image_id).map_err(|e| e.to_string())?;
     let similar_ids = if has_vector {
-        vector::find_similar_image_ids(&conn, params.image_id, limit).map_err(|e| e.to_string())?
+        vector::find_similar_image_ids(&conn, params.image_id, limit, params.folder_id)
+            .map_err(|e| e.to_string())?
     } else {
         Vec::new()
     };
@@ -330,6 +357,36 @@ pub async fn suggest_image_tags(
 pub async fn get_caption_model_status(app: AppHandle) -> Result<CaptionModelStatus, String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     Ok(captioner::caption_model_status(&app_dir))
+}
+
+#[tauri::command]
+pub async fn get_caption_acceleration(app: AppHandle) -> Result<CaptionAcceleration, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(captioner::caption_acceleration(&app_dir))
+}
+
+#[tauri::command]
+pub async fn set_caption_acceleration(
+    app: AppHandle,
+    params: SetCaptionAccelerationParams,
+) -> Result<CaptionAcceleration, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    captioner::set_caption_acceleration(&app_dir, params.acceleration).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_caption_detail(app: AppHandle) -> Result<CaptionDetail, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(captioner::caption_detail(&app_dir))
+}
+
+#[tauri::command]
+pub async fn set_caption_detail(
+    app: AppHandle,
+    params: SetCaptionDetailParams,
+) -> Result<CaptionDetail, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    captioner::set_caption_detail(&app_dir, params.detail).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -439,6 +496,24 @@ pub async fn queue_caption_jobs(
         }
         (None, None) => db::enqueue_missing_caption_jobs(&conn).map_err(|e| e.to_string()),
     }
+}
+
+#[tauri::command]
+pub async fn clear_caption_jobs(
+    db: State<'_, DbState>,
+    params: ClearCaptionJobsParams,
+) -> Result<usize, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::clear_caption_jobs(&conn, params.folder_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn reset_generated_captions(
+    db: State<'_, DbState>,
+    params: ResetCaptionsParams,
+) -> Result<usize, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::reset_generated_captions(&conn, params.folder_id).map_err(|e| e.to_string())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -670,11 +745,27 @@ pub struct FolderWorkerStates {
     pub metadata_paused: bool,
     pub embedding_paused: bool,
     pub caption_paused: bool,
+    pub tagging_paused: bool,
 }
 
 #[tauri::command]
-pub async fn set_worker_paused(worker: String, folder_id: i64, paused: bool) -> Result<(), String> {
+pub async fn set_worker_paused(
+    db: State<'_, DbState>,
+    worker: String,
+    folder_id: i64,
+    paused: bool,
+) -> Result<(), String> {
     indexer::set_worker_paused(&worker, folder_id, paused);
+    if worker == "caption" && paused {
+        let conn = db.get().map_err(|e| e.to_string())?;
+        db::requeue_processing_caption_jobs_for_folder(&conn, folder_id)
+            .map_err(|e| e.to_string())?;
+    }
+    if worker == "tagging" && paused {
+        let conn = db.get().map_err(|e| e.to_string())?;
+        db::requeue_processing_tagging_jobs_for_folder(&conn, folder_id)
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -684,23 +775,213 @@ pub async fn get_worker_states(folder_ids: Vec<i64>) -> Result<Vec<FolderWorkerS
     Ok(folder_ids
         .into_iter()
         .map(|folder_id| {
-            let state =
-                states
-                    .get(&folder_id)
-                    .copied()
-                    .unwrap_or(indexer::FolderWorkerPausedState {
-                        thumbnail: false,
-                        metadata: false,
-                        embedding: false,
-                        caption: false,
-                    });
+            let state = states
+                .get(&folder_id)
+                .copied()
+                .unwrap_or(indexer::FolderWorkerPausedState {
+                    thumbnail: false,
+                    metadata: false,
+                    embedding: false,
+                    caption: false,
+                    tagging: false,
+                });
             FolderWorkerStates {
                 folder_id,
                 thumbnail_paused: state.thumbnail,
                 metadata_paused: state.metadata,
                 embedding_paused: state.embedding,
                 caption_paused: state.caption,
+                tagging_paused: state.tagging,
             }
         })
         .collect())
+}
+
+// ---------------------------------------------------------------------------
+// Tagger commands
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct SetTaggerAccelerationParams {
+    pub acceleration: TaggerAcceleration,
+}
+
+#[derive(Deserialize)]
+pub struct SetTaggerThresholdParams {
+    pub threshold: f32,
+}
+
+#[derive(Deserialize)]
+pub struct QueueTaggingJobsParams {
+    pub folder_id: Option<i64>,
+    pub image_id: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct ClearTaggingJobsParams {
+    pub folder_id: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct GetImageTagsParams {
+    pub image_id: i64,
+}
+
+#[derive(Deserialize)]
+pub struct AddUserTagParams {
+    pub image_id: i64,
+    pub tag: String,
+}
+
+#[derive(Deserialize)]
+pub struct RemoveTagParams {
+    pub tag_id: i64,
+}
+
+#[tauri::command]
+pub async fn get_tagger_model_status(app: AppHandle) -> Result<TaggerModelStatus, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(tagger::tagger_model_status(&app_dir))
+}
+
+#[tauri::command]
+pub async fn get_tagger_acceleration(app: AppHandle) -> Result<TaggerAcceleration, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(tagger::tagger_acceleration(&app_dir))
+}
+
+#[tauri::command]
+pub async fn set_tagger_acceleration(
+    app: AppHandle,
+    params: SetTaggerAccelerationParams,
+) -> Result<TaggerAcceleration, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tagger::set_tagger_acceleration(&app_dir, params.acceleration).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn probe_tagger_runtime(app: AppHandle) -> Result<TaggerRuntimeProbe, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || tagger::probe_tagger_runtime(&app_dir))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_tagger_threshold(app: AppHandle) -> Result<f32, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(tagger::tagger_threshold(&app_dir))
+}
+
+#[tauri::command]
+pub async fn set_tagger_threshold(
+    app: AppHandle,
+    params: SetTaggerThresholdParams,
+) -> Result<f32, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tagger::set_tagger_threshold(&app_dir, params.threshold).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn prepare_tagger_model(app: AppHandle) -> Result<TaggerModelStatus, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let app = app.clone();
+        tagger::prepare_tagger_model_with_progress(&app_dir, move |progress| {
+            let _ = app.emit("tagger-model-progress", progress);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_tagger_model(app: AppHandle) -> Result<TaggerModelStatus, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || tagger::delete_tagger_model(&app_dir))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn queue_tagging_jobs(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    params: QueueTaggingJobsParams,
+) -> Result<usize, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let (total, folder_ids) = match (params.folder_id, params.image_id) {
+        (_, Some(image_id)) => {
+            db::enqueue_tagging_job(&conn, image_id).map_err(|e| e.to_string())?;
+            // Look up just this image's folder_id rather than fetching all folders
+            let image = db::get_image_by_id(&conn, image_id).map_err(|e| e.to_string())?;
+            (1usize, vec![image.folder_id])
+        }
+        (Some(folder_id), None) => {
+            let n = db::enqueue_missing_tagging_jobs_for_folder(&conn, folder_id)
+                .map_err(|e| e.to_string())?;
+            (n, vec![folder_id])
+        }
+        (None, None) => {
+            let folders = db::get_folders(&conn).map_err(|e| e.to_string())?;
+            let folder_ids: Vec<i64> = folders.iter().map(|f| f.id).collect();
+            let mut total = 0usize;
+            for &folder_id in &folder_ids {
+                total += db::enqueue_missing_tagging_jobs_for_folder(&conn, folder_id)
+                    .map_err(|e| e.to_string())?;
+            }
+            (total, folder_ids)
+        }
+    };
+    drop(conn);
+    indexer::emit_folder_job_progress(&app, db.inner(), &folder_ids, true);
+    Ok(total)
+}
+
+#[tauri::command]
+pub async fn clear_tagging_jobs(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    params: ClearTaggingJobsParams,
+) -> Result<usize, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let n = db::clear_tagging_jobs(&conn, params.folder_id).map_err(|e| e.to_string())?;
+    let folder_ids: Vec<i64> = match params.folder_id {
+        Some(id) => vec![id],
+        None => db::get_folders(&conn)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|f| f.id)
+            .collect(),
+    };
+    drop(conn);
+    indexer::emit_folder_job_progress(&app, db.inner(), &folder_ids, true);
+    Ok(n)
+}
+
+#[tauri::command]
+pub async fn get_image_tags(
+    db: State<'_, DbState>,
+    params: GetImageTagsParams,
+) -> Result<Vec<ImageTag>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::get_image_tags(&conn, params.image_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn add_user_tag(
+    db: State<'_, DbState>,
+    params: AddUserTagParams,
+) -> Result<ImageTag, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::add_user_tag(&conn, params.image_id, &params.tag).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remove_tag(db: State<'_, DbState>, params: RemoveTagParams) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::remove_tag(&conn, params.tag_id).map_err(|e| e.to_string())
 }

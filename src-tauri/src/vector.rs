@@ -80,7 +80,12 @@ pub fn upsert_caption_embedding(conn: &Connection, image_id: i64, embedding: &[f
     Ok(())
 }
 
-pub fn find_similar_image_ids(conn: &Connection, image_id: i64, limit: usize) -> Result<Vec<i64>> {
+pub fn find_similar_image_ids(
+    conn: &Connection,
+    image_id: i64,
+    limit: usize,
+    folder_id: Option<i64>,
+) -> Result<Vec<i64>> {
     let embedding: Vec<u8> = match conn.query_row(
         "SELECT embedding FROM image_vec WHERE image_id = ?1",
         [image_id],
@@ -91,25 +96,52 @@ pub fn find_similar_image_ids(conn: &Connection, image_id: i64, limit: usize) ->
         Err(error) => return Err(error.into()),
     };
 
+    let allowed_folder_ids = match folder_id {
+        Some(folder_id) => Some(image_ids_for_folder(conn, folder_id)?),
+        None => None,
+    };
+    let search_limit = if allowed_folder_ids.is_some() {
+        count_image_vectors(conn)?.max(1) as usize
+    } else {
+        limit + 1
+    };
     let mut stmt = conn.prepare(
         "SELECT image_id
          FROM image_vec
          WHERE embedding MATCH vec_f32(?1)
            AND k = ?2",
     )?;
-    let rows = stmt.query_map((&embedding, (limit as i64) + 1), |row| row.get::<_, i64>(0))?;
+    let rows = stmt
+        .query_map((&embedding, search_limit as i64), |row| {
+            row.get::<_, i64>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     let mut ids = Vec::new();
     for row in rows {
-        let candidate_id = row?;
-        if candidate_id != image_id {
-            ids.push(candidate_id);
+        if row != image_id {
+            if allowed_folder_ids
+                .as_ref()
+                .is_some_and(|folder_ids| !folder_ids.contains(&row))
+            {
+                continue;
+            }
+            ids.push(row);
         }
         if ids.len() >= limit {
             break;
         }
     }
     Ok(ids)
+}
+
+fn image_ids_for_folder(
+    conn: &Connection,
+    folder_id: i64,
+) -> Result<std::collections::HashSet<i64>> {
+    let mut stmt = conn.prepare("SELECT id FROM images WHERE folder_id = ?1")?;
+    let rows = stmt.query_map([folder_id], |row| row.get::<_, i64>(0))?;
+    Ok(rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()?)
 }
 
 /// Returns all stored image embeddings with their image IDs, optionally filtered to one folder.

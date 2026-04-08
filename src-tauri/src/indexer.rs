@@ -3,6 +3,7 @@ use crate::db::{self, DbPool, EmbeddingJob, FolderJobProgress, ImageRecord, Inde
 use crate::embedder::{embedding_source_path, ClipImageEmbedder};
 use crate::media::{probe_video_metadata, MediaTools};
 use crate::storage::{detect_storage_profile, RuntimeAdaptiveProfile, StorageProfile};
+use crate::tagger::{self, WdTagger};
 use crate::thumbnail;
 use crate::vector;
 use anyhow::Result;
@@ -35,6 +36,7 @@ struct PausedWorkerFolders {
     metadata: HashSet<i64>,
     embedding: HashSet<i64>,
     caption: HashSet<i64>,
+    tagging: HashSet<i64>,
 }
 
 #[derive(Clone, Copy)]
@@ -43,6 +45,7 @@ pub struct FolderWorkerPausedState {
     pub metadata: bool,
     pub embedding: bool,
     pub caption: bool,
+    pub tagging: bool,
 }
 
 pub fn set_worker_paused(worker: &str, folder_id: i64, paused: bool) {
@@ -55,6 +58,7 @@ pub fn set_worker_paused(worker: &str, folder_id: i64, paused: bool) {
             "metadata" => Some(&mut paused_folders.metadata),
             "embedding" => Some(&mut paused_folders.embedding),
             "caption" => Some(&mut paused_folders.caption),
+            "tagging" => Some(&mut paused_folders.tagging),
             _ => None,
         };
 
@@ -87,6 +91,7 @@ pub fn get_worker_paused_states(folder_ids: &[i64]) -> HashMap<i64, FolderWorker
                     metadata: paused_folders.metadata.contains(&folder_id),
                     embedding: paused_folders.embedding.contains(&folder_id),
                     caption: paused_folders.caption.contains(&folder_id),
+                    tagging: paused_folders.tagging.contains(&folder_id),
                 },
             )
         })
@@ -105,6 +110,8 @@ fn paused_folder_ids(worker: &str) -> HashSet<i64> {
         "thumbnail" => paused_folders.thumbnail.clone(),
         "metadata" => paused_folders.metadata.clone(),
         "embedding" => paused_folders.embedding.clone(),
+        "caption" => paused_folders.caption.clone(),
+        "tagging" => paused_folders.tagging.clone(),
         _ => HashSet::new(),
     }
 }
@@ -191,9 +198,37 @@ pub fn start_caption_worker(app: AppHandle, pool: DbPool, app_data_dir: PathBuf)
         let mut captioner: Option<FlorenceCaptioner> = None;
         println!("Caption worker started.");
         loop {
+            // If the acceleration setting changed, drop the cached session so
+            // the next batch picks it up with the new execution provider.
+            if captioner::CAPTION_SESSION_DIRTY.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                println!("Caption worker: acceleration setting changed — resetting session.");
+                captioner = None;
+            }
             if let Err(error) = process_caption_batch(&app, &pool, &app_data_dir, &mut captioner) {
                 eprintln!("Caption worker error: {}", error);
                 captioner = None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(750));
+        }
+    });
+}
+
+pub fn start_tagging_worker(app: AppHandle, pool: DbPool, app_data_dir: PathBuf) {
+    std::thread::spawn(move || {
+        let mut tagger_instance: Option<WdTagger> = None;
+        println!("Tagging worker started.");
+        loop {
+            // If the acceleration setting changed, drop the cached session so
+            // the next batch picks it up with the new execution provider.
+            if tagger::TAGGER_SESSION_DIRTY.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                println!("Tagging worker: acceleration setting changed — resetting session.");
+                tagger_instance = None;
+            }
+            if let Err(error) =
+                process_tagging_batch(&app, &pool, &app_data_dir, &mut tagger_instance)
+            {
+                eprintln!("Tagging worker error: {}", error);
+                tagger_instance = None;
             }
             std::thread::sleep(std::time::Duration::from_millis(750));
         }
@@ -370,6 +405,10 @@ fn build_record(
         caption_model: None,
         caption_updated_at: None,
         caption_error: None,
+        ai_rating: None,
+        ai_tagger_model: None,
+        ai_tagged_at: None,
+        ai_tagger_error: None,
     })
 }
 
@@ -825,6 +864,134 @@ fn process_caption_batch(
     Ok(())
 }
 
+const TAGGING_BATCH_SIZE: usize = 1;
+
+fn process_tagging_batch(
+    app: &AppHandle,
+    pool: &DbPool,
+    app_data_dir: &Path,
+    tagger_instance: &mut Option<WdTagger>,
+) -> Result<()> {
+    if !tagger::tagger_model_status(app_data_dir).ready {
+        return Ok(());
+    }
+
+    let paused_folders = paused_folder_ids("tagging");
+    let jobs = with_db_write_lock(|| {
+        let mut conn = pool.get()?;
+        db::claim_tagging_jobs(&mut conn, &paused_folders, TAGGING_BATCH_SIZE)
+    })?;
+
+    if jobs.is_empty() {
+        return Ok(());
+    }
+
+    if tagger_instance.is_none() {
+        match WdTagger::new(app_data_dir) {
+            Ok(model) => *tagger_instance = Some(model),
+            Err(error) => {
+                with_db_write_lock(|| {
+                    let conn = pool.get()?;
+                    db::requeue_tagging_jobs(
+                        &conn,
+                        &jobs.iter().map(|job| job.image_id).collect::<Vec<_>>(),
+                    )
+                })?;
+                return Err(error);
+            }
+        }
+    }
+
+    let folder_ids = jobs.iter().map(|job| job.folder_id).collect::<HashSet<_>>();
+    emit_folder_job_progress(
+        app,
+        pool,
+        &folder_ids.iter().copied().collect::<Vec<_>>(),
+        false,
+    );
+
+    let tagger_ref = tagger_instance
+        .as_mut()
+        .expect("tagger should be initialized before tagging batch processing");
+
+    let tag_results = jobs
+        .iter()
+        .map(|job| {
+            (
+                job.clone(),
+                tagger_ref.run(Path::new(&job.path), tagger::DEFAULT_MAX_TAGS),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let updated_images = with_db_write_lock(|| {
+        let mut conn = pool.get()?;
+        let tx = conn.transaction()?;
+        let mut updated_images = Vec::with_capacity(tag_results.len());
+
+        for (job, tag_result) in &tag_results {
+            // If the job was cancelled while inference was running, discard
+            // the result and delete the row — don't save tags or mark failed.
+            if db::is_tagging_job_cancelled(&tx, job.image_id)? {
+                tx.execute(
+                    "DELETE FROM tagging_jobs WHERE image_id = ?1",
+                    [job.image_id],
+                )?;
+                continue;
+            }
+            match tag_result {
+                Ok(output) => {
+                    let tag_pairs: Vec<(String, f64)> = output
+                        .tags
+                        .iter()
+                        .map(|t| (t.tag.clone(), t.confidence as f64))
+                        .collect();
+                    db::update_ai_tags(
+                        &tx,
+                        job.image_id,
+                        &tag_pairs,
+                        &output.rating,
+                        tagger::WD_TAGGER_MODEL_NAME,
+                    )?;
+                }
+                Err(error) => {
+                    db::mark_tagging_failed(&tx, job.image_id, &error.to_string())?;
+                }
+            }
+            updated_images.push(db::get_image_by_id(&tx, job.image_id)?);
+        }
+
+        tx.commit()?;
+        Ok(updated_images)
+    })
+    .or_else(|db_err| {
+        // The DB write failed.  Try to requeue the claimed jobs so they aren't
+        // left stuck in 'processing' until the next app restart.
+        let image_ids: Vec<i64> = jobs.iter().map(|job| job.image_id).collect();
+        let _ = with_db_write_lock(|| {
+            let conn = pool.get()?;
+            db::requeue_tagging_jobs(&conn, &image_ids)
+        });
+        Err(db_err)
+    })?;
+
+    if !updated_images.is_empty() {
+        let folder_ids = updated_images
+            .iter()
+            .map(|image| image.folder_id)
+            .collect::<HashSet<_>>();
+        emit_media_updates(
+            app,
+            &MediaUpdateBatch {
+                images: updated_images,
+            },
+        );
+        emit_folder_job_progress(app, pool, &folder_ids.into_iter().collect::<Vec<_>>(), true);
+    }
+
+    Ok(())
+}
+
 fn active_indexing_folders() -> HashSet<i64> {
     ACTIVE_INDEXING_FOLDERS
         .get_or_init(|| Mutex::new(HashSet::new()))
@@ -910,7 +1077,7 @@ fn emit_media_updates(app: &AppHandle, batch: &MediaUpdateBatch) {
     let _ = app.emit("media-updated", batch);
 }
 
-fn emit_folder_job_progress(app: &AppHandle, pool: &DbPool, folder_ids: &[i64], force: bool) {
+pub fn emit_folder_job_progress(app: &AppHandle, pool: &DbPool, folder_ids: &[i64], force: bool) {
     let mut unique_folder_ids = folder_ids.iter().copied().collect::<Vec<_>>();
     unique_folder_ids.sort_unstable();
     unique_folder_ids.dedup();
