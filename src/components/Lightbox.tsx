@@ -102,7 +102,12 @@ export function Lightbox() {
     void getImageTags(selectedImage.id)
       .then(setImageTags)
       .catch(() => setImageTags([]));
-  }, [selectedImage?.id, getImageTags]);
+  }, [selectedImage?.id, selectedImage?.ai_tagged_at, getImageTags]);
+
+  // Reset the queued state once the worker finishes so the button is usable again
+  useEffect(() => {
+    if (selectedImage?.ai_tagged_at) setTaggingQueued(false);
+  }, [selectedImage?.ai_tagged_at]);
 
   useEffect(() => {
     const viewport = imageViewportRef.current;
@@ -359,17 +364,19 @@ export function Lightbox() {
                             {ratingPill(selectedImage.ai_rating).label}
                           </span>
                         ) : null}
-                        <button
-                          className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                          disabled={!(taggerModelStatus?.ready ?? false) || taggingQueued}
-                          title={!(taggerModelStatus?.ready ?? false) ? "WD Tagger model not downloaded" : "Queue AI tagging for this image"}
-                          onClick={() => {
-                            setTaggingQueued(true);
-                            void queueTaggingForImage(selectedImage.id).catch(() => undefined);
-                          }}
-                        >
-                          {taggingQueued ? "Queued" : "AI tags"}
-                        </button>
+                        {selectedImage.media_kind === "image" ? (
+                          <button
+                            className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                            disabled={!(taggerModelStatus?.ready ?? false) || taggingQueued}
+                            title={!(taggerModelStatus?.ready ?? false) ? "WD Tagger model not downloaded" : "Queue AI tagging for this image"}
+                            onClick={() => {
+                              setTaggingQueued(true);
+                              void queueTaggingForImage(selectedImage.id).catch(() => undefined);
+                            }}
+                          >
+                            {taggingQueued ? "Queued" : "AI tags"}
+                          </button>
+                        ) : null}
                       </div>
                     </div>
 
