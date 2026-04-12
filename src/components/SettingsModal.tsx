@@ -1,37 +1,87 @@
-import { useEffect, useState } from "react";
-import { TaggerAcceleration, useGalleryStore } from "../store";
+import { useEffect, useMemo, useState } from "react";
+import { TaggerAcceleration, TaggingQueueScope, useGalleryStore } from "../store";
 
-type SettingsSection = "tagging" | "library" | "display" | "storage";
+type SettingsSection = "workspace" | "workers";
 
 const SECTIONS: { id: SettingsSection; label: string; detail: string }[] = [
-  { id: "tagging", label: "AI Tagging", detail: "WD tagger model" },
-  { id: "library", label: "Library", detail: "Indexing and scanning" },
-  { id: "display", label: "Display", detail: "Gallery preferences" },
-  { id: "storage", label: "Storage", detail: "Cache and model files" },
+  { id: "workspace", label: "AI Workspace", detail: "Tagging models and queue targets" },
+  { id: "workers", label: "Workers", detail: "Queue activity and background processing" },
 ];
-
 
 function StatusPill({ children, tone }: { children: React.ReactNode; tone: "ready" | "muted" | "busy" }) {
   const className =
     tone === "ready"
       ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-300"
       : tone === "busy"
-      ? "border-sky-400/25 bg-sky-500/10 text-sky-300"
-      : "border-white/10 bg-white/[0.04] text-gray-500";
+        ? "border-sky-400/25 bg-sky-500/10 text-sky-300"
+        : "border-white/10 bg-white/[0.04] text-gray-500";
 
+  return <span className={`inline-flex rounded-md border px-2 py-1 text-[11px] font-medium ${className}`}>{children}</span>;
+}
+
+function SectionShell({ eyebrow, title, description, children }: {
+  eyebrow: string;
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <span className={`inline-flex rounded-md border px-2 py-1 text-[11px] font-medium ${className}`}>
-      {children}
-    </span>
+    <section>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-600">{eyebrow}</p>
+      <h3 className="mt-1 text-lg font-semibold text-white">{title}</h3>
+      {description ? <p className="mt-2 max-w-2xl text-sm leading-relaxed text-gray-500">{description}</p> : null}
+      <div className="mt-5 space-y-4">{children}</div>
+    </section>
   );
 }
 
-function TaggerAccelerationButton({
-  acceleration,
-  current,
-  onSelect,
-  children,
-}: {
+function SettingsCard({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-5">
+      <div className="flex flex-col gap-1 border-b border-white/[0.07] pb-4">
+        <p className="text-sm font-medium text-white">{title}</p>
+        {description ? <p className="text-xs leading-relaxed text-gray-500">{description}</p> : null}
+      </div>
+      <div className="pt-4">{children}</div>
+    </div>
+  );
+}
+
+function SettingsRow({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-5 border-b border-white/[0.07] py-4 last:border-b-0 first:pt-0 last:pb-0">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-white">{title}</p>
+        <p className="mt-1 max-w-md text-xs leading-relaxed text-gray-500">{description}</p>
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+function ScopeButton({ scope, current, onSelect, children }: {
+  scope: TaggingQueueScope;
+  current: TaggingQueueScope;
+  onSelect: (scope: TaggingQueueScope) => void;
+  children: React.ReactNode;
+}) {
+  const active = scope === current;
+  return (
+    <button
+      type="button"
+      className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
+        active
+          ? "border-emerald-400/35 bg-emerald-500/15 text-emerald-200"
+          : "border-white/10 bg-white/[0.045] text-gray-500 hover:bg-white/[0.075] hover:text-gray-200"
+      }`}
+      onClick={() => onSelect(scope)}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TaggerAccelerationButton({ acceleration, current, onSelect, children }: {
   acceleration: TaggerAcceleration;
   current: TaggerAcceleration;
   onSelect: (acceleration: TaggerAcceleration) => void;
@@ -53,63 +103,32 @@ function TaggerAccelerationButton({
   );
 }
 
-
-function SettingsRow({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-5 border-b border-white/[0.07] py-4 last:border-b-0">
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-white">{title}</p>
-        <p className="mt-1 max-w-md text-xs leading-relaxed text-gray-500">{description}</p>
-      </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  );
-}
-
-function SectionShell({
-  eyebrow,
-  title,
-  children,
-}: {
-  eyebrow: string;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-600">{eyebrow}</p>
-      <h3 className="mt-1 text-lg font-semibold text-white">{title}</h3>
-      <div className="mt-5 border-t border-white/[0.08]">{children}</div>
-    </div>
-  );
-}
-
 export function SettingsModal() {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("tagging");
+  const [activeSection, setActiveSection] = useState<SettingsSection>("workspace");
   const [taggerQueueStatus, setTaggerQueueStatus] = useState<string | null>(null);
   const [taggerQueueing, setTaggerQueueing] = useState(false);
   const [taggerClearing, setTaggerClearing] = useState(false);
   const [taggerAccelerationSaving, setTaggerAccelerationSaving] = useState(false);
   const [taggerThresholdDraft, setTaggerThresholdDraft] = useState<string | null>(null);
   const [taggerThresholdSaving, setTaggerThresholdSaving] = useState(false);
+  const [taggerBatchSizeDraft, setTaggerBatchSizeDraft] = useState<string | null>(null);
+  const [taggerBatchSizeSaving, setTaggerBatchSizeSaving] = useState(false);
   const settingsOpen = useGalleryStore((state) => state.settingsOpen);
   const setSettingsOpen = useGalleryStore((state) => state.setSettingsOpen);
-  const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
   const folders = useGalleryStore((state) => state.folders);
+  const mediaJobProgress = useGalleryStore((state) => state.mediaJobProgress);
+  const taggingQueueScope = useGalleryStore((state) => state.taggingQueueScope);
+  const taggingQueueFolderIds = useGalleryStore((state) => state.taggingQueueFolderIds);
+  const setTaggingQueueScope = useGalleryStore((state) => state.setTaggingQueueScope);
+  const toggleTaggingQueueFolder = useGalleryStore((state) => state.toggleTaggingQueueFolder);
+  const setTaggingQueueFolderIds = useGalleryStore((state) => state.setTaggingQueueFolderIds);
   const taggerModelStatus = useGalleryStore((state) => state.taggerModelStatus);
   const taggerModelPreparing = useGalleryStore((state) => state.taggerModelPreparing);
   const taggerModelProgress = useGalleryStore((state) => state.taggerModelProgress);
   const taggerModelError = useGalleryStore((state) => state.taggerModelError);
   const taggerAcceleration = useGalleryStore((state) => state.taggerAcceleration);
   const taggerThreshold = useGalleryStore((state) => state.taggerThreshold);
+  const taggerBatchSize = useGalleryStore((state) => state.taggerBatchSize);
   const taggerRuntimeProbe = useGalleryStore((state) => state.taggerRuntimeProbe);
   const taggerRuntimeChecking = useGalleryStore((state) => state.taggerRuntimeChecking);
   const loadTaggerModelStatus = useGalleryStore((state) => state.loadTaggerModelStatus);
@@ -119,49 +138,123 @@ export function SettingsModal() {
   const setTaggerAcceleration = useGalleryStore((state) => state.setTaggerAcceleration);
   const loadTaggerThreshold = useGalleryStore((state) => state.loadTaggerThreshold);
   const setTaggerThreshold = useGalleryStore((state) => state.setTaggerThreshold);
+  const loadTaggerBatchSize = useGalleryStore((state) => state.loadTaggerBatchSize);
+  const setTaggerBatchSize = useGalleryStore((state) => state.setTaggerBatchSize);
   const probeTaggerRuntime = useGalleryStore((state) => state.probeTaggerRuntime);
   const queueTaggingJobs = useGalleryStore((state) => state.queueTaggingJobs);
+  const queueTaggingJobsForFolders = useGalleryStore((state) => state.queueTaggingJobsForFolders);
   const clearTaggingJobs = useGalleryStore((state) => state.clearTaggingJobs);
+  const clearTaggingJobsForFolders = useGalleryStore((state) => state.clearTaggingJobsForFolders);
 
   useEffect(() => {
     if (!settingsOpen) return;
     void loadTaggerModelStatus();
     void loadTaggerAcceleration();
     void loadTaggerThreshold();
+    void loadTaggerBatchSize();
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setSettingsOpen(false);
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [settingsOpen, loadTaggerModelStatus, loadTaggerAcceleration, loadTaggerThreshold, setSettingsOpen]);
+  }, [settingsOpen, loadTaggerModelStatus, loadTaggerAcceleration, loadTaggerThreshold, loadTaggerBatchSize, setSettingsOpen]);
+
+  const selectedFolders = useMemo(
+    () => folders.filter((folder) => taggingQueueFolderIds.includes(folder.id)),
+    [folders, taggingQueueFolderIds],
+  );
+
+  const totalQueuedJobs = useMemo(
+    () => Object.values(mediaJobProgress).reduce((sum, progress) => sum + (progress?.tagging_pending ?? 0), 0),
+    [mediaJobProgress],
+  );
 
   if (!settingsOpen) return null;
 
-  const selectedFolder = folders.find((folder) => folder.id === selectedFolderId);
-  const scopeLabel = selectedFolder ? selectedFolder.name : "all libraries";
+  const taggerReady = taggerModelStatus?.ready ?? false;
+  const queueScopeLabel =
+    taggingQueueScope === "all"
+      ? "all media"
+      : selectedFolders.length > 0
+        ? `${selectedFolders.length} selected folder${selectedFolders.length === 1 ? "" : "s"}`
+        : "no folders selected";
+  const thresholdDisplay = taggerThresholdDraft ?? String(taggerThreshold);
+  const batchSizeDisplay = taggerBatchSizeDraft ?? String(taggerBatchSize);
+  const taggerDownloadLabel = taggerModelProgress
+    ? `Downloading ${taggerModelProgress.completed_files}/${taggerModelProgress.total_files}`
+    : taggerModelPreparing
+      ? "Preparing WD Tagger..."
+      : taggerReady
+        ? "Installed"
+        : "Install model";
+  const taggerDownloadPercent = taggerModelProgress
+    ? Math.round((taggerModelProgress.completed_files / Math.max(taggerModelProgress.total_files, 1)) * 100)
+    : 0;
+
+  const runQueueAction = (action: "queue" | "clear") => {
+    const selectedIds = taggingQueueFolderIds;
+    const perform =
+      taggingQueueScope === "all"
+        ? action === "queue"
+          ? queueTaggingJobs(null)
+          : clearTaggingJobs(null)
+        : selectedIds.length > 0
+          ? action === "queue"
+            ? queueTaggingJobsForFolders(selectedIds)
+            : clearTaggingJobsForFolders(selectedIds)
+          : Promise.resolve(0);
+
+    if (action === "queue") {
+      setTaggerQueueing(true);
+    } else {
+      setTaggerClearing(true);
+    }
+    setTaggerQueueStatus(null);
+
+    void perform
+      .then((count) => {
+        if (taggingQueueScope === "selected" && selectedIds.length === 0) {
+          setTaggerQueueStatus("Choose at least one folder before running tagging jobs.");
+          return;
+        }
+        setTaggerQueueStatus(
+          count === 0
+            ? action === "queue"
+              ? "No missing tags found for the current target."
+              : "No queued tagging jobs to clear for the current target."
+            : action === "queue"
+              ? `Queued ${count.toLocaleString()} image${count === 1 ? "" : "s"} for tagging.`
+              : `Cleared ${count.toLocaleString()} queued tagging job${count === 1 ? "" : "s"}.`,
+        );
+      })
+      .catch((error) => setTaggerQueueStatus(String(error)))
+      .finally(() => {
+        if (action === "queue") {
+          setTaggerQueueing(false);
+        } else {
+          setTaggerClearing(false);
+        }
+      });
+  };
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/65 px-6 backdrop-blur-sm"
-      onClick={() => setSettingsOpen(false)}
-    >
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/65 px-6 backdrop-blur-sm" onClick={() => setSettingsOpen(false)}>
       <div
-        className="flex h-[min(680px,calc(100vh-56px))] w-full max-w-4xl overflow-hidden rounded-lg border border-white/10 bg-[#07080f] shadow-2xl shadow-black/60"
+        className="flex h-[min(760px,calc(100vh-56px))] w-full max-w-5xl overflow-hidden rounded-lg border border-white/10 bg-[#07080f] shadow-2xl shadow-black/60"
         onClick={(event) => event.stopPropagation()}
       >
-        <aside className="flex w-56 shrink-0 flex-col border-r border-white/[0.07] bg-white/[0.025]">
+        <aside className="flex w-64 shrink-0 flex-col border-r border-white/[0.07] bg-white/[0.025]">
           <div className="border-b border-white/[0.07] px-5 py-5">
             <p className="text-base font-semibold text-white">Settings</p>
-            <p className="mt-1 text-xs text-gray-600">Phokus preferences</p>
+            <p className="mt-1 text-xs text-gray-600">Operational controls for AI workflows</p>
           </div>
           <div className="flex-1 space-y-1 overflow-y-auto p-2">
             {SECTIONS.map((section) => (
               <button
                 key={section.id}
                 className={`w-full rounded-md px-3 py-2.5 text-left transition-colors ${
-                  activeSection === section.id
-                    ? "bg-white/10 text-white"
-                    : "text-gray-500 hover:bg-white/[0.055] hover:text-gray-200"
+                  activeSection === section.id ? "bg-white/10 text-white" : "text-gray-500 hover:bg-white/[0.055] hover:text-gray-200"
                 }`}
                 onClick={() => setActiveSection(section.id)}
               >
@@ -173,7 +266,11 @@ export function SettingsModal() {
         </aside>
 
         <main className="flex min-w-0 flex-1 flex-col">
-          <div className="flex h-14 shrink-0 items-center justify-end border-b border-white/[0.07] px-6">
+          <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/[0.07] px-6">
+            <div>
+              <p className="text-sm font-medium text-white">{activeSection === "workspace" ? "AI Workspace" : "Workers"}</p>
+              <p className="text-xs text-gray-600">{activeSection === "workspace" ? "Model setup and queue targets" : "Background processing status"}</p>
+            </div>
             <button
               className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
               onClick={() => setSettingsOpen(false)}
@@ -186,274 +283,283 @@ export function SettingsModal() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-7 py-6">
-            {activeSection === "tagging" ? (() => {
-              const taggerReady = taggerModelStatus?.ready ?? false;
-              const taggerDownloadLabel = taggerModelProgress
-                ? `Downloading ${taggerModelProgress.completed_files}/${taggerModelProgress.total_files}`
-                : taggerModelPreparing
-                ? "Preparing WD Tagger..."
-                : taggerReady
-                ? "Downloaded"
-                : "Download WD Tagger";
-              const taggerDownloadPercent = taggerModelProgress
-                ? Math.round((taggerModelProgress.completed_files / Math.max(taggerModelProgress.total_files, 1)) * 100)
-                : 0;
-              const thresholdDisplay = taggerThresholdDraft ?? String(taggerThreshold);
-              return (
-                <SectionShell eyebrow="AI Tagging" title="WD SwinV2 Tagger v3">
-                  <SettingsRow
-                    title="WD Tagger model"
-                    description={taggerReady ? "Stored locally and available offline." : "Download the model to enable automatic AI tagging."}
-                  >
-                    <div className="flex flex-col items-end gap-2">
-                      <button
-                        className="relative overflow-hidden rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
-                        onClick={() => void prepareTaggerModel()}
-                        disabled={taggerModelPreparing || taggerReady}
-                      >
-                        {taggerModelProgress ? (
-                          <span
-                            className="absolute inset-y-0 left-0 bg-emerald-400/15 transition-[width] duration-200"
-                            style={{ width: `${taggerDownloadPercent}%` }}
-                          />
-                        ) : null}
-                        <span className="relative">{taggerDownloadLabel}</span>
-                      </button>
-                      {taggerReady ? (
-                        <>
-                          <button
-                            className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
-                            onClick={() => void probeTaggerRuntime()}
-                            disabled={taggerRuntimeChecking}
-                          >
-                            {taggerRuntimeChecking ? "Checking runtime..." : "Check runtime"}
-                          </button>
-                          <button
-                            className="rounded-md border border-red-400/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-200 transition-colors hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-45"
-                            onClick={() => void deleteTaggerModel()}
-                            disabled={taggerModelPreparing}
-                          >
-                            Delete model files
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
-                  </SettingsRow>
-
-                  <SettingsRow
-                    title="Tagger acceleration"
-                    description="Use DirectML for GPU-accelerated tagging when available."
-                  >
-                    <div className="flex flex-col items-end gap-2">
-                      <div className="flex rounded-lg border border-white/[0.07] bg-black/20 p-1">
-                        <TaggerAccelerationButton
-                          acceleration="auto"
-                          current={taggerAcceleration}
-                          onSelect={(acceleration) => {
-                            setTaggerAccelerationSaving(true);
-                            void setTaggerAcceleration(acceleration)
-                              .catch((error) => setTaggerQueueStatus(String(error)))
-                              .finally(() => setTaggerAccelerationSaving(false));
-                          }}
-                        >
-                          Auto
-                        </TaggerAccelerationButton>
-                        <TaggerAccelerationButton
-                          acceleration="directml"
-                          current={taggerAcceleration}
-                          onSelect={(acceleration) => {
-                            setTaggerAccelerationSaving(true);
-                            void setTaggerAcceleration(acceleration)
-                              .catch((error) => setTaggerQueueStatus(String(error)))
-                              .finally(() => setTaggerAccelerationSaving(false));
-                          }}
-                        >
-                          DirectML
-                        </TaggerAccelerationButton>
-                        <TaggerAccelerationButton
-                          acceleration="cpu"
-                          current={taggerAcceleration}
-                          onSelect={(acceleration) => {
-                            setTaggerAccelerationSaving(true);
-                            void setTaggerAcceleration(acceleration)
-                              .catch((error) => setTaggerQueueStatus(String(error)))
-                              .finally(() => setTaggerAccelerationSaving(false));
-                          }}
-                        >
-                          CPU
-                        </TaggerAccelerationButton>
-                      </div>
-                      <p className="text-[11px] text-gray-600">
-                        {taggerAccelerationSaving ? "Saving..." : `Current: ${taggerAcceleration}`}
-                      </p>
-                    </div>
-                  </SettingsRow>
-
-                  <SettingsRow
-                    title="Confidence threshold"
-                    description="Tags with confidence below this value are discarded. Lower = more tags, higher = fewer but more accurate."
-                  >
-                    <div className="flex flex-col items-end gap-2">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min="0.05"
-                          max="0.99"
-                          step="0.05"
-                          className="w-20 rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white focus:border-white/20 focus:outline-none"
-                          value={thresholdDisplay}
-                          onChange={(e) => setTaggerThresholdDraft(e.target.value)}
-                          onBlur={() => {
-                            const val = parseFloat(thresholdDisplay);
-                            if (!isNaN(val) && val >= 0.05 && val <= 0.99) {
-                              setTaggerThresholdSaving(true);
-                              void setTaggerThreshold(val)
-                                .catch((error) => setTaggerQueueStatus(String(error)))
-                                .finally(() => {
-                                  setTaggerThresholdDraft(null);
-                                  setTaggerThresholdSaving(false);
-                                });
-                            } else {
-                              setTaggerThresholdDraft(null);
-                            }
-                          }}
-                        />
-                      </div>
-                      <p className="text-[11px] text-gray-600">
-                        {taggerThresholdSaving ? "Saving..." : "Default: 0.35"}
-                      </p>
-                    </div>
-                  </SettingsRow>
-
-                  <SettingsRow
-                    title="Tagging queue"
-                    description={`Generate missing AI tags in ${scopeLabel}. Tags update as the background worker finishes each image.`}
-                  >
-                    <div className="flex flex-col items-end gap-2">
-                      <button
-                        className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
-                        onClick={() => {
-                          setTaggerQueueing(true);
-                          setTaggerQueueStatus(null);
-                          void queueTaggingJobs(selectedFolderId)
-                            .then((queued) => {
-                              setTaggerQueueStatus(
-                                queued === 0
-                                  ? "No missing tags found."
-                                  : `Queued ${queued.toLocaleString()} image${queued === 1 ? "" : "s"}.`,
-                              );
-                            })
-                            .catch((error) => setTaggerQueueStatus(String(error)))
-                            .finally(() => setTaggerQueueing(false));
-                        }}
-                        disabled={!taggerReady || taggerQueueing || taggerClearing}
-                      >
-                        {taggerQueueing
-                          ? "Queueing..."
-                          : selectedFolder
-                          ? "Tag this library"
-                          : "Tag all libraries"}
-                      </button>
-                      <button
-                        className="rounded-md border border-amber-400/20 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200 transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-45"
-                        onClick={() => {
-                          setTaggerClearing(true);
-                          setTaggerQueueStatus(null);
-                          void clearTaggingJobs(selectedFolderId)
-                            .then((cleared) => {
-                              setTaggerQueueStatus(
-                                cleared === 0
-                                  ? "No queued tagging jobs to clear."
-                                  : `Cleared ${cleared.toLocaleString()} queued job${cleared === 1 ? "" : "s"}.`,
-                              );
-                            })
-                            .catch((error) => setTaggerQueueStatus(String(error)))
-                            .finally(() => setTaggerClearing(false));
-                        }}
-                        disabled={taggerQueueing || taggerClearing}
-                      >
-                        {taggerClearing
-                          ? "Clearing..."
-                          : selectedFolder
-                          ? "Clear this queue"
-                          : "Clear all queued tags"}
-                      </button>
-                    </div>
-                  </SettingsRow>
-
-                  <div className="py-4">
-                    <p className="text-xs font-medium text-gray-400">Model location</p>
-                    <p className="mt-2 break-all rounded-md border border-white/[0.07] bg-black/20 px-3 py-2 text-xs text-gray-600">
-                      {taggerReady ? taggerModelStatus?.local_dir : "Not downloaded"}
-                    </p>
-                    {taggerModelProgress?.current_file ? (
-                      <p className="mt-3 break-all text-xs text-gray-500">{taggerModelProgress.current_file}</p>
-                    ) : null}
-                    {taggerModelError ? (
-                      <p className="mt-3 text-xs text-amber-300">{taggerModelError}</p>
-                    ) : null}
-                    {taggerQueueStatus ? (
-                      <p className="mt-3 text-xs text-gray-500">{taggerQueueStatus}</p>
-                    ) : null}
-                    {taggerRuntimeProbe ? (
-                      <div className="mt-4 border-t border-white/[0.07] pt-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-xs font-medium text-gray-400">Runtime check</p>
-                          <StatusPill tone="ready">Ready</StatusPill>
-                        </div>
-                        <p className="mt-2 text-xs text-gray-600">
-                          Tagger acceleration: {taggerRuntimeProbe.acceleration}
-                        </p>
-                        <div className="mt-3 space-y-2">
-                          <div className="rounded-md border border-white/[0.07] bg-black/20 px-3 py-2">
-                            <p className="break-all text-xs text-gray-400">{taggerRuntimeProbe.session.file}</p>
-                            <p className="mt-1 text-[11px] text-gray-600">
-                              {taggerRuntimeProbe.session.inputs.length} input{taggerRuntimeProbe.session.inputs.length === 1 ? "" : "s"} · {taggerRuntimeProbe.session.outputs.join(", ")}
-                            </p>
+            {activeSection === "workspace" ? (
+              <div className="space-y-8">
+                <SectionShell
+                  eyebrow="AI Workspace"
+                  title="Tagging"
+                >
+                  <SettingsCard title="Tagging Models">
+                    <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium text-white">WD SwinV2 Tagger v3</p>
+                            <StatusPill tone={taggerReady ? "ready" : taggerModelPreparing ? "busy" : "muted"}>
+                              {taggerReady ? "Installed" : taggerModelPreparing ? "Preparing" : "Not installed"}
+                            </StatusPill>
                           </div>
+                          <p className="mt-1 max-w-xl text-xs leading-relaxed text-gray-500">
+                            Anime-focused vision model by SmilingWolf. Generates booru-style tags with configurable confidence thresholds.
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <button
+                            className="relative overflow-hidden rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                            onClick={() => void prepareTaggerModel()}
+                            disabled={taggerModelPreparing || taggerReady}
+                          >
+                            {taggerModelProgress ? <span className="absolute inset-y-0 left-0 bg-emerald-400/15 transition-[width] duration-200" style={{ width: `${taggerDownloadPercent}%` }} /> : null}
+                            <span className="relative">{taggerDownloadLabel}</span>
+                          </button>
+                          {taggerReady ? (
+                            <>
+                              <button
+                                className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                                onClick={() => void probeTaggerRuntime()}
+                                disabled={taggerRuntimeChecking}
+                              >
+                                {taggerRuntimeChecking ? "Checking runtime..." : "Check runtime"}
+                              </button>
+                              <button
+                                className="rounded-md border border-red-400/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-200 transition-colors hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-45"
+                                onClick={() => void deleteTaggerModel()}
+                                disabled={taggerModelPreparing}
+                              >
+                                Delete model files
+                              </button>
+                            </>
+                          ) : null}
                         </div>
                       </div>
-                    ) : null}
-                  </div>
+
+                      <div className="mt-4 space-y-4 border-t border-white/[0.07] pt-4">
+                        <SettingsRow title="Tagger acceleration" description="Use DirectML when available, or fall back to CPU for reliability.">
+                          <div className="flex flex-col items-end gap-2">
+                            <div className="flex rounded-lg border border-white/[0.07] bg-black/20 p-1">
+                              {(["auto", "directml", "cpu"] as const).map((acceleration) => (
+                                <TaggerAccelerationButton
+                                  key={acceleration}
+                                  acceleration={acceleration}
+                                  current={taggerAcceleration}
+                                  onSelect={(nextAcceleration) => {
+                                    setTaggerAccelerationSaving(true);
+                                    void setTaggerAcceleration(nextAcceleration)
+                                      .catch((error) => setTaggerQueueStatus(String(error)))
+                                      .finally(() => setTaggerAccelerationSaving(false));
+                                  }}
+                                >
+                                  {acceleration === "directml" ? "DirectML" : acceleration === "cpu" ? "CPU" : "Auto"}
+                                </TaggerAccelerationButton>
+                              ))}
+                            </div>
+                            <p className="text-[11px] text-gray-600">{taggerAccelerationSaving ? "Saving..." : `Current: ${taggerAcceleration}`}</p>
+                          </div>
+                        </SettingsRow>
+
+                        <SettingsRow title="Confidence threshold" description="Lower values keep more tags. Higher values are stricter and usually cleaner.">
+                          <div className="flex flex-col items-end gap-2">
+                            <input
+                              type="number"
+                              min="0.05"
+                              max="0.99"
+                              step="0.05"
+                              className="w-20 rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white focus:border-white/20 focus:outline-none"
+                              value={thresholdDisplay}
+                              onChange={(event) => setTaggerThresholdDraft(event.target.value)}
+                              onBlur={() => {
+                                const value = parseFloat(thresholdDisplay);
+                                if (!isNaN(value) && value >= 0.05 && value <= 0.99) {
+                                  setTaggerThresholdSaving(true);
+                                  void setTaggerThreshold(value)
+                                    .catch((error) => setTaggerQueueStatus(String(error)))
+                                    .finally(() => {
+                                      setTaggerThresholdDraft(null);
+                                      setTaggerThresholdSaving(false);
+                                    });
+                                } else {
+                                  setTaggerThresholdDraft(null);
+                                }
+                              }}
+                            />
+                            <p className="text-[11px] text-gray-600">{taggerThresholdSaving ? "Saving..." : "Default: 0.35"}</p>
+                          </div>
+                        </SettingsRow>
+
+                        <SettingsRow title="Tagging batch size" description="Number of images processed concurrently during tag generation.">
+                          <div className="flex flex-col items-end gap-2">
+                            <input
+                              type="number"
+                              min="1"
+                              max="100"
+                              step="1"
+                              className="w-20 rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white focus:border-white/20 focus:outline-none"
+                              value={batchSizeDisplay}
+                              onChange={(event) => setTaggerBatchSizeDraft(event.target.value)}
+                              onBlur={() => {
+                                const value = parseInt(batchSizeDisplay, 10);
+                                if (!isNaN(value) && value >= 1 && value <= 100) {
+                                  setTaggerBatchSizeSaving(true);
+                                  void setTaggerBatchSize(value)
+                                    .catch((error: unknown) => setTaggerQueueStatus(String(error)))
+                                    .finally(() => {
+                                      setTaggerBatchSizeDraft(null);
+                                      setTaggerBatchSizeSaving(false);
+                                    });
+                                } else {
+                                  setTaggerBatchSizeDraft(null);
+                                }
+                              }}
+                            />
+                            <p className="text-[11px] text-gray-600">{taggerBatchSizeSaving ? "Saving..." : "Default: 8"}</p>
+                          </div>
+                        </SettingsRow>
+
+                        <div>
+                          <p className="text-xs font-medium text-gray-400">Model location</p>
+                          <p className="mt-2 break-all rounded-md border border-white/[0.07] bg-black/20 px-3 py-2 text-xs text-gray-600">
+                            {taggerReady ? taggerModelStatus?.local_dir : "Not downloaded"}
+                          </p>
+                          {taggerModelProgress?.current_file ? <p className="mt-3 break-all text-xs text-gray-500">{taggerModelProgress.current_file}</p> : null}
+                          {taggerModelError ? <p className="mt-3 text-xs text-amber-300">{taggerModelError}</p> : null}
+                          {taggerRuntimeProbe ? (
+                            <div className="mt-4 rounded-lg border border-white/[0.07] bg-black/20 px-3 py-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-xs font-medium text-gray-400">Runtime check</p>
+                                <StatusPill tone="ready">Ready</StatusPill>
+                              </div>
+                              <p className="mt-2 text-xs text-gray-600">Tagger acceleration: {taggerRuntimeProbe.acceleration}</p>
+                              <p className="mt-2 break-all text-xs text-gray-500">{taggerRuntimeProbe.session.file}</p>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </SettingsCard>
+
+                  <SettingsCard title="Queue Targets" description="Choose which folders to include when queuing tagging jobs.">
+                    <SettingsRow title="Target scope" description="Queue across the full library, or choose a specific folder set and keep the modal open while you work through it.">
+                      <div className="flex rounded-lg border border-white/[0.07] bg-black/20 p-1">
+                        <ScopeButton scope="all" current={taggingQueueScope} onSelect={setTaggingQueueScope}>All media</ScopeButton>
+                        <ScopeButton scope="selected" current={taggingQueueScope} onSelect={setTaggingQueueScope}>Selected folders</ScopeButton>
+                      </div>
+                    </SettingsRow>
+
+                    <div className="border-b border-white/[0.07] py-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-medium text-white">Folder selection</p>
+                          <p className="mt-1 text-xs leading-relaxed text-gray-500">Current target: {queueScopeLabel}.</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40"
+                            onClick={() => setTaggingQueueFolderIds(folders.map((folder) => folder.id))}
+                            disabled={folders.length === 0}
+                          >
+                            Select all
+                          </button>
+                          <button
+                            className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40"
+                            onClick={() => setTaggingQueueFolderIds([])}
+                            disabled={taggingQueueFolderIds.length === 0}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={`mt-4 grid max-h-64 gap-2 overflow-y-auto pr-1 ${taggingQueueScope === "selected" ? "opacity-100" : "opacity-60"}`}>
+                        {folders.map((folder) => {
+                          const active = taggingQueueFolderIds.includes(folder.id);
+                          const progress = mediaJobProgress[folder.id];
+                          return (
+                            <button
+                              key={folder.id}
+                              type="button"
+                              className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left transition-colors ${
+                                active
+                                  ? "border-emerald-400/30 bg-emerald-500/10 text-white"
+                                  : "border-white/[0.07] bg-black/20 text-gray-300 hover:border-white/15 hover:bg-white/[0.04]"
+                              }`}
+                              onClick={() => toggleTaggingQueueFolder(folder.id)}
+                            >
+                              <div>
+                                <p className="text-sm font-medium">{folder.name}</p>
+                                <p className="mt-1 text-[11px] text-gray-500">{folder.image_count.toLocaleString()} items</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {(progress?.tagging_pending ?? 0) > 0 ? <StatusPill tone="busy">{progress?.tagging_pending} queued</StatusPill> : null}
+                                <span className={`h-4 w-4 rounded-full border ${active ? "border-emerald-300 bg-emerald-300" : "border-white/15 bg-transparent"}`} />
+                              </div>
+                            </button>
+                          );
+                        })}
+                        {folders.length === 0 ? <p className="text-sm text-gray-500">Add a folder first to enable targeted tagging queues.</p> : null}
+                      </div>
+                    </div>
+
+                    <SettingsRow title="Queue tagging jobs" description="Generate missing AI tags for the current target. Results flow back into the library as the background worker finishes.">
+                      <div className="flex flex-col items-end gap-2">
+                        <button
+                          className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                          onClick={() => runQueueAction("queue")}
+                          disabled={!taggerReady || taggerQueueing || taggerClearing || (taggingQueueScope === "selected" && taggingQueueFolderIds.length === 0)}
+                        >
+                          {taggerQueueing ? "Queueing..." : "Queue tagging"}
+                        </button>
+                        <button
+                          className="rounded-md border border-amber-400/20 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200 transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-45"
+                          onClick={() => runQueueAction("clear")}
+                          disabled={taggerQueueing || taggerClearing || (taggingQueueScope === "selected" && taggingQueueFolderIds.length === 0)}
+                        >
+                          {taggerClearing ? "Clearing..." : "Clear queued jobs"}
+                        </button>
+                      </div>
+                    </SettingsRow>
+
+                    {taggerQueueStatus ? <p className="pt-4 text-xs text-gray-500">{taggerQueueStatus}</p> : null}
+                  </SettingsCard>
+
+                  <SettingsCard title="Captioning">
+                    <div className="rounded-xl border border-dashed border-white/[0.09] bg-black/20 px-4 py-4">
+                      <p className="text-sm font-medium text-white/50">Coming soon</p>
+                    </div>
+                  </SettingsCard>
                 </SectionShell>
-              );
-            })() : null}
+              </div>
+            ) : (
+              <div className="space-y-8">
+                <SectionShell
+                  eyebrow="Workers"
+                  title="Background processing"
+                >
+                  <SettingsCard title="Queue summary" description="Live totals across all folder workers.">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Tagging queued</p>
+                        <p className="mt-2 text-2xl font-semibold text-white">{totalQueuedJobs.toLocaleString()}</p>
+                      </div>
+                      <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Selected folders</p>
+                        <p className="mt-2 text-2xl font-semibold text-white">{selectedFolders.length.toLocaleString()}</p>
+                      </div>
+                      <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Library folders</p>
+                        <p className="mt-2 text-2xl font-semibold text-white">{folders.length.toLocaleString()}</p>
+                      </div>
+                    </div>
+                  </SettingsCard>
 
-            {activeSection === "library" ? (
-              <SectionShell eyebrow="Library" title="Indexing and scanning">
-                <SettingsRow title="Background workers" description="Folder-level pause controls remain in the background tasks panel.">
-                  <StatusPill tone="muted">Managed per folder</StatusPill>
-                </SettingsRow>
-                <SettingsRow title="Reindexing" description="Use the library sidebar to rescan a folder when files change.">
-                  <StatusPill tone="muted">Available</StatusPill>
-                </SettingsRow>
-              </SectionShell>
-            ) : null}
-
-            {activeSection === "display" ? (
-              <SectionShell eyebrow="Display" title="Gallery preferences">
-                <SettingsRow title="Grid density" description="Use the toolbar size control to change thumbnail density.">
-                  <StatusPill tone="muted">Toolbar</StatusPill>
-                </SettingsRow>
-                <SettingsRow title="Result view" description="Similar results reset to the top on each new search.">
-                  <StatusPill tone="ready">Enabled</StatusPill>
-                </SettingsRow>
-              </SectionShell>
-            ) : null}
-
-            {activeSection === "storage" ? (
-              <SectionShell eyebrow="Storage" title="Local files">
-                <SettingsRow title="WD Tagger" description="Remove the local tagger model without changing the rest of the library.">
-                  <button
-                    className="rounded-md border border-red-400/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-200 transition-colors hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-45"
-                    onClick={() => void deleteTaggerModel()}
-                    disabled={taggerModelPreparing || !(taggerModelStatus?.ready ?? false)}
-                  >
-                    Delete model files
-                  </button>
-                </SettingsRow>
-              </SectionShell>
-            ) : null}
+                  <SettingsCard title="Worker controls" description="Pause, resume, retry, and per-folder failure details are available in the background tasks panel.">
+                    <div className="flex items-center justify-between gap-4 rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                      <p className="text-sm text-gray-400">Workers are running in the background.</p>
+                      <StatusPill tone="ready">Live</StatusPill>
+                    </div>
+                  </SettingsCard>
+                </SectionShell>
+              </div>
+            )}
           </div>
         </main>
       </div>

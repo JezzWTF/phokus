@@ -14,6 +14,7 @@ pub const WD_TAGGER_MODEL_NAME: &str = "wd-swinv2-tagger-v3";
 
 const TAGGER_ACCELERATION_FILE: &str = "settings/tagger_acceleration.txt";
 const TAGGER_THRESHOLD_FILE: &str = "settings/tagger_threshold.txt";
+const TAGGER_BATCH_SIZE_FILE: &str = "settings/tagger_batch_size.txt";
 
 // Files required on disk before the tagger can run.  The ONNX runtime DLLs
 // are shared with the captioner and live in the same `onnxruntime/` directory.
@@ -186,6 +187,28 @@ pub fn tagger_threshold(app_data_dir: &Path) -> f32 {
 pub fn set_tagger_threshold(app_data_dir: &Path, threshold: f32) -> Result<f32> {
     let clamped = threshold.clamp(0.01, 1.0);
     let path = app_data_dir.join(TAGGER_THRESHOLD_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, clamped.to_string())?;
+    Ok(clamped)
+}
+
+pub fn tagger_batch_size(app_data_dir: &Path) -> usize {
+    let path = app_data_dir.join(TAGGER_BATCH_SIZE_FILE);
+    let Ok(value) = std::fs::read_to_string(path) else {
+        return 8;
+    };
+    value
+        .trim()
+        .parse::<usize>()
+        .unwrap_or(8)
+        .clamp(1, 100)
+}
+
+pub fn set_tagger_batch_size(app_data_dir: &Path, batch_size: usize) -> Result<usize> {
+    let clamped = batch_size.clamp(1, 100);
+    let path = app_data_dir.join(TAGGER_BATCH_SIZE_FILE);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

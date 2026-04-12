@@ -2,6 +2,7 @@ mod captioner;
 mod commands;
 mod db;
 mod embedder;
+mod hnsw_index;
 mod indexer;
 mod media;
 mod storage;
@@ -89,6 +90,7 @@ pub fn run() {
             commands::debug_similar_images,
             commands::retry_failed_embeddings,
             commands::semantic_search_images,
+            commands::search_images_by_tag,
             commands::get_caption_model_status,
             commands::get_caption_acceleration,
             commands::set_caption_acceleration,
@@ -107,6 +109,8 @@ pub fn run() {
             commands::set_worker_paused,
             commands::get_worker_states,
             commands::get_tag_cloud,
+            commands::get_explore_tags,
+            commands::get_images_by_ids,
             commands::get_failed_embedding_images,
             commands::get_tagger_model_status,
             commands::get_tagger_acceleration,
@@ -114,6 +118,8 @@ pub fn run() {
             commands::probe_tagger_runtime,
             commands::get_tagger_threshold,
             commands::set_tagger_threshold,
+            commands::get_tagger_batch_size,
+            commands::set_tagger_batch_size,
             commands::prepare_tagger_model,
             commands::delete_tagger_model,
             commands::queue_tagging_jobs,
@@ -121,6 +127,10 @@ pub fn run() {
             commands::get_image_tags,
             commands::add_user_tag,
             commands::remove_tag,
+            commands::search_tags_autocomplete,
+            commands::find_duplicates,
+            commands::load_duplicate_scan_cache,
+            commands::delete_images_from_disk,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

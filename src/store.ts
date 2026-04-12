@@ -15,10 +15,14 @@ export type MediaKind = "image" | "video";
 export type MediaFilter = "all" | MediaKind;
 export type ZoomPreset = "compact" | "comfortable" | "detail";
 export type SearchMode = "filename" | "semantic";
+export type SearchCommand = "filename" | "semantic" | "tag";
 export type CaptionAcceleration = "auto" | "cpu" | "directml";
 export type CaptionDetail = "short" | "detailed" | "paragraph";
 export type TaggerAcceleration = "auto" | "cpu" | "directml";
 export type AiRating = "general" | "sensitive" | "questionable" | "explicit";
+export type TaggingQueueScope = "all" | "selected";
+export type SimilarScope = "all_media" | "current_folder";
+export type ExploreMode = "visual" | "tags";
 
 export interface ImageRecord {
   id: number;
@@ -115,12 +119,33 @@ export interface ThumbnailBatch {
   images: ImageRecord[];
 }
 
-export type ActiveView = "gallery" | "explore";
+export type ActiveView = "gallery" | "explore" | "duplicates";
 
 export interface TagCloudEntry {
   count: number;
   representative_image_id: number;
   thumbnail_path: string | null;
+  image_ids: number[];
+}
+
+export interface ExploreTagEntry {
+  tag: string;
+  count: number;
+  representative_image_id: number;
+  thumbnail_path: string | null;
+}
+
+export interface DuplicateGroup {
+  file_hash: string;
+  file_size: number;
+  images: ImageRecord[];
+}
+
+export interface SimilarImagesPage {
+  images: ImageRecord[];
+  offset: number;
+  limit: number;
+  has_more: boolean;
 }
 
 export interface CaptionModelStatus {
@@ -171,6 +196,12 @@ export interface TaggerRuntimeProbe {
   session: TaggerRuntimeSessionProbe;
 }
 
+export interface ParsedSearch {
+  mode: SearchCommand;
+  query: string;
+  prefix: string | null;
+}
+
 export type SortOrder =
   | "date_desc"
   | "date_asc"
@@ -178,6 +209,8 @@ export type SortOrder =
   | "name_desc"
   | "size_desc"
   | "size_asc"
+  | "rating_desc"
+  | "rating_asc"
   | "duration_desc"
   | "duration_asc";
 
@@ -194,17 +227,25 @@ interface GalleryState {
   sort: SortOrder;
   mediaFilter: MediaFilter;
   favoritesOnly: boolean;
+  minimumRating: number;
   failedEmbeddingsOnly: boolean;
   zoomPreset: ZoomPreset;
   selectedImage: ImageRecord | null;
   collectionTitle: string | null;
   similarSourceImageId: number | null;
+  similarSourceFolderId: number | null;
   similarHasMore: boolean;
+  similarScope: SimilarScope;
+  similarFolderId: number | null;
   galleryScrollResetKey: number;
   activeView: ActiveView;
+  exploreMode: ExploreMode;
   tagCloudEntries: TagCloudEntry[];
   tagCloudLoading: boolean;
   tagCloudFolderId: number | null | undefined; // undefined = never loaded
+  exploreTagEntries: ExploreTagEntry[];
+  exploreTagLoading: boolean;
+  exploreTagsFolderId: number | null | undefined;
   indexingProgress: Record<number, IndexProgress>;
   mediaJobProgress: Record<number, FolderJobProgress>;
   cacheDir: string;
@@ -218,6 +259,8 @@ interface GalleryState {
   captionDetail: CaptionDetail;
   aiCaptionsEnabled: boolean;
   settingsOpen: boolean;
+  taggingQueueScope: TaggingQueueScope;
+  taggingQueueFolderIds: number[];
 
   taggerModelStatus: TaggerModelStatus | null;
   taggerModelPreparing: boolean;
@@ -225,8 +268,15 @@ interface GalleryState {
   taggerModelProgress: TaggerModelProgress | null;
   taggerAcceleration: TaggerAcceleration;
   taggerThreshold: number;
+  taggerBatchSize: number;
   taggerRuntimeProbe: TaggerRuntimeProbe | null;
   taggerRuntimeChecking: boolean;
+
+  duplicateGroups: DuplicateGroup[];
+  duplicateScanning: boolean;
+  duplicateScanProgress: { scanned: number; total: number } | null;
+  duplicateSelectedIds: Set<number>;
+  duplicateLastScanned: number | null; // Unix timestamp (seconds)
 
   loadFolders: () => Promise<void>;
   loadBackgroundJobProgress: () => Promise<void>;
@@ -243,14 +293,19 @@ interface GalleryState {
   setSort: (sort: SortOrder) => void;
   setMediaFilter: (filter: MediaFilter) => void;
   setFavoritesOnly: (favoritesOnly: boolean) => void;
+  setMinimumRating: (minimumRating: number) => void;
   setFailedEmbeddingsOnly: (failedEmbeddingsOnly: boolean) => void;
   setZoomPreset: (zoomPreset: ZoomPreset) => void;
   openImage: (image: ImageRecord) => void;
   closeImage: () => void;
   setView: (view: ActiveView) => void;
+  setExploreMode: (mode: ExploreMode) => void;
   loadTagCloud: () => Promise<void>;
-  searchByTag: (imageId: number) => void;
-  loadSimilarImages: (imageId: number, folderId?: number | null, reset?: boolean) => Promise<void>;
+  loadExploreTags: () => Promise<void>;
+  showVisualCluster: (imageIds: number[]) => Promise<void>;
+  searchForTag: (tag: string) => void;
+  loadSimilarImages: (imageId: number, folderId?: number | null, reset?: boolean, sourceFolderId?: number | null) => Promise<void>;
+  setSimilarScope: (scope: SimilarScope) => void;
   suggestImageTags: (imageId: number) => Promise<string[]>;
   loadCaptionModelStatus: () => Promise<void>;
   prepareCaptionModel: () => Promise<void>;
@@ -268,6 +323,9 @@ interface GalleryState {
   setCaptionDetail: (detail: CaptionDetail) => Promise<void>;
   setAiCaptionsEnabled: (enabled: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  setTaggingQueueScope: (scope: TaggingQueueScope) => void;
+  toggleTaggingQueueFolder: (folderId: number) => void;
+  setTaggingQueueFolderIds: (folderIds: number[]) => void;
   retryFailedEmbeddings: (folderId: number) => Promise<void>;
   updateImageDetails: (imageId: number, updates: { favorite?: boolean; rating?: number }) => Promise<void>;
   setCacheDir: (dir: string) => void;
@@ -280,10 +338,21 @@ interface GalleryState {
   setTaggerAcceleration: (acceleration: TaggerAcceleration) => Promise<void>;
   loadTaggerThreshold: () => Promise<void>;
   setTaggerThreshold: (threshold: number) => Promise<void>;
+  loadTaggerBatchSize: () => Promise<void>;
+  setTaggerBatchSize: (batchSize: number) => Promise<void>;
   probeTaggerRuntime: () => Promise<void>;
   queueTaggingJobs: (folderId?: number | null) => Promise<number>;
+  queueTaggingJobsForFolders: (folderIds: number[]) => Promise<number>;
   queueTaggingForImage: (imageId: number) => Promise<number>;
   clearTaggingJobs: (folderId?: number | null) => Promise<number>;
+  clearTaggingJobsForFolders: (folderIds: number[]) => Promise<number>;
+  loadDuplicateScanCache: (folderId?: number | null) => Promise<void>;
+  scanDuplicates: (folderId?: number | null) => Promise<void>;
+  toggleDuplicateSelected: (imageId: number) => void;
+  selectAllDuplicates: (imageIds: number[]) => void;
+  selectKeepFirstAllGroups: () => void;
+  clearDuplicateSelection: () => void;
+  deleteSelectedDuplicates: () => Promise<number>;
   getImageTags: (imageId: number) => Promise<ImageTag[]>;
   addUserTag: (imageId: number, tag: string) => Promise<ImageTag>;
   removeTag: (tagId: number) => Promise<void>;
@@ -291,6 +360,12 @@ interface GalleryState {
 
 const PAGE_SIZE = 200;
 const AI_CAPTIONS_ENABLED_KEY = "phokus.aiCaptionsEnabled";
+const SIMILAR_DISTANCE_THRESHOLD = 0.24;
+
+let galleryRequestToken = 0;
+let similarRequestToken = 0;
+let tagCloudRequestToken = 0;
+let exploreTagRequestToken = 0;
 
 function initialAiCaptionsEnabled(): boolean {
   if (typeof window === "undefined") return false;
@@ -312,19 +387,71 @@ function matchesSearch(image: ImageRecord, search: string): boolean {
   return image.filename.toLowerCase().includes(search.toLowerCase());
 }
 
+function isDerivedCollectionTitle(collectionTitle: string | null): boolean {
+  return collectionTitle !== null;
+}
+
+export function parseSearchValue(search: string): ParsedSearch {
+  if (!search.trim()) {
+    return { mode: "filename", query: "", prefix: null };
+  }
+
+  const slashPrefix = search.match(/^\/([a-z])(?:\s|$)/i);
+  if (slashPrefix) {
+    const rawPrefix = slashPrefix[1].toLowerCase();
+    const query = search.length > 3 ? search.slice(3) : "";
+    if (rawPrefix === "s") {
+      return { mode: "semantic", query, prefix: "/s" };
+    }
+    if (rawPrefix === "t") {
+      return { mode: "tag", query, prefix: "/t" };
+    }
+    return { mode: "filename", query, prefix: rawPrefix === "f" ? "/f" : null };
+  }
+
+  const trimmed = search.trim();
+  const match = trimmed.match(/^([a-z]):\s*(.*)$/i);
+  if (!match) {
+    return { mode: "filename", query: trimmed, prefix: null };
+  }
+
+  const rawPrefix = match[1].toLowerCase();
+  const query = match[2].trim();
+  if (rawPrefix === "s") {
+    return { mode: "semantic", query, prefix: "s:" };
+  }
+  if (rawPrefix === "t") {
+    return { mode: "tag", query, prefix: "t:" };
+  }
+  return { mode: "filename", query, prefix: rawPrefix === "f" ? "f:" : null };
+}
+
+export function searchModeLabel(mode: SearchCommand): string {
+  switch (mode) {
+    case "semantic":
+      return "Semantic Search";
+    case "tag":
+      return "Tag Search";
+    default:
+      return "Filename Search";
+  }
+}
+
 function matchesFilters(
   image: ImageRecord,
   selectedFolderId: number | null,
   mediaFilter: MediaFilter,
   favoritesOnly: boolean,
+  minimumRating: number,
   failedEmbeddingsOnly: boolean,
   search: string,
 ): boolean {
   const matchesFolder = selectedFolderId === null || image.folder_id === selectedFolderId;
   const matchesMedia = mediaFilter === "all" || image.media_kind === mediaFilter;
   const matchesFavorite = !favoritesOnly || image.favorite;
+  const matchesRating = image.rating >= minimumRating;
   const matchesFailedEmbedding = !failedEmbeddingsOnly || image.embedding_status === "failed";
-  return matchesFolder && matchesMedia && matchesFavorite && matchesFailedEmbedding && matchesSearch(image, search);
+  return matchesFolder && matchesMedia && matchesFavorite && matchesRating && matchesFailedEmbedding && matchesSearch(image, search);
 }
 
 function compareNullableNumber(a: number | null, b: number | null): number {
@@ -349,6 +476,10 @@ function compareImages(a: ImageRecord, b: ImageRecord, sort: SortOrder): number 
       return compareNullableNumber(a.file_size, b.file_size);
     case "size_desc":
       return compareNullableNumber(b.file_size, a.file_size);
+    case "rating_asc":
+      return compareNullableNumber(a.rating, b.rating);
+    case "rating_desc":
+      return compareNullableNumber(b.rating, a.rating);
     case "duration_asc":
       return compareNullableNumber(a.duration_ms, b.duration_ms);
     case "duration_desc":
@@ -424,17 +555,25 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   sort: "date_desc",
   mediaFilter: "all",
   favoritesOnly: false,
+  minimumRating: 0,
   failedEmbeddingsOnly: false,
   zoomPreset: "comfortable",
   selectedImage: null,
   collectionTitle: null,
   similarSourceImageId: null,
+  similarSourceFolderId: null,
   similarHasMore: false,
+  similarScope: "all_media",
+  similarFolderId: null,
   galleryScrollResetKey: 0,
   activeView: "gallery",
+  exploreMode: "visual",
   tagCloudEntries: [],
   tagCloudLoading: false,
   tagCloudFolderId: undefined,
+  exploreTagEntries: [],
+  exploreTagLoading: false,
+  exploreTagsFolderId: undefined,
   indexingProgress: {},
   mediaJobProgress: {},
   cacheDir: "",
@@ -448,6 +587,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   captionDetail: "paragraph",
   aiCaptionsEnabled: initialAiCaptionsEnabled(),
   settingsOpen: false,
+  taggingQueueScope: "all",
+  taggingQueueFolderIds: [],
 
   taggerModelStatus: null,
   taggerModelPreparing: false,
@@ -455,14 +596,33 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   taggerModelProgress: null,
   taggerAcceleration: "auto",
   taggerThreshold: 0.35,
+  taggerBatchSize: 8,
   taggerRuntimeProbe: null,
   taggerRuntimeChecking: false,
+
+  duplicateGroups: [],
+  duplicateScanning: false,
+  duplicateScanProgress: null,
+  duplicateSelectedIds: new Set(),
+  duplicateLastScanned: null,
 
   setCacheDir: (cacheDir) => set({ cacheDir }),
 
   loadFolders: async () => {
     const folders = await invoke<Folder[]>("get_folders");
-    set({ folders });
+    set((state) => {
+      const folderIds = new Set(folders.map((folder) => folder.id));
+      const nextSelected = state.taggingQueueFolderIds.filter((folderId) => folderIds.has(folderId));
+      return {
+        folders,
+        taggingQueueFolderIds:
+          nextSelected.length > 0
+            ? nextSelected
+            : state.taggingQueueScope === "selected" && folders.length > 0
+              ? [folders[0].id]
+              : nextSelected,
+      };
+    });
   },
 
   loadBackgroundJobProgress: async () => {
@@ -507,29 +667,64 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   loadImages: async (reset = false) => {
-    const { selectedFolderId, search, searchMode, sort, loadedCount, mediaFilter, favoritesOnly, failedEmbeddingsOnly } = get();
+    const { selectedFolderId, search, sort, loadedCount, mediaFilter, favoritesOnly, minimumRating, failedEmbeddingsOnly } = get();
+    const parsedSearch = parseSearchValue(search);
+    const requestToken = ++galleryRequestToken;
     set({ loadingImages: true, imageLoadError: null });
 
     try {
-      if (searchMode === "semantic" && search.trim()) {
+      if (parsedSearch.mode === "semantic" && parsedSearch.query) {
         const images = await invoke<ImageRecord[]>("semantic_search_images", {
           params: {
-            query: search,
+            query: parsedSearch.query,
             folder_id: selectedFolderId,
             media_kind: mediaFilter === "all" ? null : mediaFilter,
             favorites_only: favoritesOnly,
+            rating_min: minimumRating > 0 ? minimumRating : null,
             limit: PAGE_SIZE,
           },
         });
 
+        if (requestToken !== galleryRequestToken) return;
         set({
           images,
           totalImages: images.length,
           loadedCount: images.length,
           loadingImages: false,
-          collectionTitle: `Semantic search: ${search}`,
+          collectionTitle: `Semantic search: ${parsedSearch.query}`,
+          selectedFolderId,
           similarSourceImageId: null,
+          similarSourceFolderId: null,
           similarHasMore: false,
+          similarFolderId: null,
+        });
+        return;
+      }
+
+      if (parsedSearch.mode === "tag" && parsedSearch.query) {
+        const images = await invoke<ImageRecord[]>("search_images_by_tag", {
+          params: {
+            query: parsedSearch.query,
+            folder_id: selectedFolderId,
+            media_kind: mediaFilter === "all" ? null : mediaFilter,
+            favorites_only: favoritesOnly,
+            rating_min: minimumRating > 0 ? minimumRating : null,
+            limit: PAGE_SIZE,
+          },
+        });
+
+        if (requestToken !== galleryRequestToken) return;
+        set({
+          images,
+          totalImages: images.length,
+          loadedCount: images.length,
+          loadingImages: false,
+          collectionTitle: `Tag search: ${parsedSearch.query}`,
+          selectedFolderId,
+          similarSourceImageId: null,
+          similarSourceFolderId: null,
+          similarHasMore: false,
+          similarFolderId: null,
         });
         return;
       }
@@ -543,9 +738,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       }>("get_images", {
         params: {
           folder_id: selectedFolderId,
-          search: search || null,
+          search: parsedSearch.query || null,
           media_kind: mediaFilter === "all" ? null : mediaFilter,
           favorites_only: favoritesOnly,
+          rating_min: minimumRating > 0 ? minimumRating : null,
           embedding_failed_only: failedEmbeddingsOnly,
           sort,
           offset,
@@ -553,6 +749,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         },
       });
 
+      if (requestToken !== galleryRequestToken) return;
       set((state) => ({
         images: reset ? result.images : [...state.images, ...result.images],
         totalImages: result.total,
@@ -560,20 +757,24 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         loadingImages: false,
         collectionTitle: reset ? null : state.collectionTitle,
         similarSourceImageId: null,
+        similarSourceFolderId: null,
         similarHasMore: false,
+        similarFolderId: null,
       }));
     } catch (error) {
+      if (requestToken !== galleryRequestToken) return;
       console.error("Failed to load media:", error);
       set({ loadingImages: false, imageLoadError: String(error) });
     }
   },
 
   loadMoreImages: async () => {
-    const { loadedCount, totalImages, loadingImages, collectionTitle, similarSourceImageId, similarHasMore, selectedFolderId } = get();
+    const { loadedCount, totalImages, loadingImages, collectionTitle, similarSourceImageId, similarHasMore, similarFolderId } = get();
     if (loadingImages || loadedCount >= totalImages) return;
+    if (collectionTitle === "Explore Cluster") return;
     if (collectionTitle === "Similar Images" && similarSourceImageId !== null) {
       if (!similarHasMore) return;
-      await get().loadSimilarImages(similarSourceImageId, selectedFolderId, false);
+      await get().loadSimilarImages(similarSourceImageId, similarFolderId, false);
       return;
     }
     await get().loadImages(false);
@@ -614,6 +815,11 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     void get().loadImages(true);
   },
 
+  setMinimumRating: (minimumRating) => {
+    set({ minimumRating, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
+    void get().loadImages(true);
+  },
+
   setFailedEmbeddingsOnly: (failedEmbeddingsOnly) => {
     set({ failedEmbeddingsOnly, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
     void get().loadImages(true);
@@ -626,59 +832,148 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   setView: (activeView) => set({ activeView }),
 
+  setExploreMode: (exploreMode) => set({ exploreMode }),
+
   loadTagCloud: async () => {
     const { selectedFolderId, tagCloudFolderId, tagCloudLoading } = get();
     // Skip if already loaded for this folder and not currently loading
     if (!tagCloudLoading && tagCloudFolderId !== undefined && tagCloudFolderId === selectedFolderId) {
       return;
     }
+    const requestToken = ++tagCloudRequestToken;
     set({ tagCloudLoading: true, tagCloudFolderId: selectedFolderId });
     try {
       const entries = await invoke<TagCloudEntry[]>("get_tag_cloud", {
         folderId: selectedFolderId,
       });
+      if (requestToken !== tagCloudRequestToken) return;
       set({ tagCloudEntries: entries, tagCloudLoading: false });
     } catch (error) {
+      if (requestToken !== tagCloudRequestToken) return;
       console.error("Failed to load tag cloud:", error);
       set({ tagCloudLoading: false });
     }
   },
 
-  searchByTag: (imageId) => {
-    const { selectedFolderId } = get();
-    set((state) => ({ activeView: "gallery", images: [], loadedCount: 0, loadingImages: true, collectionTitle: "Similar Images", imageLoadError: null, galleryScrollResetKey: state.galleryScrollResetKey + 1 }));
-    void get().loadSimilarImages(imageId, selectedFolderId);
+  loadExploreTags: async () => {
+    const { selectedFolderId, exploreTagsFolderId, exploreTagLoading } = get();
+    if (!exploreTagLoading && exploreTagsFolderId !== undefined && exploreTagsFolderId === selectedFolderId) {
+      return;
+    }
+    const requestToken = ++exploreTagRequestToken;
+    set({ exploreTagLoading: true, exploreTagsFolderId: selectedFolderId });
+    try {
+      const entries = await invoke<ExploreTagEntry[]>("get_explore_tags", {
+        params: { folder_id: selectedFolderId, limit: 48 },
+      });
+      if (requestToken !== exploreTagRequestToken) return;
+      set({ exploreTagEntries: entries, exploreTagLoading: false });
+    } catch (error) {
+      if (requestToken !== exploreTagRequestToken) return;
+      console.error("Failed to load explore tags:", error);
+      set({ exploreTagLoading: false });
+    }
   },
 
-  loadSimilarImages: async (imageId, folderId = get().selectedFolderId, reset = true) => {
-    const requestedLimit = reset ? PAGE_SIZE : get().loadedCount + PAGE_SIZE;
+  showVisualCluster: async (imageIds) => {
+    const requestToken = ++similarRequestToken;
     set((state) => ({
-      images: reset ? [] : get().images,
-      loadedCount: reset ? 0 : get().loadedCount,
+      activeView: "gallery",
+      search: "",
+      images: [],
+      totalImages: imageIds.length,
+      loadedCount: 0,
+      loadingImages: true,
+      collectionTitle: "Explore Cluster",
+      imageLoadError: null,
+      similarSourceImageId: null,
+      similarSourceFolderId: null,
+      similarHasMore: false,
+      similarFolderId: null,
+      galleryScrollResetKey: state.galleryScrollResetKey + 1,
+    }));
+
+    try {
+      const images = await invoke<ImageRecord[]>("get_images_by_ids", {
+        params: { image_ids: imageIds },
+      });
+      if (requestToken !== similarRequestToken) return;
+      set({
+        images,
+        totalImages: images.length,
+        loadedCount: images.length,
+        loadingImages: false,
+        imageLoadError: null,
+        collectionTitle: "Explore Cluster",
+      });
+    } catch (error) {
+      if (requestToken !== similarRequestToken) return;
+      set({
+        images: [],
+        totalImages: 0,
+        loadedCount: 0,
+        loadingImages: false,
+        imageLoadError: String(error),
+        collectionTitle: "Explore Cluster",
+      });
+    }
+  },
+
+  searchForTag: (tag) => {
+    set({ activeView: "gallery", search: `/t ${tag}`, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, similarFolderId: null, imageLoadError: null });
+    void get().loadImages(true);
+  },
+
+  loadSimilarImages: async (imageId, folderId = get().selectedFolderId, reset = true, sourceFolderId = folderId ?? null) => {
+    const requestToken = ++similarRequestToken;
+    const offset = reset ? 0 : get().loadedCount;
+    const similarScope = folderId === null ? "all_media" : "current_folder";
+    set((state) => ({
+      images: reset ? [] : state.images,
+      loadedCount: reset ? 0 : state.loadedCount,
       loadingImages: true,
       collectionTitle: "Similar Images",
       imageLoadError: null,
       similarSourceImageId: imageId,
+      similarSourceFolderId: sourceFolderId,
+      similarFolderId: folderId ?? null,
+      similarScope,
       galleryScrollResetKey: reset ? state.galleryScrollResetKey + 1 : state.galleryScrollResetKey,
     }));
-      try {
-        const images = await invoke<ImageRecord[]>("find_similar_images", {
-          params: { image_id: imageId, folder_id: folderId ?? null, limit: requestedLimit },
-        });
-      const hasMore = images.length >= requestedLimit;
-      set({
-        images,
-        totalImages: hasMore ? images.length + PAGE_SIZE : images.length,
-        loadedCount: images.length,
-        loadingImages: false,
-        imageLoadError: null,
-        collectionTitle: "Similar Images",
-        similarSourceImageId: imageId,
-        similarHasMore: hasMore,
-        selectedFolderId: folderId ?? null,
-        selectedImage: reset ? null : get().selectedImage,
+
+    try {
+      const result = await invoke<SimilarImagesPage>("find_similar_images", {
+        params: {
+          image_id: imageId,
+          folder_id: folderId ?? null,
+          offset,
+          limit: PAGE_SIZE,
+          threshold: SIMILAR_DISTANCE_THRESHOLD,
+        },
+      });
+
+      if (requestToken !== similarRequestToken) return;
+
+      set((state) => {
+        const nextImages = reset ? result.images : [...state.images, ...result.images];
+        const nextLoadedCount = nextImages.length;
+        return {
+          images: nextImages,
+          totalImages: result.has_more ? nextLoadedCount + 1 : nextLoadedCount,
+          loadedCount: nextLoadedCount,
+          loadingImages: false,
+          imageLoadError: null,
+          collectionTitle: "Similar Images",
+          similarSourceImageId: imageId,
+          similarSourceFolderId: sourceFolderId,
+          similarHasMore: result.has_more,
+          similarFolderId: folderId ?? null,
+          similarScope,
+          selectedImage: reset ? null : state.selectedImage,
+        };
       });
     } catch (error) {
+      if (requestToken !== similarRequestToken) return;
       console.error("Failed to load similar images:", error);
       set({
         images: [],
@@ -688,11 +983,21 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         imageLoadError: String(error),
         collectionTitle: "Similar Images",
         similarSourceImageId: imageId,
+        similarSourceFolderId: sourceFolderId,
         similarHasMore: false,
-        selectedFolderId: folderId ?? null,
+        similarFolderId: folderId ?? null,
+        similarScope,
         selectedImage: null,
       });
     }
+  },
+
+  setSimilarScope: (similarScope) => {
+    set({ similarScope });
+    const { similarSourceImageId, similarSourceFolderId, selectedFolderId } = get();
+    if (similarSourceImageId === null) return;
+    const folderId = similarScope === "current_folder" ? (similarSourceFolderId ?? selectedFolderId) : null;
+    void get().loadSimilarImages(similarSourceImageId, folderId, true, similarSourceFolderId);
   },
 
   suggestImageTags: async (imageId) => {
@@ -833,6 +1138,27 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
 
+  setTaggingQueueScope: (taggingQueueScope) => {
+    set((state) => ({
+      taggingQueueScope,
+      taggingQueueFolderIds:
+        taggingQueueScope === "selected" && state.taggingQueueFolderIds.length === 0 && state.folders.length > 0
+          ? [state.folders[0].id]
+          : state.taggingQueueFolderIds,
+    }));
+  },
+
+  toggleTaggingQueueFolder: (folderId) => {
+    set((state) => {
+      const next = state.taggingQueueFolderIds.includes(folderId)
+        ? state.taggingQueueFolderIds.filter((id) => id !== folderId)
+        : [...state.taggingQueueFolderIds, folderId].sort((a, b) => a - b);
+      return { taggingQueueFolderIds: next };
+    });
+  },
+
+  setTaggingQueueFolderIds: (taggingQueueFolderIds) => set({ taggingQueueFolderIds }),
+
   loadTaggerModelStatus: async () => {
     try {
       const taggerModelStatus = await invoke<TaggerModelStatus>("get_tagger_model_status");
@@ -874,6 +1200,22 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     set({ taggerThreshold });
   },
 
+  loadTaggerBatchSize: async () => {
+    try {
+      const taggerBatchSize = await invoke<number>("get_tagger_batch_size");
+      set({ taggerBatchSize });
+    } catch (error) {
+      set({ taggerModelError: String(error) });
+    }
+  },
+
+  setTaggerBatchSize: async (batchSize) => {
+    const taggerBatchSize = await invoke<number>("set_tagger_batch_size", {
+      params: { batch_size: batchSize },
+    });
+    set({ taggerBatchSize });
+  },
+
   prepareTaggerModel: async () => {
     set({ taggerModelPreparing: true, taggerModelError: null, taggerModelProgress: null });
     try {
@@ -912,6 +1254,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     return queued;
   },
 
+  queueTaggingJobsForFolders: async (folderIds) => {
+    const queued = await invoke<number>("queue_tagging_jobs", {
+      params: { folder_id: null, folder_ids: folderIds, image_id: null },
+    });
+    await get().loadBackgroundJobProgress();
+    return queued;
+  },
+
   queueTaggingForImage: async (imageId) => {
     const queued = await invoke<number>("queue_tagging_jobs", {
       params: { folder_id: null, image_id: imageId },
@@ -923,6 +1273,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   clearTaggingJobs: async (folderId = get().selectedFolderId) => {
     const cleared = await invoke<number>("clear_tagging_jobs", {
       params: { folder_id: folderId ?? null },
+    });
+    await get().loadBackgroundJobProgress();
+    return cleared;
+  },
+
+  clearTaggingJobsForFolders: async (folderIds) => {
+    const cleared = await invoke<number>("clear_tagging_jobs", {
+      params: { folder_id: null, folder_ids: folderIds },
     });
     await get().loadBackgroundJobProgress();
     return cleared;
@@ -944,6 +1302,73 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     await invoke<void>("remove_tag", {
       params: { tag_id: tagId },
     });
+  },
+
+  loadDuplicateScanCache: async (folderId = null) => {
+    interface CacheResult { groups: DuplicateGroup[]; scanned_at: number }
+    const cached = await invoke<CacheResult | null>("load_duplicate_scan_cache", { folderId: folderId ?? null });
+    if (cached) {
+      set({ duplicateGroups: cached.groups, duplicateLastScanned: cached.scanned_at });
+    }
+  },
+
+  scanDuplicates: async (folderId = null) => {
+    const { listen } = await import("@tauri-apps/api/event");
+    set({ duplicateScanning: true, duplicateGroups: [], duplicateScanProgress: null, duplicateSelectedIds: new Set() });
+    const unlisten = await listen<[number, number]>("duplicate_scan_progress", (event) => {
+      const [scanned, total] = event.payload;
+      set({ duplicateScanProgress: { scanned, total } });
+    });
+    try {
+      const groups = await invoke<DuplicateGroup[]>("find_duplicates", { folderId: folderId ?? null });
+      set({ duplicateGroups: groups, duplicateLastScanned: Math.floor(Date.now() / 1000) });
+    } finally {
+      unlisten();
+      set({ duplicateScanning: false });
+    }
+  },
+
+  toggleDuplicateSelected: (imageId) => {
+    set((state) => {
+      const next = new Set(state.duplicateSelectedIds);
+      if (next.has(imageId)) next.delete(imageId);
+      else next.add(imageId);
+      return { duplicateSelectedIds: next };
+    });
+  },
+
+  selectAllDuplicates: (imageIds) => {
+    set((state) => {
+      const next = new Set(state.duplicateSelectedIds);
+      for (const id of imageIds) next.add(id);
+      return { duplicateSelectedIds: next };
+    });
+  },
+
+  selectKeepFirstAllGroups: () => {
+    const { duplicateGroups } = get();
+    const toMark = new Set<number>();
+    for (const group of duplicateGroups) {
+      for (const img of group.images.slice(1)) toMark.add(img.id);
+    }
+    set({ duplicateSelectedIds: toMark });
+  },
+
+  clearDuplicateSelection: () => set({ duplicateSelectedIds: new Set() }),
+
+  deleteSelectedDuplicates: async () => {
+    const { duplicateSelectedIds } = get();
+    const ids = Array.from(duplicateSelectedIds);
+    if (ids.length === 0) return 0;
+    const deleted = await invoke<number>("delete_images_from_disk", { params: { image_ids: ids } });
+    // Remove deleted images from groups and drop now-trivial groups
+    set((state) => ({
+      duplicateSelectedIds: new Set(),
+      duplicateGroups: state.duplicateGroups
+        .map((g) => ({ ...g, images: g.images.filter((img) => !duplicateSelectedIds.has(img.id)) }))
+        .filter((g) => g.images.length > 1),
+    }));
+    return deleted;
   },
 
   retryFailedEmbeddings: async (folderId) => {
@@ -979,7 +1404,9 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       if (progress.done) {
         void get().loadFolders();
         void get().loadBackgroundJobProgress();
-        void get().loadImages(true);
+        if (get().activeView !== "explore" && !isDerivedCollectionTitle(get().collectionTitle)) {
+          void get().loadImages(true);
+        }
 
         setTimeout(() => {
           set((state) => {
@@ -1019,12 +1446,17 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const batch = event.payload;
 
       set((state) => {
+        if (isDerivedCollectionTitle(state.collectionTitle) || state.activeView === "explore") {
+          return state;
+        }
+
         const visibleImages = batch.images.filter((image) =>
           matchesFilters(
             image,
             state.selectedFolderId,
             state.mediaFilter,
             state.favoritesOnly,
+            state.minimumRating,
             state.failedEmbeddingsOnly,
             state.search,
           ),
@@ -1049,12 +1481,21 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const batch = event.payload;
 
       set((state) => {
+        if (isDerivedCollectionTitle(state.collectionTitle) || state.activeView === "explore") {
+          const selectedImage =
+            state.selectedImage && batch.images.some((image) => image.id === state.selectedImage?.id)
+              ? batch.images.find((image) => image.id === state.selectedImage?.id) ?? state.selectedImage
+              : state.selectedImage;
+          return { selectedImage };
+        }
+
         const visibleImages = batch.images.filter((image) =>
           matchesFilters(
             image,
             state.selectedFolderId,
             state.mediaFilter,
             state.favoritesOnly,
+            state.minimumRating,
             state.failedEmbeddingsOnly,
             state.search,
           ),

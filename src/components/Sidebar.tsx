@@ -138,6 +138,23 @@ export function Sidebar() {
             Explore
           </span>
         </div>
+
+        <div
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150 ${
+            activeView === "duplicates"
+              ? "bg-white/8 text-white"
+              : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
+          }`}
+          onClick={() => setView("duplicates")}
+        >
+          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+          <span className={`text-[13px] font-medium ${activeView === "duplicates" ? "text-white" : ""}`}>
+            Duplicates
+          </span>
+        </div>
       </div>
 
       {/* Section label */}

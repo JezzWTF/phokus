@@ -122,6 +122,14 @@ pub struct ImageTag {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ExploreTagEntry {
+    pub tag: String,
+    pub count: i64,
+    pub representative_image_id: i64,
+    pub thumbnail_path: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct IndexedMediaEntry {
     pub id: i64,
@@ -245,6 +253,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             image_ids_hash  INTEGER NOT NULL,
             entries_json    TEXT NOT NULL,
             created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS duplicate_scan_cache (
+            folder_scope    TEXT PRIMARY KEY,
+            scanned_at      INTEGER NOT NULL,
+            groups_json     TEXT NOT NULL
         );
 
         CREATE INDEX IF NOT EXISTS idx_images_folder_id ON images(folder_id);
@@ -1302,6 +1316,7 @@ pub fn get_images(
     search: Option<&str>,
     media_kind: Option<&str>,
     favorites_only: bool,
+    rating_min: i64,
     embedding_failed_only: bool,
     sort: &str,
     offset: i64,
@@ -1314,6 +1329,8 @@ pub fn get_images(
         "date_desc" => "modified_at DESC NULLS LAST",
         "size_asc" => "file_size ASC",
         "size_desc" => "file_size DESC",
+        "rating_asc" => "rating ASC, modified_at DESC NULLS LAST",
+        "rating_desc" => "rating DESC, modified_at DESC NULLS LAST",
         "duration_asc" => "duration_ms ASC NULLS LAST",
         "duration_desc" => "duration_ms DESC NULLS LAST",
         _ => "modified_at DESC NULLS LAST",
@@ -1333,9 +1350,10 @@ pub fn get_images(
            AND (?2 IS NULL OR filename LIKE ?2)
            AND (?3 IS NULL OR media_kind = ?3)
            AND (?4 = 0 OR favorite = 1)
-           AND (?5 = 0 OR embedding_status = 'failed')
+           AND rating >= ?5
+           AND (?6 = 0 OR embedding_status = 'failed')
          ORDER BY {}
-         LIMIT ?6 OFFSET ?7",
+         LIMIT ?7 OFFSET ?8",
         order
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -1345,6 +1363,7 @@ pub fn get_images(
             search_pattern,
             media_kind,
             favorites_flag,
+            rating_min,
             embedding_failed_flag,
             limit,
             offset
@@ -1360,6 +1379,7 @@ pub fn count_images(
     search: Option<&str>,
     media_kind: Option<&str>,
     favorites_only: bool,
+    rating_min: i64,
     embedding_failed_only: bool,
 ) -> Result<i64> {
     let search_pattern = search.map(|value| format!("%{}%", value));
@@ -1372,18 +1392,155 @@ pub fn count_images(
            AND (?2 IS NULL OR filename LIKE ?2)
            AND (?3 IS NULL OR media_kind = ?3)
            AND (?4 = 0 OR favorite = 1)
-           AND (?5 = 0 OR embedding_status = 'failed')",
+           AND rating >= ?5
+           AND (?6 = 0 OR embedding_status = 'failed')",
         params![
             folder_id,
             search_pattern,
             media_kind,
             favorites_flag,
+            rating_min,
             embedding_failed_flag
         ],
         |row| row.get(0),
     )?;
 
     Ok(count)
+}
+
+pub fn search_images_by_tag(
+    conn: &Connection,
+    query: &str,
+    folder_id: Option<i64>,
+    media_kind: Option<&str>,
+    favorites_only: bool,
+    rating_min: i64,
+    limit: usize,
+) -> Result<Vec<ImageRecord>> {
+    let normalized_query = query.trim().to_ascii_lowercase();
+    if normalized_query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let favorites_flag = i64::from(favorites_only);
+
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT i.id
+         FROM images i
+         JOIN image_tags t ON t.image_id = i.id
+         WHERE (?1 IS NULL OR i.folder_id = ?1)
+           AND (?2 IS NULL OR i.media_kind = ?2)
+           AND (?3 = 0 OR i.favorite = 1)
+           AND i.rating >= ?4
+           AND LOWER(TRIM(t.tag)) = ?5
+         ORDER BY i.rating DESC, i.modified_at DESC NULLS LAST, i.filename ASC
+         LIMIT ?6",
+    )?;
+
+    let image_ids = stmt
+        .query_map(
+            params![
+                folder_id,
+                media_kind,
+                favorites_flag,
+                rating_min,
+                normalized_query,
+                limit as i64
+            ],
+            |row| row.get::<_, i64>(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    get_images_by_ids(conn, &image_ids)
+}
+
+pub fn search_tags_autocomplete(
+    conn: &Connection,
+    query: &str,
+    folder_id: Option<i64>,
+    limit: usize,
+) -> Result<Vec<ExploreTagEntry>> {
+    let pattern = format!("%{}%", query.to_lowercase());
+    let mut stmt = conn.prepare(
+        "SELECT t.tag, COUNT(DISTINCT t.image_id) AS tag_count, MIN(t.image_id) AS representative_image_id
+         FROM image_tags t
+         JOIN images i ON i.id = t.image_id
+         WHERE (?1 IS NULL OR i.folder_id = ?1)
+           AND LOWER(t.tag) LIKE ?2
+         GROUP BY t.tag
+         ORDER BY tag_count DESC, t.tag ASC
+         LIMIT ?3",
+    )?;
+    let rows = stmt
+        .query_map(params![folder_id, pattern, limit as i64], |row| {
+            Ok(ExploreTagEntry {
+                tag: row.get(0)?,
+                count: row.get(1)?,
+                representative_image_id: row.get(2)?,
+                thumbnail_path: None, // skip per-suggestion thumbnail for speed
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+pub struct ImagePathRecord {
+    pub id: i64,
+    pub path: String,
+    pub thumbnail_path: Option<String>,
+}
+
+pub fn get_all_image_paths(
+    conn: &Connection,
+    folder_id: Option<i64>,
+) -> Result<Vec<ImagePathRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, thumbnail_path FROM images WHERE (?1 IS NULL OR folder_id = ?1) ORDER BY id",
+    )?;
+    let rows = stmt
+        .query_map(params![folder_id], |row| {
+            Ok(ImagePathRecord {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                thumbnail_path: row.get(2)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+pub fn get_explore_tags(
+    conn: &Connection,
+    folder_id: Option<i64>,
+    limit: usize,
+) -> Result<Vec<ExploreTagEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.tag, COUNT(DISTINCT t.image_id) AS tag_count, MIN(t.image_id) AS representative_image_id
+         FROM image_tags t
+         JOIN images i ON i.id = t.image_id
+         WHERE (?1 IS NULL OR i.folder_id = ?1)
+         GROUP BY t.tag
+         HAVING COUNT(DISTINCT t.image_id) >= 2
+         ORDER BY tag_count DESC, t.tag ASC
+         LIMIT ?2",
+    )?;
+
+    let rows = stmt
+        .query_map(params![folder_id, limit as i64], |row| {
+            let representative_image_id = row.get::<_, i64>(2)?;
+            let thumbnail_path = get_image_by_id(conn, representative_image_id)
+                .ok()
+                .and_then(|image| image.thumbnail_path);
+
+            Ok(ExploreTagEntry {
+                tag: row.get(0)?,
+                count: row.get(1)?,
+                representative_image_id,
+                thumbnail_path,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok(rows)
 }
 
 pub fn get_failed_embedding_images(
@@ -1867,6 +2024,43 @@ pub fn set_tag_cloud_cache(
              entries_json   = excluded.entries_json,
              created_at     = excluded.created_at",
         params![folder_scope, image_ids_hash as i64, entries_json],
+    )?;
+    Ok(())
+}
+
+/// Returns (groups_json, scanned_at_unix) for the given folder scope, if present.
+pub fn get_duplicate_scan_cache(
+    conn: &Connection,
+    folder_scope: &str,
+) -> Result<Option<(String, i64)>> {
+    match conn.query_row(
+        "SELECT groups_json, scanned_at FROM duplicate_scan_cache WHERE folder_scope = ?1",
+        params![folder_scope],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+    ) {
+        Ok(row) => Ok(Some(row)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Upserts the duplicate scan cache for the given scope.
+pub fn set_duplicate_scan_cache(
+    conn: &Connection,
+    folder_scope: &str,
+    groups_json: &str,
+) -> Result<()> {
+    let scanned_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    conn.execute(
+        "INSERT INTO duplicate_scan_cache (folder_scope, scanned_at, groups_json)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(folder_scope) DO UPDATE SET
+             scanned_at  = excluded.scanned_at,
+             groups_json = excluded.groups_json",
+        params![folder_scope, scanned_at, groups_json],
     )?;
     Ok(())
 }

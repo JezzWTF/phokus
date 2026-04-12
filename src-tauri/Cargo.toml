@@ -27,6 +27,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 sqlite-vec = "=0.1.9"
+hnsw_rs = "0.3.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp", "tiff"] }
 fast_image_resize = { version = "6.0.0", features = ["image"] }
 walkdir = "2"
@@ -38,6 +39,7 @@ anyhow = "1"
 log = "0.4"
 ffmpeg-sidecar = "2.5.0"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+memmap2 = "0.9"
 sysinfo = "0.38.4"
 candle-core = { version = "0.10.2", features = ["cuda"] }
 candle-nn = { version = "0.10.2", features = ["cuda"] }
@@ -48,3 +50,51 @@ ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "n
 ureq = { version = "3.3.0", default-features = false, features = ["native-tls"] }
 zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
 csv = "1"
+
+# ── Dev-mode performance ────────────────────────────────────────────────────
+# opt-level=1 on the main crate keeps incremental compile short.
+# Only the packages that are genuine hot-path bottlenecks in dev get opt-level=3
+# (using "*" caused cargo to recheck all dependency fingerprints too aggressively,
+# which caused spurious full rebuilds and linker conflicts).
+[profile.dev]
+opt-level = 1
+
+# ML inference — without opt these run 20-50× slower than release
+[profile.dev.package.candle-core]
+opt-level = 3
+[profile.dev.package.candle-nn]
+opt-level = 3
+[profile.dev.package.candle-transformers]
+opt-level = 3
+
+# ONNX runtime (WD tagger)
+[profile.dev.package.ort]
+opt-level = 3
+[profile.dev.package.ort-sys]
+opt-level = 3
+
+# Image decode/resize workers
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.fast_image_resize]
+opt-level = 3
+
+# Parallel work scheduler
+[profile.dev.package.rayon]
+opt-level = 3
+[profile.dev.package.rayon-core]
+opt-level = 3
+
+# Tokenisation (embedding model pre-processing)
+[profile.dev.package.tokenizers]
+opt-level = 3
+
+# Hashing (duplicate finder)
+[profile.dev.package.xxhash-rust]
+opt-level = 3
+
+# SQLite (frequent db calls in workers)
+[profile.dev.package.rusqlite]
+opt-level = 3
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3

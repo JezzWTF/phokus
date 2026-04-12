@@ -64,6 +64,7 @@ export function Lightbox() {
   const images = useGalleryStore((state) => state.images);
   const openImage = useGalleryStore((state) => state.openImage);
   const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
+  const similarScope = useGalleryStore((state) => state.similarScope);
   const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
   const getImageTags = useGalleryStore((state) => state.getImageTags);
   const addUserTag = useGalleryStore((state) => state.addUserTag);
@@ -246,7 +247,7 @@ export function Lightbox() {
                       }`}
                       onClick={() => {
                         if (!canFindSimilar) return;
-                        void loadSimilarImages(selectedImage.id);
+                        void loadSimilarImages(selectedImage.id, similarScope === "current_folder" ? selectedImage.folder_id : null, true, selectedImage.folder_id);
                       }}
                       disabled={!canFindSimilar}
                     >

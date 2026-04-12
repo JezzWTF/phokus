@@ -1,0 +1,12 @@
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+    # Disable MSVC incremental linking — avoids .ilk file corruption
+    # and removes one source of link failure on restart.
+    "-C", "link-arg=/INCREMENTAL:NO",
+    # Skip PDB generation entirely in dev builds.
+    # The .pdb file is the most common reason the linker fails after
+    # an unclean shutdown: the previous phokus.exe process holds the
+    # file open, so link.exe cannot write a new one → LNK error.
+    # Rust backtraces still work without MSVC PDBs.
+    "-C", "link-arg=/DEBUG:NONE",
+]

@@ -2,8 +2,9 @@ use crate::captioner::{
     self, CaptionAcceleration, CaptionDetail, CaptionModelStatus, CaptionRuntimeProbe,
     CaptionVisionProbe,
 };
-use crate::db::{self, DbPool, Folder, FolderJobProgress, ImageRecord, ImageTag};
+use crate::db::{self, DbPool, ExploreTagEntry, Folder, FolderJobProgress, ImageRecord, ImageTag};
 use crate::embedder;
+use crate::hnsw_index;
 use crate::indexer;
 use crate::tagger::{self, TaggerAcceleration, TaggerModelStatus, TaggerRuntimeProbe};
 use crate::vector;
@@ -21,12 +22,21 @@ pub struct ImagesPage {
     pub limit: i64,
 }
 
+#[derive(Serialize)]
+pub struct SimilarImagesPage {
+    pub images: Vec<ImageRecord>,
+    pub offset: usize,
+    pub limit: usize,
+    pub has_more: bool,
+}
+
 #[derive(Deserialize)]
 pub struct GetImagesParams {
     pub folder_id: Option<i64>,
     pub search: Option<String>,
     pub media_kind: Option<String>,
     pub favorites_only: Option<bool>,
+    pub rating_min: Option<i64>,
     pub embedding_failed_only: Option<bool>,
     pub sort: Option<String>,
     pub offset: Option<i64>,
@@ -44,7 +54,9 @@ pub struct UpdateImageDetailsParams {
 pub struct FindSimilarImagesParams {
     pub image_id: i64,
     pub folder_id: Option<i64>,
+    pub offset: Option<usize>,
     pub limit: Option<usize>,
+    pub threshold: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -114,7 +126,54 @@ pub struct SemanticSearchParams {
     pub folder_id: Option<i64>,
     pub media_kind: Option<String>,
     pub favorites_only: Option<bool>,
+    pub rating_min: Option<i64>,
     pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct TagSearchParams {
+    pub query: String,
+    pub folder_id: Option<i64>,
+    pub media_kind: Option<String>,
+    pub favorites_only: Option<bool>,
+    pub rating_min: Option<i64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct GetExploreTagsParams {
+    pub folder_id: Option<i64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct SearchTagsAutocompleteParams {
+    pub query: String,
+    pub folder_id: Option<i64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DuplicateGroup {
+    pub file_hash: String,
+    pub file_size: u64,
+    pub images: Vec<ImageRecord>,
+}
+
+#[derive(Serialize)]
+pub struct DuplicateScanCache {
+    pub groups: Vec<DuplicateGroup>,
+    pub scanned_at: i64,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteImagesFromDiskParams {
+    pub image_ids: Vec<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct GetImagesByIdsParams {
+    pub image_ids: Vec<i64>,
 }
 
 #[tauri::command]
@@ -187,6 +246,7 @@ pub async fn get_images(
     let search = params.search.as_deref();
     let media_kind = params.media_kind.as_deref();
     let favorites_only = params.favorites_only.unwrap_or(false);
+    let rating_min = params.rating_min.unwrap_or(0);
     let embedding_failed_only = params.embedding_failed_only.unwrap_or(false);
 
     let total = db::count_images(
@@ -195,6 +255,7 @@ pub async fn get_images(
         search,
         media_kind,
         favorites_only,
+        rating_min,
         embedding_failed_only,
     )
     .map_err(|e| e.to_string())?;
@@ -205,6 +266,7 @@ pub async fn get_images(
         search,
         media_kind,
         favorites_only,
+        rating_min,
         embedding_failed_only,
         sort,
         offset,
@@ -254,16 +316,42 @@ pub async fn reindex_folder(
 pub async fn find_similar_images(
     db: State<'_, DbState>,
     params: FindSimilarImagesParams,
-) -> Result<Vec<ImageRecord>, String> {
+) -> Result<SimilarImagesPage, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     let limit = params.limit.unwrap_or(32);
+    let offset = params.offset.unwrap_or(0);
+    let threshold = params.threshold.unwrap_or(0.24);
     if !vector::has_image_vector(&conn, params.image_id).map_err(|e| e.to_string())? {
         db::repair_embedding_consistency(&conn).map_err(|e| e.to_string())?;
-        return Ok(Vec::new());
+        return Ok(SimilarImagesPage {
+            images: Vec::new(),
+            offset,
+            limit,
+            has_more: false,
+        });
     }
-    let image_ids = vector::find_similar_image_ids(&conn, params.image_id, limit, params.folder_id)
+    let matches = hnsw_index::find_similar_image_matches(
+        &conn,
+        params.image_id,
+        params.folder_id,
+        threshold,
+        offset,
+        limit + 1,
+    )
         .map_err(|e| e.to_string())?;
-    db::get_images_by_ids(&conn, &image_ids).map_err(|e| e.to_string())
+    let has_more = matches.len() > limit;
+    let image_ids = matches
+        .into_iter()
+        .take(limit)
+        .map(|(image_id, _)| image_id)
+        .collect::<Vec<_>>();
+    let images = db::get_images_by_ids(&conn, &image_ids).map_err(|e| e.to_string())?;
+    Ok(SimilarImagesPage {
+        images,
+        offset,
+        limit,
+        has_more,
+    })
 }
 
 #[derive(Serialize)]
@@ -328,8 +416,29 @@ pub async fn semantic_search_images(
     if params.favorites_only.unwrap_or(false) {
         images.retain(|image| image.favorite);
     }
+    if let Some(rating_min) = params.rating_min {
+        images.retain(|image| image.rating >= rating_min);
+    }
 
     Ok(images)
+}
+
+#[tauri::command]
+pub async fn search_images_by_tag(
+    db: State<'_, DbState>,
+    params: TagSearchParams,
+) -> Result<Vec<ImageRecord>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::search_images_by_tag(
+        &conn,
+        &params.query,
+        params.folder_id,
+        params.media_kind.as_deref(),
+        params.favorites_only.unwrap_or(false),
+        params.rating_min.unwrap_or(0),
+        params.limit.unwrap_or(64),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -521,6 +630,8 @@ pub struct TagCloudEntry {
     pub count: usize,
     pub representative_image_id: i64,
     pub thumbnail_path: Option<String>,
+    #[serde(default)]
+    pub image_ids: Vec<i64>,
 }
 
 fn fnv_hash_ids(ids: &[i64]) -> u64 {
@@ -569,7 +680,11 @@ pub async fn get_tag_cloud(
             .map_err(|e| e.to_string())?
         {
             if let Ok(entries) = serde_json::from_str::<Vec<TagCloudEntry>>(&json) {
-                return Ok(entries);
+                // Reject cache entries written before image_ids were tracked — they all
+                // have empty image_ids which causes "No media found" when a cluster is opened.
+                if entries.iter().all(|e| !e.image_ids.is_empty()) {
+                    return Ok(entries);
+                }
             }
         }
     }
@@ -597,6 +712,13 @@ pub async fn get_tag_cloud(
         }
 
         let centroid = &centroids[ci];
+        let cluster_ids = points
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| assignments[*i] == ci)
+            .map(|(i, _)| ids[i])
+            .collect::<Vec<_>>();
+
         let best_id = points
             .iter()
             .enumerate()
@@ -614,6 +736,7 @@ pub async fn get_tag_cloud(
             count,
             representative_image_id: best_id,
             thumbnail_path,
+            image_ids: cluster_ids,
         });
     }
 
@@ -623,6 +746,224 @@ pub async fn get_tag_cloud(
     }
 
     Ok(entries)
+}
+
+#[tauri::command]
+pub async fn get_explore_tags(
+    db: State<'_, DbState>,
+    params: GetExploreTagsParams,
+) -> Result<Vec<ExploreTagEntry>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::get_explore_tags(&conn, params.folder_id, params.limit.unwrap_or(48)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn search_tags_autocomplete(
+    db: State<'_, DbState>,
+    params: SearchTagsAutocompleteParams,
+) -> Result<Vec<ExploreTagEntry>, String> {
+    if params.query.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::search_tags_autocomplete(&conn, &params.query, params.folder_id, params.limit.unwrap_or(10))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn find_duplicates(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    folder_id: Option<i64>,
+) -> Result<Vec<DuplicateGroup>, String> {
+    let records = {
+        let conn = db.get().map_err(|e| e.to_string())?;
+        db::get_all_image_paths(&conn, folder_id).map_err(|e| e.to_string())?
+    };
+
+    let total = records.len();
+    let _ = app.emit("duplicate_scan_progress", (0usize, total));
+
+    // Two-phase detection. No full-file read at any point.
+    //
+    // Phase 1 — stat:
+    //   Read only file metadata (size). Files with a unique size cannot be
+    //   duplicates; discard them immediately. Zero file content read.
+    //
+    // Phase 2 — sample hash:
+    //   For each size-matched candidate, read four evenly-spaced 16 KB windows
+    //   (head, 33%, 66%, tail) and hash them together. Total I/O per file is
+    //   capped at 64 KB regardless of how large the file is.
+    //
+    //   For small files (≤ 64 KB) the windows cover the whole file, so the
+    //   hash is exact. For large files, matching all four windows at different
+    //   offsets is effectively impossible for natural photo/video content unless
+    //   the files are genuinely identical — eliminating the need for a full read.
+    let app_hash = app.clone();
+    let pairs: Vec<(u64, u64, i64)> = tokio::task::spawn_blocking(move || {
+        use memmap2::Mmap;
+        use rayon::prelude::*;
+        use std::collections::HashMap;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use xxhash_rust::xxh3::{xxh3_64, Xxh3};
+
+        const WINDOW: usize = 16 * 1024; // 16 KB per sample window
+        const N: usize = 4;              // windows at 0%, 33%, 66%, 100%
+        const COVERED: usize = WINDOW * N; // 64 KB total; also full-coverage threshold
+
+        // Hash four evenly-spaced 16 KB windows. For files ≤ 64 KB this is
+        // equivalent to hashing the entire file.
+        fn sample(mmap: &[u8]) -> u64 {
+            if mmap.len() <= COVERED {
+                return xxh3_64(mmap);
+            }
+            let mut h = Xxh3::new();
+            for i in 0..N {
+                let pos = (mmap.len() - WINDOW) * i / (N - 1);
+                h.update(&mmap[pos..pos + WINDOW]);
+            }
+            h.digest()
+        }
+
+        // ── Phase 1: stat ─────────────────────────────────────────────────
+        let sized: Vec<(i64, String, u64)> = records
+            .par_iter()
+            .filter_map(|r| {
+                let size = std::fs::metadata(&r.path).ok()?.len();
+                if size == 0 { return None; }
+                Some((r.id, r.path.clone(), size))
+            })
+            .collect();
+
+        let mut by_size: HashMap<u64, Vec<usize>> = HashMap::new();
+        for (i, (_, _, size)) in sized.iter().enumerate() {
+            by_size.entry(*size).or_default().push(i);
+        }
+        let candidates: Vec<usize> = by_size
+            .into_values()
+            .filter(|g| g.len() > 1)
+            .flatten()
+            .collect();
+
+        if candidates.is_empty() {
+            return vec![];
+        }
+
+        // ── Phase 2: sample hash ──────────────────────────────────────────
+        let c_total = candidates.len();
+        let _ = app_hash.emit("duplicate_scan_progress", (0usize, c_total));
+        let counter = AtomicUsize::new(0);
+
+        candidates
+            .par_iter()
+            .filter_map(|&idx| {
+                let (id, path, size) = &sized[idx];
+                let file = std::fs::File::open(path).ok()?;
+                // SAFETY: read-only; no external truncation expected during scan.
+                let mmap = unsafe { Mmap::map(&file).ok()? };
+                let hash = sample(&mmap);
+                let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                if done % 100 == 0 || done == c_total {
+                    let _ = app_hash.emit("duplicate_scan_progress", (done, c_total));
+                }
+                Some((hash, *size, *id))
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut size_hash_map: std::collections::HashMap<(u64, u64), Vec<i64>> = std::collections::HashMap::new();
+    for (hash, file_size, id) in pairs {
+        size_hash_map.entry((hash, file_size)).or_default().push(id);
+    }
+
+    // Resolve image records for each duplicate group
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let mut groups: Vec<DuplicateGroup> = size_hash_map
+        .into_iter()
+        .filter(|(_, ids)| ids.len() > 1)
+        .filter_map(|((hash, file_size), ids)| {
+            let images = db::get_images_by_ids(&conn, &ids).ok()?;
+            Some(DuplicateGroup {
+                file_hash: format!("{:016x}", hash),
+                file_size,
+                images,
+            })
+        })
+        .collect();
+
+    // Largest duplicates first — wastes the most space
+    groups.sort_by(|a, b| b.file_size.cmp(&a.file_size));
+
+    // Persist results so they survive restart — best-effort, ignore errors.
+    let folder_scope = match folder_id {
+        Some(id) => format!("folder:{}", id),
+        None => "all".to_string(),
+    };
+    if let Ok(json) = serde_json::to_string(&groups) {
+        let _ = db::set_duplicate_scan_cache(&conn, &folder_scope, &json);
+    }
+
+    Ok(groups)
+}
+
+#[tauri::command]
+pub async fn load_duplicate_scan_cache(
+    db: State<'_, DbState>,
+    folder_id: Option<i64>,
+) -> Result<Option<DuplicateScanCache>, String> {
+    let folder_scope = match folder_id {
+        Some(id) => format!("folder:{}", id),
+        None => "all".to_string(),
+    };
+    let conn = db.get().map_err(|e| e.to_string())?;
+    match db::get_duplicate_scan_cache(&conn, &folder_scope).map_err(|e| e.to_string())? {
+        Some((json, scanned_at)) => {
+            let groups: Vec<DuplicateGroup> =
+                serde_json::from_str(&json).map_err(|e| e.to_string())?;
+            Ok(Some(DuplicateScanCache { groups, scanned_at }))
+        }
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+pub async fn delete_images_from_disk(
+    db: State<'_, DbState>,
+    params: DeleteImagesFromDiskParams,
+) -> Result<usize, String> {
+    if params.image_ids.is_empty() {
+        return Ok(0);
+    }
+    let conn = db.get().map_err(|e| e.to_string())?;
+    // Collect paths before deleting DB rows
+    let records = db::get_all_image_paths(&conn, None).map_err(|e| e.to_string())?;
+    let id_set: std::collections::HashSet<i64> = params.image_ids.iter().copied().collect();
+    let paths: Vec<String> = records
+        .into_iter()
+        .filter(|r| id_set.contains(&r.id))
+        .map(|r| r.path)
+        .collect();
+
+    db::delete_images_by_ids(&conn, &params.image_ids).map_err(|e| e.to_string())?;
+
+    let mut deleted = 0usize;
+    for path in &paths {
+        if std::fs::remove_file(path).is_ok() {
+            deleted += 1;
+        }
+    }
+    Ok(deleted)
+}
+
+#[tauri::command]
+pub async fn get_images_by_ids(
+    db: State<'_, DbState>,
+    params: GetImagesByIdsParams,
+) -> Result<Vec<ImageRecord>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::get_images_by_ids(&conn, &params.image_ids).map_err(|e| e.to_string())
 }
 
 // ── k-means with cosine similarity (all vectors assumed to be unit-normalized) ──
@@ -812,14 +1153,21 @@ pub struct SetTaggerThresholdParams {
 }
 
 #[derive(Deserialize)]
+pub struct SetTaggerBatchSizeParams {
+    pub batch_size: usize,
+}
+
+#[derive(Deserialize)]
 pub struct QueueTaggingJobsParams {
     pub folder_id: Option<i64>,
+    pub folder_ids: Option<Vec<i64>>,
     pub image_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
 pub struct ClearTaggingJobsParams {
     pub folder_id: Option<i64>,
+    pub folder_ids: Option<Vec<i64>>,
 }
 
 #[derive(Deserialize)]
@@ -884,6 +1232,21 @@ pub async fn set_tagger_threshold(
 }
 
 #[tauri::command]
+pub async fn get_tagger_batch_size(app: AppHandle) -> Result<usize, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(tagger::tagger_batch_size(&app_dir))
+}
+
+#[tauri::command]
+pub async fn set_tagger_batch_size(
+    app: AppHandle,
+    params: SetTaggerBatchSizeParams,
+) -> Result<usize, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tagger::set_tagger_batch_size(&app_dir, params.batch_size).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn prepare_tagger_model(app: AppHandle) -> Result<TaggerModelStatus, String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -913,19 +1276,28 @@ pub async fn queue_tagging_jobs(
     params: QueueTaggingJobsParams,
 ) -> Result<usize, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
-    let (total, folder_ids) = match (params.folder_id, params.image_id) {
-        (_, Some(image_id)) => {
+    let requested_folder_ids = params.folder_ids.unwrap_or_default();
+    let (total, folder_ids) = match (params.folder_id, params.image_id, requested_folder_ids.is_empty()) {
+        (_, Some(image_id), _) => {
             db::enqueue_tagging_job(&conn, image_id).map_err(|e| e.to_string())?;
             // Look up just this image's folder_id rather than fetching all folders
             let image = db::get_image_by_id(&conn, image_id).map_err(|e| e.to_string())?;
             (1usize, vec![image.folder_id])
         }
-        (Some(folder_id), None) => {
+        (Some(folder_id), None, _) => {
             let n = db::enqueue_missing_tagging_jobs_for_folder(&conn, folder_id)
                 .map_err(|e| e.to_string())?;
             (n, vec![folder_id])
         }
-        (None, None) => {
+        (None, None, false) => {
+            let mut total = 0usize;
+            for &folder_id in &requested_folder_ids {
+                total += db::enqueue_missing_tagging_jobs_for_folder(&conn, folder_id)
+                    .map_err(|e| e.to_string())?;
+            }
+            (total, requested_folder_ids)
+        }
+        (None, None, true) => {
             let folders = db::get_folders(&conn).map_err(|e| e.to_string())?;
             let folder_ids: Vec<i64> = folders.iter().map(|f| f.id).collect();
             let mut total = 0usize;
@@ -948,14 +1320,27 @@ pub async fn clear_tagging_jobs(
     params: ClearTaggingJobsParams,
 ) -> Result<usize, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
-    let n = db::clear_tagging_jobs(&conn, params.folder_id).map_err(|e| e.to_string())?;
-    let folder_ids: Vec<i64> = match params.folder_id {
-        Some(id) => vec![id],
-        None => db::get_folders(&conn)
+    let requested_folder_ids = params.folder_ids.unwrap_or_default();
+    let (n, folder_ids): (usize, Vec<i64>) = match (params.folder_id, requested_folder_ids.is_empty()) {
+        (Some(id), _) => (
+            db::clear_tagging_jobs(&conn, Some(id)).map_err(|e| e.to_string())?,
+            vec![id],
+        ),
+        (None, false) => {
+            let mut total = 0usize;
+            for &folder_id in &requested_folder_ids {
+                total += db::clear_tagging_jobs(&conn, Some(folder_id)).map_err(|e| e.to_string())?;
+            }
+            (total, requested_folder_ids)
+        }
+        (None, true) => (
+            db::clear_tagging_jobs(&conn, None).map_err(|e| e.to_string())?,
+            db::get_folders(&conn)
             .map_err(|e| e.to_string())?
             .into_iter()
             .map(|f| f.id)
             .collect(),
+        ),
     };
     drop(conn);
     indexer::emit_folder_job_progress(&app, db.inner(), &folder_ids, true);

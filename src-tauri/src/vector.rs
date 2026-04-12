@@ -96,15 +96,25 @@ pub fn find_similar_image_ids(
         Err(error) => return Err(error.into()),
     };
 
-    let allowed_folder_ids = match folder_id {
-        Some(folder_id) => Some(image_ids_for_folder(conn, folder_id)?),
-        None => None,
-    };
-    let search_limit = if allowed_folder_ids.is_some() {
-        count_image_vectors(conn)?.max(1) as usize
-    } else {
-        limit + 1
-    };
+    if let Some(folder_id) = folder_id {
+        // Brute-force cosine scan scoped to the folder — avoids the KNN k=4096 limit
+        // and returns exact nearest neighbours within the folder.
+        let mut stmt = conn.prepare(
+            "SELECT v.image_id
+             FROM image_vec v
+             JOIN images i ON i.id = v.image_id
+             WHERE i.folder_id = ?2
+               AND v.image_id != ?3
+             ORDER BY vec_distance_cosine(v.embedding, vec_f32(?1)) ASC
+             LIMIT ?4",
+        )?;
+        let rows = stmt.query_map((&embedding, folder_id, image_id, limit as i64), |row| {
+            row.get::<_, i64>(0)
+        })?;
+        return Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?);
+    }
+
+    // Global KNN search (no folder filter) — use the ANN index.
     let mut stmt = conn.prepare(
         "SELECT image_id
          FROM image_vec
@@ -112,20 +122,12 @@ pub fn find_similar_image_ids(
            AND k = ?2",
     )?;
     let rows = stmt
-        .query_map((&embedding, search_limit as i64), |row| {
-            row.get::<_, i64>(0)
-        })?
+        .query_map((&embedding, (limit + 1) as i64), |row| row.get::<_, i64>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
     let mut ids = Vec::new();
     for row in rows {
         if row != image_id {
-            if allowed_folder_ids
-                .as_ref()
-                .is_some_and(|folder_ids| !folder_ids.contains(&row))
-            {
-                continue;
-            }
             ids.push(row);
         }
         if ids.len() >= limit {
@@ -135,14 +137,101 @@ pub fn find_similar_image_ids(
     Ok(ids)
 }
 
-fn image_ids_for_folder(
-    conn: &Connection,
-    folder_id: i64,
-) -> Result<std::collections::HashSet<i64>> {
-    let mut stmt = conn.prepare("SELECT id FROM images WHERE folder_id = ?1")?;
-    let rows = stmt.query_map([folder_id], |row| row.get::<_, i64>(0))?;
-    Ok(rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()?)
+// pub fn find_similar_image_matches(
+//     conn: &Connection,
+//     image_id: i64,
+//     folder_id: Option<i64>,
+//     threshold: f32,
+//     offset: usize,
+//     limit: usize,
+// ) -> Result<Vec<(i64, f32)>> {
+//     let embedding: Vec<u8> = match conn.query_row(
+//         "SELECT embedding FROM image_vec WHERE image_id = ?1",
+//         [image_id],
+//         |row| row.get(0),
+//     ) {
+//         Ok(embedding) => embedding,
+//         Err(SqliteError::QueryReturnedNoRows) => return Ok(Vec::new()),
+//         Err(error) => return Err(error.into()),
+//     };
+
+//     let query = match folder_id {
+//         Some(_) => {
+//             "SELECT v.image_id, vec_distance_cosine(v.embedding, vec_f32(?1)) AS distance
+//              FROM image_vec v
+//              JOIN images i ON i.id = v.image_id
+//              WHERE i.folder_id = ?2
+//                AND v.image_id != ?3
+//                AND vec_distance_cosine(v.embedding, vec_f32(?1)) <= ?4
+//              ORDER BY distance ASC
+//              LIMIT ?5 OFFSET ?6"
+//         }
+//         None => {
+//             "SELECT v.image_id, vec_distance_cosine(v.embedding, vec_f32(?1)) AS distance
+//              FROM image_vec v
+//              WHERE v.image_id != ?2
+//                AND vec_distance_cosine(v.embedding, vec_f32(?1)) <= ?3
+//              ORDER BY distance ASC
+//              LIMIT ?4 OFFSET ?5"
+//         }
+//     };
+
+//     let mut stmt = conn.prepare(query)?;
+//     match folder_id {
+//         Some(folder_id) => Ok(stmt
+//             .query_map(
+//                 (
+//                     &embedding,
+//                     folder_id,
+//                     image_id,
+//                     threshold,
+//                     limit as i64,
+//                     offset as i64,
+//                 ),
+//                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, f32>(1)?)),
+//             )?
+//             .collect::<rusqlite::Result<Vec<_>>>()?),
+//         None => Ok(stmt
+//             .query_map(
+//                 (&embedding, image_id, threshold, limit as i64, offset as i64),
+//                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, f32>(1)?)),
+//             )?
+//             .collect::<rusqlite::Result<Vec<_>>>()?),
+//     }
+// }
+
+pub fn get_image_embedding(conn: &Connection, image_id: i64) -> Result<Option<Vec<f32>>> {
+    let embedding: Result<Vec<u8>, rusqlite::Error> = conn.query_row(
+        "SELECT embedding FROM image_vec WHERE image_id = ?1",
+        [image_id],
+        |row| row.get(0),
+    );
+
+    match embedding {
+        Ok(bytes) => Ok(Some(unpack_f32(&bytes))),
+        Err(SqliteError::QueryReturnedNoRows) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
 }
+
+pub fn get_embedding_revision(conn: &Connection) -> Result<String> {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM image_vec", [], |row| row.get(0))?;
+    let max_updated_at: Option<String> = conn.query_row(
+        "SELECT MAX(embedding_updated_at) FROM images WHERE embedding_status = 'ready'",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(format!("{}:{}", count, max_updated_at.unwrap_or_default()))
+}
+
+// fn image_ids_for_folder(
+//     conn: &Connection,
+//     folder_id: i64,
+// ) -> Result<std::collections::HashSet<i64>> {
+//     let mut stmt = conn.prepare("SELECT id FROM images WHERE folder_id = ?1")?;
+//     let rows = stmt.query_map([folder_id], |row| row.get::<_, i64>(0))?;
+//     Ok(rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()?)
+// }
 
 /// Returns all stored image embeddings with their image IDs, optionally filtered to one folder.
 /// Each entry is `(image_id, normalized_f32_embedding)`.

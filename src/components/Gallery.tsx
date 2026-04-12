@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { ImageRecord, tileSizeForZoom, useGalleryStore } from "../store";
+import { ImageRecord, parseSearchValue, tileSizeForZoom, useGalleryStore } from "../store";
 
 const GAP = 6;
 
@@ -30,6 +30,7 @@ function ContextMenu({
   const openImage = useGalleryStore((state) => state.openImage);
   const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
   const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
+  const similarScope = useGalleryStore((state) => state.similarScope);
   const canFindSimilar = image.embedding_status === "ready";
 
   return (
@@ -59,7 +60,7 @@ function ContextMenu({
         }`}
         onClick={async () => {
           if (!canFindSimilar) return;
-          await loadSimilarImages(image.id);
+          await loadSimilarImages(image.id, similarScope === "current_folder" ? image.folder_id : null, true, image.folder_id);
           onClose();
         }}
         disabled={!canFindSimilar}
@@ -115,6 +116,7 @@ function ImageTile({
   const [loaded, setLoaded] = useState(false);
   const [errored, setErrored] = useState(false);
   const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
+  const similarScope = useGalleryStore((state) => state.similarScope);
   const canFindSimilar = image.embedding_status === "ready";
 
   const src = image.thumbnail_path
@@ -181,6 +183,15 @@ function ImageTile({
             </svg>
           </div>
         )}
+        {image.rating > 0 && (
+          <div className="flex items-center gap-0.5 rounded-md bg-black/60 px-1.5 py-1 text-amber-300 backdrop-blur-sm">
+            {Array.from({ length: image.rating }, (_, index) => (
+              <svg key={index} className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81H7.03a1 1 0 00.951-.69l1.07-3.292z" />
+              </svg>
+            ))}
+          </div>
+        )}
         {image.media_kind === "video" && image.duration_ms && (
           <div className="rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white/80 backdrop-blur-sm">
             {formatDuration(image.duration_ms)}
@@ -230,7 +241,7 @@ function ImageTile({
             onClick={(event) => {
               event.stopPropagation();
               if (!canFindSimilar) return;
-              void loadSimilarImages(image.id);
+              void loadSimilarImages(image.id, similarScope === "current_folder" ? image.folder_id : null, true, image.folder_id);
             }}
             disabled={!canFindSimilar}
           >
@@ -250,11 +261,11 @@ export function Gallery() {
   const loadingImages = useGalleryStore((state) => state.loadingImages);
   const zoomPreset = useGalleryStore((state) => state.zoomPreset);
   const search = useGalleryStore((state) => state.search);
-  const searchMode = useGalleryStore((state) => state.searchMode);
   const collectionTitle = useGalleryStore((state) => state.collectionTitle);
   const imageLoadError = useGalleryStore((state) => state.imageLoadError);
   const galleryScrollResetKey = useGalleryStore((state) => state.galleryScrollResetKey);
   const isSimilarResults = collectionTitle === "Similar Images";
+  const parsedSearch = parseSearchValue(search);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; image: ImageRecord } | null>(null);
@@ -262,6 +273,7 @@ export function Gallery() {
   const handleScroll = useCallback(() => {
     const element = parentRef.current;
     if (!element) return;
+    if (element.scrollTop < 24) return;
     const nearBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 600;
     if (nearBottom && !loadingImages && images.length < totalImages) {
       void loadMoreImages();
@@ -295,85 +307,87 @@ export function Gallery() {
     };
   }, []);
 
-  if (images.length === 0 && loadingImages) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8">
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8 min-w-72">
-          <div className="h-5 w-5 mx-auto rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
-          <p className="mt-4 text-sm text-white/40 font-medium">
-            {isSimilarResults
-              ? "Finding similar images"
-              : searchMode === "semantic" && search.trim().length > 0
-              ? `Searching for matches to "${search}"`
-              : "Loading media"}
-          </p>
-          <p className="text-xs text-white/20 mt-1">
-            {isSimilarResults
-              ? "Comparing visual embeddings"
-              : searchMode === "semantic" && search.trim().length > 0
-              ? "Semantic search can take a little longer than filename search"
-              : "Fetching results"}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (images.length === 0 && !loadingImages) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8">
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8">
-          <svg className="h-12 w-12 mx-auto text-white/10 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={0.75}
-              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          <p className="text-sm text-white/30 font-medium">
-            {imageLoadError
-              ? "Could not load results"
-              : isSimilarResults
-              ? "No similar images found"
-              : searchMode === "semantic" && search.trim().length > 0
-              ? "No semantic matches found"
-              : "No media found"}
-          </p>
-          <p className="text-xs text-white/15 mt-1">
-            {imageLoadError
-              ? imageLoadError
-              : isSimilarResults
-              ? "This item may be visually isolated, or more embeddings may need to finish processing"
-              : searchMode === "semantic" && search.trim().length > 0
-              ? "Try a broader phrase, or wait for more embeddings to finish processing"
-              : "Try adjusting your filters or add a new folder"}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div ref={parentRef} className="relative flex-1 overflow-y-auto overflow-x-hidden min-h-0 bg-[#07080f]">
-      <div
-        className="grid content-start"
-        style={{
-          padding: GAP,
-          gap: GAP,
-          gridTemplateColumns: `repeat(auto-fill, minmax(${tileSizeForZoom(zoomPreset)}px, 1fr))`,
-        }}
-      >
-        {images.map((image) => (
-          <ImageTile
-            key={image.id}
-            image={image}
-            onClick={() => openImage(image)}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              setContextMenu({ x: event.clientX, y: event.clientY, image });
-            }}
-          />
-        ))}
-      </div>
+      {images.length === 0 && loadingImages ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
+          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8 min-w-72">
+            <div className="h-5 w-5 mx-auto rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
+            <p className="mt-4 text-sm text-white/40 font-medium">
+              {isSimilarResults
+                ? "Finding similar images"
+                : parsedSearch.mode === "semantic" && parsedSearch.query.length > 0
+                ? `Searching for matches to "${parsedSearch.query}"`
+                : parsedSearch.mode === "tag" && parsedSearch.query.length > 0
+                ? `Searching tags for "${parsedSearch.query}"`
+                : "Loading media"}
+            </p>
+            <p className="text-xs text-white/20 mt-1">
+              {isSimilarResults
+                ? "Comparing visual embeddings"
+                : parsedSearch.mode === "semantic" && parsedSearch.query.length > 0
+                ? "Semantic search can take a little longer than filename search"
+                : parsedSearch.mode === "tag" && parsedSearch.query.length > 0
+                ? "Matching against AI and user tags"
+                : "Fetching results"}
+            </p>
+          </div>
+        </div>
+      ) : images.length === 0 && !loadingImages ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
+          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8">
+            <svg className="h-12 w-12 mx-auto text-white/10 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={0.75}
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <p className="text-sm text-white/30 font-medium">
+              {imageLoadError
+                ? "Could not load results"
+                : isSimilarResults
+                ? "No similar images found"
+                : parsedSearch.mode === "semantic" && parsedSearch.query.length > 0
+                ? "No semantic matches found"
+                : parsedSearch.mode === "tag" && parsedSearch.query.length > 0
+                ? "No tag matches found"
+                : "No media found"}
+            </p>
+            <p className="text-xs text-white/15 mt-1">
+              {imageLoadError
+                ? imageLoadError
+                : isSimilarResults
+                ? "This item may be visually isolated, or more embeddings may need to finish processing"
+                : parsedSearch.mode === "semantic" && parsedSearch.query.length > 0
+                ? "Try a broader phrase, or wait for more embeddings to finish processing"
+                : parsedSearch.mode === "tag" && parsedSearch.query.length > 0
+                ? "Try a shorter tag, or wait for more tagging jobs to finish"
+                : "Try adjusting your filters or add a new folder"}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div
+          className="grid content-start"
+          style={{
+            padding: GAP,
+            gap: GAP,
+            gridTemplateColumns: `repeat(auto-fill, minmax(${tileSizeForZoom(zoomPreset)}px, 1fr))`,
+          }}
+        >
+          {images.map((image) => (
+            <ImageTile
+              key={image.id}
+              image={image}
+              onClick={() => openImage(image)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setContextMenu({ x: event.clientX, y: event.clientY, image });
+              }}
+            />
+          ))}
+        </div>
+      )}
 
-      {loadingImages ? (
+      {images.length > 0 && loadingImages ? (
         <div className="flex justify-center py-8">
           <div className="h-4 w-4 rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
         </div>

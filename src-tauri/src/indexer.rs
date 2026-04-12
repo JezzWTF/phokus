@@ -331,6 +331,7 @@ fn do_index(app: AppHandle, pool: DbPool, folder_id: i64, folder_path: PathBuf) 
         if !missing_ids.is_empty() {
             db::delete_images_by_ids(&conn, &missing_ids)?;
         }
+        let _ = db::backfill_embedding_jobs(&conn)?;
         db::update_folder_count(&conn, folder_id)?;
     }
 
@@ -864,8 +865,6 @@ fn process_caption_batch(
     Ok(())
 }
 
-const TAGGING_BATCH_SIZE: usize = 1;
-
 fn process_tagging_batch(
     app: &AppHandle,
     pool: &DbPool,
@@ -877,9 +876,10 @@ fn process_tagging_batch(
     }
 
     let paused_folders = paused_folder_ids("tagging");
+    let batch_size = crate::tagger::tagger_batch_size(app_data_dir);
     let jobs = with_db_write_lock(|| {
         let mut conn = pool.get()?;
-        db::claim_tagging_jobs(&mut conn, &paused_folders, TAGGING_BATCH_SIZE)
+        db::claim_tagging_jobs(&mut conn, &paused_folders, batch_size)
     })?;
 
     if jobs.is_empty() {
