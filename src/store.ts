@@ -305,6 +305,7 @@ interface GalleryState {
   showVisualCluster: (imageIds: number[]) => Promise<void>;
   searchForTag: (tag: string) => void;
   loadSimilarImages: (imageId: number, folderId?: number | null, reset?: boolean, sourceFolderId?: number | null) => Promise<void>;
+  loadSimilarByRegion: (imageId: number, crop: { x: number; y: number; w: number; h: number }, folderId?: number | null, sourceFolderId?: number | null) => Promise<void>;
   setSimilarScope: (scope: SimilarScope) => void;
   suggestImageTags: (imageId: number) => Promise<string[]>;
   loadCaptionModelStatus: () => Promise<void>;
@@ -982,6 +983,72 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         loadingImages: false,
         imageLoadError: String(error),
         collectionTitle: "Similar Images",
+        similarSourceImageId: imageId,
+        similarSourceFolderId: sourceFolderId,
+        similarHasMore: false,
+        similarFolderId: folderId ?? null,
+        similarScope,
+        selectedImage: null,
+      });
+    }
+  },
+
+  loadSimilarByRegion: async (imageId, crop, folderId = get().selectedFolderId, sourceFolderId = folderId ?? null) => {
+    const requestToken = ++similarRequestToken;
+    const similarScope = folderId === null ? "all_media" : "current_folder";
+    set((state) => ({
+      images: [],
+      loadedCount: 0,
+      loadingImages: true,
+      collectionTitle: "Region Search Results",
+      imageLoadError: null,
+      similarSourceImageId: imageId,
+      similarSourceFolderId: sourceFolderId,
+      similarFolderId: folderId ?? null,
+      similarScope,
+      galleryScrollResetKey: state.galleryScrollResetKey + 1,
+      selectedImage: null,
+    }));
+
+    try {
+      const result = await invoke<SimilarImagesPage>("find_similar_by_region", {
+        params: {
+          image_id: imageId,
+          crop_x: crop.x,
+          crop_y: crop.y,
+          crop_w: crop.w,
+          crop_h: crop.h,
+          folder_id: folderId ?? null,
+          offset: 0,
+          limit: PAGE_SIZE,
+        },
+      });
+
+      if (requestToken !== similarRequestToken) return;
+
+      set({
+        images: result.images,
+        totalImages: result.has_more ? result.images.length + 1 : result.images.length,
+        loadedCount: result.images.length,
+        loadingImages: false,
+        imageLoadError: null,
+        collectionTitle: "Region Search Results",
+        similarSourceImageId: imageId,
+        similarSourceFolderId: sourceFolderId,
+        similarHasMore: result.has_more,
+        similarFolderId: folderId ?? null,
+        similarScope,
+      });
+    } catch (error) {
+      if (requestToken !== similarRequestToken) return;
+      console.error("Failed to load region search results:", error);
+      set({
+        images: [],
+        totalImages: 0,
+        loadedCount: 0,
+        loadingImages: false,
+        imageLoadError: String(error),
+        collectionTitle: "Region Search Results",
         similarSourceImageId: imageId,
         similarSourceFolderId: sourceFolderId,
         similarHasMore: false,

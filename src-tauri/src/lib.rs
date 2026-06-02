@@ -87,6 +87,7 @@ pub fn run() {
             commands::reindex_folder,
             commands::update_image_details,
             commands::find_similar_images,
+            commands::find_similar_by_region,
             commands::debug_similar_images,
             commands::retry_failed_embeddings,
             commands::semantic_search_images,

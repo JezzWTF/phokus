@@ -60,6 +60,19 @@ pub struct FindSimilarImagesParams {
 }
 
 #[derive(Deserialize)]
+pub struct FindSimilarByRegionParams {
+    pub image_id: i64,
+    /// Normalized crop rect (0.0–1.0).
+    pub crop_x: f32,
+    pub crop_y: f32,
+    pub crop_w: f32,
+    pub crop_h: f32,
+    pub folder_id: Option<i64>,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
 pub struct DebugSimilarImagesParams {
     pub image_id: i64,
     pub folder_id: Option<i64>,
@@ -346,6 +359,66 @@ pub async fn find_similar_images(
         .map(|(image_id, _)| image_id)
         .collect::<Vec<_>>();
     let images = db::get_images_by_ids(&conn, &image_ids).map_err(|e| e.to_string())?;
+    Ok(SimilarImagesPage {
+        images,
+        offset,
+        limit,
+        has_more,
+    })
+}
+
+#[tauri::command]
+pub async fn find_similar_by_region(
+    db: State<'_, DbState>,
+    params: FindSimilarByRegionParams,
+) -> Result<SimilarImagesPage, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let limit = params.limit.unwrap_or(32);
+    let offset = params.offset.unwrap_or(0);
+
+    // Look up the source image path
+    let image = db::get_image_by_id(&conn, params.image_id).map_err(|e| e.to_string())?;
+    let image_path = std::path::Path::new(&image.path);
+
+    // Embed the cropped region in-memory (no temp file needed)
+    let embedder = embedder::ClipImageEmbedder::new().map_err(|e| e.to_string())?;
+    let embedding = embedder
+        .embed_image_crop(
+            image_path,
+            params.crop_x,
+            params.crop_y,
+            params.crop_w,
+            params.crop_h,
+        )
+        .map_err(|e| e.to_string())?;
+
+    // Search for similar images using the crop embedding
+    let image_ids = match params.folder_id {
+        Some(folder_id) => vector::search_image_ids_by_embedding_in_folder(
+            &conn,
+            &embedding,
+            folder_id,
+            Some(params.image_id),
+            offset + limit + 1,
+        )
+        .map_err(|e| e.to_string())?,
+        None => {
+            let mut ids = vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 1)
+                .map_err(|e| e.to_string())?;
+            // Exclude the source image from global results
+            ids.retain(|&id| id != params.image_id);
+            ids
+        }
+    };
+
+    let has_more = image_ids.len() > offset + limit;
+    let page_ids = image_ids
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .collect::<Vec<_>>();
+
+    let images = db::get_images_by_ids(&conn, &page_ids).map_err(|e| e.to_string())?;
     Ok(SimilarImagesPage {
         images,
         offset,

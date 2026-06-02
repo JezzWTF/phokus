@@ -58,12 +58,69 @@ function ratingPill(rating: AiRating): { label: string; className: string } {
   }
 }
 
+interface DragRect {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+}
+
+/** Compute a CSS-pixel rect (relative to the viewport container) from a DragRect. */
+function normaliseRect(r: DragRect): { left: number; top: number; width: number; height: number } {
+  return {
+    left: Math.min(r.startX, r.endX),
+    top: Math.min(r.startY, r.endY),
+    width: Math.abs(r.endX - r.startX),
+    height: Math.abs(r.endY - r.startY),
+  };
+}
+
+/** Convert a CSS-pixel drag rect (relative to viewport container) to normalised 0–1 crop coords
+ *  relative to the actual rendered <img> element bounds. */
+function rectToNormalisedCrop(
+  rect: DragRect,
+  imgEl: HTMLImageElement,
+): { x: number; y: number; w: number; h: number } | null {
+  const imgBounds = imgEl.getBoundingClientRect();
+  if (imgBounds.width === 0 || imgBounds.height === 0) return null;
+
+  // rect coords are already in viewport space (client coords)
+  const rawX = Math.min(rect.startX, rect.endX);
+  const rawY = Math.min(rect.startY, rect.endY);
+  const rawW = Math.abs(rect.endX - rect.startX);
+  const rawH = Math.abs(rect.endY - rect.startY);
+
+  // Clamp to image bounds
+  const clampedX = Math.max(rawX, imgBounds.left);
+  const clampedY = Math.max(rawY, imgBounds.top);
+  const clampedRight = Math.min(rawX + rawW, imgBounds.right);
+  const clampedBottom = Math.min(rawY + rawH, imgBounds.bottom);
+
+  const croppedW = clampedRight - clampedX;
+  const croppedH = clampedBottom - clampedY;
+
+  if (croppedW <= 0 || croppedH <= 0) return null;
+
+  // Normalize by the CSS transform scale — getBoundingClientRect already returns
+  // the scaled (on-screen) size, so we normalize directly against that.
+  return {
+    x: (clampedX - imgBounds.left) / imgBounds.width,
+    y: (clampedY - imgBounds.top) / imgBounds.height,
+    w: croppedW / imgBounds.width,
+    h: croppedH / imgBounds.height,
+  };
+}
+
+/** Minimum selection size as a fraction of the viewport container dimension. */
+const MIN_SELECTION_FRACTION = 0.02;
+
 export function Lightbox() {
   const selectedImage = useGalleryStore((state) => state.selectedImage);
   const closeImage = useGalleryStore((state) => state.closeImage);
   const images = useGalleryStore((state) => state.images);
   const openImage = useGalleryStore((state) => state.openImage);
   const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
+  const loadSimilarByRegion = useGalleryStore((state) => state.loadSimilarByRegion);
   const similarScope = useGalleryStore((state) => state.similarScope);
   const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
   const getImageTags = useGalleryStore((state) => state.getImageTags);
@@ -71,16 +128,26 @@ export function Lightbox() {
   const removeTag = useGalleryStore((state) => state.removeTag);
   const taggerModelStatus = useGalleryStore((state) => state.taggerModelStatus);
   const queueTaggingForImage = useGalleryStore((state) => state.queueTaggingForImage);
+
   const [zoom, setZoom] = useState(1);
   const [imageTags, setImageTags] = useState<ImageTag[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [tagAdding, setTagAdding] = useState(false);
   const [tagsExpanded, setTagsExpanded] = useState(false);
   const [taggingQueued, setTaggingQueued] = useState(false);
+
+  // Region selection state
+  const [regionSelectMode, setRegionSelectMode] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragRect, setDragRect] = useState<DragRect | null>(null);
+  const [regionSearching, setRegionSearching] = useState(false);
+
   const imageViewportRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   const currentIndex = selectedImage ? images.findIndex((image) => image.id === selectedImage.id) : -1;
   const canFindSimilar = selectedImage?.embedding_status === "ready";
+  const canSearchRegion = canFindSimilar && selectedImage?.media_kind === "image";
 
   const goPrev = useCallback(() => {
     if (currentIndex > 0) openImage(images[currentIndex - 1]);
@@ -90,13 +157,21 @@ export function Lightbox() {
     if (currentIndex >= 0 && currentIndex < images.length - 1) openImage(images[currentIndex + 1]);
   }, [currentIndex, images, openImage]);
 
+  const exitRegionMode = useCallback(() => {
+    setRegionSelectMode(false);
+    setIsDragging(false);
+    setDragRect(null);
+  }, []);
+
   useEffect(() => {
     setZoom(1);
     setImageTags([]);
     setTagInput("");
     setTagsExpanded(false);
     setTaggingQueued(false);
-  }, [selectedImage?.id]);
+    exitRegionMode();
+    setRegionSearching(false);
+  }, [selectedImage?.id, exitRegionMode]);
 
   useEffect(() => {
     if (!selectedImage) return;
@@ -115,6 +190,7 @@ export function Lightbox() {
     if (!viewport || !selectedImage || selectedImage.media_kind !== "image") return;
 
     const handleWheel = (event: WheelEvent) => {
+      if (regionSelectMode) return; // don't zoom during selection
       if (!event.ctrlKey && Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
       event.preventDefault();
       setZoom((value) => {
@@ -125,12 +201,19 @@ export function Lightbox() {
 
     viewport.addEventListener("wheel", handleWheel, { passive: false });
     return () => viewport.removeEventListener("wheel", handleWheel);
-  }, [selectedImage]);
+  }, [selectedImage, regionSelectMode]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (!selectedImage) return;
-      if (event.key === "Escape") closeImage();
+      if (event.key === "Escape") {
+        if (regionSelectMode) {
+          exitRegionMode();
+        } else {
+          closeImage();
+        }
+      }
+      if (regionSelectMode) return; // block nav keys during selection
       if (event.key === "ArrowLeft") goPrev();
       if (event.key === "ArrowRight") goNext();
       if (event.key === "+" || event.key === "=") setZoom((value) => Math.min(3, value + 0.25));
@@ -139,7 +222,75 @@ export function Lightbox() {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selectedImage, closeImage, goPrev, goNext]);
+  }, [selectedImage, closeImage, goPrev, goNext, regionSelectMode, exitRegionMode]);
+
+  // ── Region selection pointer handlers ───────────────────────────────────────
+  const handleRegionPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!regionSelectMode) return;
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setIsDragging(true);
+      setDragRect({
+        startX: event.clientX,
+        startY: event.clientY,
+        endX: event.clientX,
+        endY: event.clientY,
+      });
+    },
+    [regionSelectMode],
+  );
+
+  const handleRegionPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!isDragging) return;
+      setDragRect((prev) =>
+        prev ? { ...prev, endX: event.clientX, endY: event.clientY } : null,
+      );
+    },
+    [isDragging],
+  );
+
+  const handleRegionPointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!isDragging || !dragRect || !selectedImage || !imgRef.current) {
+        setIsDragging(false);
+        return;
+      }
+      event.currentTarget.releasePointerCapture(event.pointerId);
+
+      const finalRect: DragRect = { ...dragRect, endX: event.clientX, endY: event.clientY };
+      const crop = rectToNormalisedCrop(finalRect, imgRef.current);
+
+      setIsDragging(false);
+      setDragRect(null);
+
+      // Ignore tiny accidental clicks
+      const containerBounds = imageViewportRef.current?.getBoundingClientRect();
+      const containerSize = containerBounds
+        ? Math.min(containerBounds.width, containerBounds.height)
+        : 500;
+      const selW = Math.abs(finalRect.endX - finalRect.startX);
+      const selH = Math.abs(finalRect.endY - finalRect.startY);
+      if (!crop || selW < containerSize * MIN_SELECTION_FRACTION || selH < containerSize * MIN_SELECTION_FRACTION) {
+        exitRegionMode();
+        return;
+      }
+
+      exitRegionMode();
+      setRegionSearching(true);
+
+      const folderId =
+        similarScope === "current_folder" ? selectedImage.folder_id : null;
+      void loadSimilarByRegion(selectedImage.id, crop, folderId, selectedImage.folder_id)
+        .finally(() => setRegionSearching(false));
+    },
+    [isDragging, dragRect, selectedImage, similarScope, loadSimilarByRegion, exitRegionMode],
+  );
+
+  // Build the CSS rect for the selection overlay (viewport-relative)
+  const selectionOverlay =
+    isDragging && dragRect ? normaliseRect(dragRect) : null;
 
   return (
     <AnimatePresence>
@@ -151,11 +302,11 @@ export function Lightbox() {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.15 }}
-          onClick={closeImage}
+          onClick={regionSelectMode ? undefined : closeImage}
         >
           <button
             className="absolute left-4 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white transition-colors hover:bg-white/20 disabled:opacity-20"
-            disabled={currentIndex <= 0}
+            disabled={currentIndex <= 0 || regionSelectMode}
             onClick={(event) => {
               event.stopPropagation();
               goPrev();
@@ -170,8 +321,38 @@ export function Lightbox() {
             <div className="flex flex-1 overflow-hidden">
               <div
                 ref={imageViewportRef}
-                className="group relative flex flex-1 items-center justify-center overflow-auto p-10"
+                className={`group relative flex flex-1 items-center justify-center overflow-auto p-10 ${
+                  regionSelectMode ? "cursor-crosshair select-none" : ""
+                }`}
+                onPointerDown={handleRegionPointerDown}
+                onPointerMove={handleRegionPointerMove}
+                onPointerUp={handleRegionPointerUp}
               >
+                {/* Region selection mode hint */}
+                {regionSelectMode && (
+                  <div className="pointer-events-none absolute inset-x-0 top-4 z-20 flex justify-center">
+                    <div className="flex items-center gap-2 rounded-full border border-white/15 bg-black/70 px-4 py-2 text-xs text-gray-300 backdrop-blur">
+                      <svg className="h-3.5 w-3.5 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                      </svg>
+                      Draw a region to search — <kbd className="ml-1 rounded border border-white/20 bg-white/10 px-1.5 py-0.5 font-mono text-[10px]">Esc</kbd> to cancel
+                    </div>
+                  </div>
+                )}
+
+                {/* Selection rectangle overlay */}
+                {selectionOverlay && selectionOverlay.width > 4 && selectionOverlay.height > 4 && (
+                  <div
+                    className="pointer-events-none fixed z-30 rounded border-2 border-violet-400 bg-violet-400/15 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]"
+                    style={{
+                      left: selectionOverlay.left,
+                      top: selectionOverlay.top,
+                      width: selectionOverlay.width,
+                      height: selectionOverlay.height,
+                    }}
+                  />
+                )}
+
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={selectedImage.id}
@@ -191,6 +372,7 @@ export function Lightbox() {
                     ) : (
                       <>
                         <img
+                          ref={imgRef}
                           src={convertFileSrc(selectedImage.path)}
                           alt={selectedImage.filename}
                           className="max-w-full rounded-2xl shadow-2xl"
@@ -198,25 +380,29 @@ export function Lightbox() {
                             maxHeight: "calc(100vh - 10rem)",
                             transform: `scale(${zoom})`,
                             transformOrigin: "center center",
+                            // Slightly dim the image while in region select mode
+                            ...(regionSelectMode ? { opacity: 0.85 } : {}),
                           }}
                         />
-                        <div className="pointer-events-none absolute right-6 top-6 opacity-0 transition-opacity group-hover:opacity-100">
-                          <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-black/55 px-2 py-1 backdrop-blur">
-                            <button
-                              className="px-2 text-sm text-gray-300 hover:text-white"
-                              onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}
-                            >
-                              -
-                            </button>
-                            <span className="min-w-14 text-center text-xs text-gray-300">{Math.round(zoom * 100)}%</span>
-                            <button
-                              className="px-2 text-sm text-gray-300 hover:text-white"
-                              onClick={() => setZoom((value) => Math.min(4, value + 0.25))}
-                            >
-                              +
-                            </button>
+                        {!regionSelectMode && (
+                          <div className="pointer-events-none absolute right-6 top-6 opacity-0 transition-opacity group-hover:opacity-100">
+                            <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-black/55 px-2 py-1 backdrop-blur">
+                              <button
+                                className="px-2 text-sm text-gray-300 hover:text-white"
+                                onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}
+                              >
+                                -
+                              </button>
+                              <span className="min-w-14 text-center text-xs text-gray-300">{Math.round(zoom * 100)}%</span>
+                              <button
+                                className="px-2 text-sm text-gray-300 hover:text-white"
+                                onClick={() => setZoom((value) => Math.min(4, value + 0.25))}
+                              >
+                                +
+                              </button>
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </>
                     )}
                   </motion.div>
@@ -260,6 +446,53 @@ export function Lightbox() {
                     </svg>
                   </button>
                 </div>
+
+                {/* Search region button row */}
+                {canSearchRegion && (
+                  <div className="shrink-0 px-5 pb-3">
+                    <button
+                      className={`w-full rounded-lg border px-3 py-2 text-xs transition-colors ${
+                        regionSelectMode
+                          ? "border-violet-400/40 bg-violet-500/15 text-violet-300 hover:bg-violet-500/20"
+                          : regionSearching
+                          ? "border-white/5 bg-white/[0.03] text-gray-500 cursor-not-allowed"
+                          : "border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
+                      }`}
+                      onClick={() => {
+                        if (regionSearching) return;
+                        setRegionSelectMode((prev) => !prev);
+                        setDragRect(null);
+                        setIsDragging(false);
+                      }}
+                      disabled={regionSearching}
+                      title={regionSelectMode ? "Cancel region selection" : "Draw a region on the image to search for similar content"}
+                    >
+                      {regionSearching ? (
+                        <span className="flex items-center justify-center gap-1.5">
+                          <svg className="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                          </svg>
+                          Searching region…
+                        </span>
+                      ) : regionSelectMode ? (
+                        <span className="flex items-center justify-center gap-1.5">
+                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                          Cancel selection
+                        </span>
+                      ) : (
+                        <span className="flex items-center justify-center gap-1.5">
+                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                          </svg>
+                          Search within image
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                )}
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 space-y-4 text-sm">
                   <div>
@@ -472,7 +705,7 @@ export function Lightbox() {
 
           <button
             className="absolute right-80 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white transition-colors hover:bg-white/20 disabled:opacity-20"
-            disabled={currentIndex >= images.length - 1}
+            disabled={currentIndex >= images.length - 1 || regionSelectMode}
             onClick={(event) => {
               event.stopPropagation();
               goNext();

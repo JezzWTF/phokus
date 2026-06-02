@@ -310,6 +310,40 @@ pub fn search_image_ids_by_embedding(
     Ok(ids)
 }
 
+/// Brute-force cosine search scoped to a single folder, ordered by ascending distance.
+/// Used for region-based similarity search where we want folder-scoped results.
+pub fn search_image_ids_by_embedding_in_folder(
+    conn: &Connection,
+    embedding: &[f32],
+    folder_id: i64,
+    exclude_image_id: Option<i64>,
+    limit: usize,
+) -> Result<Vec<i64>> {
+    if embedding.len() != CLIP_VECTOR_DIM {
+        return Err(anyhow!(
+            "expected {}-dimensional embedding, got {}",
+            CLIP_VECTOR_DIM,
+            embedding.len()
+        ));
+    }
+
+    let packed = pack_f32(embedding);
+    let exclude_id = exclude_image_id.unwrap_or(-1);
+    let mut stmt = conn.prepare(
+        "SELECT v.image_id
+         FROM image_vec v
+         JOIN images i ON i.id = v.image_id
+         WHERE i.folder_id = ?2
+           AND v.image_id != ?3
+         ORDER BY vec_distance_cosine(v.embedding, vec_f32(?1)) ASC
+         LIMIT ?4",
+    )?;
+    let rows = stmt.query_map((&packed, folder_id, exclude_id, limit as i64), |row| {
+        row.get::<_, i64>(0)
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 #[allow(dead_code)]
 pub fn search_caption_ids_by_embedding(
     conn: &Connection,
