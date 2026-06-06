@@ -857,7 +857,7 @@ pub async fn find_duplicates(
     let total = records.len();
     let _ = app.emit("duplicate_scan_progress", (0usize, total));
 
-    // Two-phase detection. No full-file read at any point.
+    // Three-phase detection.
     //
     // Phase 1 — stat:
     //   Read only file metadata (size). Files with a unique size cannot be
@@ -865,15 +865,14 @@ pub async fn find_duplicates(
     //
     // Phase 2 — sample hash:
     //   For each size-matched candidate, read four evenly-spaced 16 KB windows
-    //   (head, 33%, 66%, tail) and hash them together. Total I/O per file is
-    //   capped at 64 KB regardless of how large the file is.
+    //   and hash them. For small files (≤ 64 KB) the windows cover the whole
+    //   file so the hash is exact. For large files this is a fast shortlist.
     //
-    //   For small files (≤ 64 KB) the windows cover the whole file, so the
-    //   hash is exact. For large files, matching all four windows at different
-    //   offsets is effectively impossible for natural photo/video content unless
-    //   the files are genuinely identical — eliminating the need for a full read.
+    // Phase 3 — full hash (large files only):
+    //   For sample-hash groups that contain files > 64 KB, compute a full-file
+    //   hash to confirm the match before presenting them as deletable duplicates.
     let app_hash = app.clone();
-    let pairs: Vec<(u64, u64, i64)> = tokio::task::spawn_blocking(move || {
+    let pairs: Vec<(u64, u64, i64, String)> = tokio::task::spawn_blocking(move || {
         use memmap2::Mmap;
         use rayon::prelude::*;
         use std::collections::HashMap;
@@ -939,23 +938,82 @@ pub async fn find_duplicates(
                 if done % 100 == 0 || done == c_total {
                     let _ = app_hash.emit("duplicate_scan_progress", (done, c_total));
                 }
-                Some((hash, *size, *id))
+                Some((hash, *size, *id, path.clone()))
             })
             .collect()
     })
     .await
     .map_err(|e| e.to_string())?;
 
-    let mut size_hash_map: std::collections::HashMap<(u64, u64), Vec<i64>> = std::collections::HashMap::new();
-    for (hash, file_size, id) in pairs {
-        size_hash_map.entry((hash, file_size)).or_default().push(id);
+    // Group by (sample_hash, file_size).
+    let mut size_hash_map: std::collections::HashMap<(u64, u64), Vec<(i64, String)>> =
+        std::collections::HashMap::new();
+    for (hash, file_size, id, path) in pairs {
+        size_hash_map.entry((hash, file_size)).or_default().push((id, path));
     }
+
+    // Phase 3: for large-file groups (> 64 KB) the sample hash is not exact;
+    // re-hash the full file contents to avoid false positives before deletion.
+    const COVERED: u64 = (16 * 1024 * 4) as u64;
+    let confirmed: std::collections::HashMap<(u64, u64), Vec<i64>> =
+        tokio::task::spawn_blocking(move || {
+            use memmap2::Mmap;
+            use rayon::prelude::*;
+            use xxhash_rust::xxh3::xxh3_64;
+
+            size_hash_map
+                .into_iter()
+                .filter(|(_, entries)| entries.len() > 1)
+                .filter_map(|((sample_hash, file_size), entries)| {
+                    if file_size <= COVERED {
+                        // Sample was already a full hash — no re-read needed.
+                        let ids = entries.into_iter().map(|(id, _)| id).collect();
+                        return Some(((sample_hash, file_size), ids));
+                    }
+                    // Full-file hash pass to confirm.
+                    let full_hashes: Vec<(i64, Option<u64>)> = entries
+                        .par_iter()
+                        .map(|(id, path)| {
+                            let hash = std::fs::File::open(path)
+                                .ok()
+                                .and_then(|f| unsafe { Mmap::map(&f).ok() })
+                                .map(|mmap| xxh3_64(&mmap));
+                            (*id, hash)
+                        })
+                        .collect();
+                    // Group by full hash; keep only groups where every file hashed
+                    // successfully and at least two share the same hash.
+                    let mut by_full: std::collections::HashMap<u64, Vec<i64>> =
+                        std::collections::HashMap::new();
+                    for (id, maybe_hash) in full_hashes {
+                        if let Some(h) = maybe_hash {
+                            by_full.entry(h).or_default().push(id);
+                        }
+                    }
+                    // Return the largest confirmed group (same sample_hash/size bucket).
+                    // In practice a single full hash will dominate; emit each sub-group.
+                    // We flatten into one entry using the sample_hash key — callers only
+                    // need confirmed IDs, not the exact full hash.
+                    let confirmed_ids: Vec<i64> = by_full
+                        .into_values()
+                        .filter(|g| g.len() > 1)
+                        .flatten()
+                        .collect();
+                    if confirmed_ids.is_empty() {
+                        None
+                    } else {
+                        Some(((sample_hash, file_size), confirmed_ids))
+                    }
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Resolve image records for each duplicate group
     let conn = db.get().map_err(|e| e.to_string())?;
-    let mut groups: Vec<DuplicateGroup> = size_hash_map
+    let mut groups: Vec<DuplicateGroup> = confirmed
         .into_iter()
-        .filter(|(_, ids)| ids.len() > 1)
         .filter_map(|((hash, file_size), ids)| {
             let images = db::get_images_by_ids(&conn, &ids).ok()?;
             Some(DuplicateGroup {
@@ -1010,22 +1068,21 @@ pub async fn delete_images_from_disk(
         return Ok(0);
     }
     let conn = db.get().map_err(|e| e.to_string())?;
-    // Collect paths before deleting DB rows
     let records = db::get_all_image_paths(&conn, None).map_err(|e| e.to_string())?;
     let id_set: std::collections::HashSet<i64> = params.image_ids.iter().copied().collect();
-    let paths: Vec<String> = records
-        .into_iter()
-        .filter(|r| id_set.contains(&r.id))
-        .map(|r| r.path)
-        .collect();
 
-    db::delete_images_by_ids(&conn, &params.image_ids).map_err(|e| e.to_string())?;
-
-    let mut deleted = 0usize;
-    for path in &paths {
-        if std::fs::remove_file(path).is_ok() {
-            deleted += 1;
+    // Attempt filesystem removal first; only delete DB rows for files that
+    // were successfully removed. This prevents entries from disappearing from
+    // the library when a file is locked or permission-denied.
+    let mut succeeded_ids: Vec<i64> = Vec::new();
+    for r in records.into_iter().filter(|r| id_set.contains(&r.id)) {
+        if std::fs::remove_file(&r.path).is_ok() {
+            succeeded_ids.push(r.id);
         }
+    }
+    let deleted = succeeded_ids.len();
+    if !succeeded_ids.is_empty() {
+        db::delete_images_by_ids(&conn, &succeeded_ids).map_err(|e| e.to_string())?;
     }
     Ok(deleted)
 }

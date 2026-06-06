@@ -1697,7 +1697,8 @@ pub fn update_ai_tags(
          ON CONFLICT(image_id, tag) DO UPDATE SET
             source = 'ai',
             ai_model = excluded.ai_model,
-            confidence = excluded.confidence",
+            confidence = excluded.confidence
+         WHERE source != 'user'",
     )?;
     for (tag, confidence) in tags {
         stmt.execute(params![image_id, tag, model, confidence])?;
@@ -1748,7 +1749,7 @@ pub fn clear_tagging_jobs(conn: &Connection, folder_id: Option<i64>) -> Result<u
             )?;
             let n = conn.execute(
                 "DELETE FROM tagging_jobs
-                 WHERE status != 'processing'
+                 WHERE status NOT IN ('processing', 'cancelled')
                    AND image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
                 [fid],
             )?;
@@ -1767,7 +1768,7 @@ pub fn clear_tagging_jobs(conn: &Connection, folder_id: Option<i64>) -> Result<u
                  WHERE status = 'processing'",
                 [],
             )?;
-            let n = conn.execute("DELETE FROM tagging_jobs WHERE status != 'processing'", [])?;
+            let n = conn.execute("DELETE FROM tagging_jobs WHERE status NOT IN ('processing', 'cancelled')", [])?;
             conn.execute(
                 "UPDATE images SET ai_tagger_error = NULL WHERE ai_tagged_at IS NULL",
                 [],
