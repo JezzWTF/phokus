@@ -1523,7 +1523,7 @@ pub fn get_explore_tags(
          JOIN images i ON i.id = t.image_id
          WHERE (?1 IS NULL OR i.folder_id = ?1)
          GROUP BY t.tag
-         HAVING COUNT(DISTINCT t.image_id) >= 2
+         HAVING COUNT(DISTINCT t.image_id) >= 1
          ORDER BY tag_count DESC, t.tag ASC
          LIMIT ?2",
     )?;

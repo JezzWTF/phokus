@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useGalleryStore, Folder, IndexProgress } from "../store";
 
@@ -12,6 +13,22 @@ function FolderItem({
 }) {
   const { selectFolder, removeFolder, reindexFolder } = useGalleryStore();
   const isIndexing = progress && !progress.done;
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
+
+  useEffect(() => {
+    if (!confirmingRemoval) return;
+
+    const timeout = window.setTimeout(() => {
+      setConfirmingRemoval(false);
+    }, 4000);
+
+    return () => window.clearTimeout(timeout);
+  }, [confirmingRemoval]);
+
+  const handleRemove = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    await removeFolder(folder.id);
+  };
 
   return (
     <div
@@ -46,27 +63,54 @@ function FolderItem({
         )}
       </div>
 
-      <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-        <button
-          className="p-1 rounded-md hover:bg-white/10 text-gray-500 hover:text-gray-200"
-          title="Re-index"
-          onClick={(e) => { e.stopPropagation(); reindexFolder(folder.id); }}
+      {confirmingRemoval ? (
+        <div
+          className="flex items-center gap-1 shrink-0"
+          role="group"
+          aria-label={`Confirm removal of ${folder.name}`}
+          onClick={(event) => event.stopPropagation()}
         >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-        </button>
-        <button
-          className="p-1 rounded-md hover:bg-red-500/15 text-gray-500 hover:text-red-400"
-          title="Remove folder"
-          onClick={(e) => { e.stopPropagation(); removeFolder(folder.id); }}
-        >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
+          <button
+            className="px-1.5 py-1 rounded-md text-[10px] font-medium text-red-400 bg-red-500/10 hover:bg-red-500/20 hover:text-red-300"
+            onClick={handleRemove}
+          >
+            Remove
+          </button>
+          <button
+            className="px-1.5 py-1 rounded-md text-[10px] font-medium text-gray-400 hover:text-gray-100 hover:bg-white/10"
+            onClick={() => setConfirmingRemoval(false)}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
+          <button
+            className="p-1 rounded-md hover:bg-white/10 text-gray-500 hover:text-gray-200"
+            title="Re-index"
+            aria-label={`Re-index ${folder.name}`}
+            onClick={(e) => { e.stopPropagation(); reindexFolder(folder.id); }}
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+          <button
+            className="p-1 rounded-md hover:bg-red-500/15 text-gray-500 hover:text-red-400"
+            title="Remove folder"
+            aria-label={`Remove ${folder.name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              setConfirmingRemoval(true);
+            }}
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

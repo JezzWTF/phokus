@@ -1360,15 +1360,20 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   addUserTag: async (imageId, tag) => {
-    return invoke<ImageTag>("add_user_tag", {
+    const result = await invoke<ImageTag>("add_user_tag", {
       params: { image_id: imageId, tag },
     });
+    // Invalidate explore tags cache so new tag appears immediately
+    set({ exploreTagsFolderId: undefined });
+    return result;
   },
 
   removeTag: async (tagId) => {
     await invoke<void>("remove_tag", {
       params: { tag_id: tagId },
     });
+    // Invalidate explore tags cache so removed tag disappears immediately
+    set({ exploreTagsFolderId: undefined });
   },
 
   loadDuplicateScanCache: async (folderId = null) => {
