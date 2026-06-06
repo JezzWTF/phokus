@@ -349,7 +349,11 @@ pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
             generated_caption = excluded.generated_caption,
             caption_model = excluded.caption_model,
             caption_updated_at = excluded.caption_updated_at,
-            caption_error = excluded.caption_error
+            caption_error = excluded.caption_error,
+            ai_rating = NULL,
+            ai_tagger_model = NULL,
+            ai_tagged_at = NULL,
+            ai_tagger_error = NULL
          RETURNING id",
         params![
             img.folder_id,
@@ -384,6 +388,12 @@ pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
             img.ai_tagger_error,
         ],
         |row| row.get(0),
+    )?;
+    // Remove stale AI tags when content changes so they aren't shown for the
+    // new file. User-sourced tags are preserved.
+    conn.execute(
+        "DELETE FROM image_tags WHERE image_id = ?1 AND source = 'ai'",
+        [id],
     )?;
     Ok(id)
 }
@@ -1678,14 +1688,17 @@ fn get_pending_tagging_jobs_excluding(
     paused_folder_ids: &std::collections::HashSet<i64>,
     limit: usize,
 ) -> Result<Vec<TaggingJob>> {
-    let mut stmt = conn.prepare(
+    let sql = format!(
         "SELECT j.image_id, i.folder_id, i.path
          FROM tagging_jobs j
          JOIN images i ON i.id = j.image_id
          WHERE j.status = 'pending'
+           {}
          ORDER BY j.created_at ASC
          LIMIT ?1",
-    )?;
+        folder_exclusion_clause("i", paused_folder_ids)
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
         .query_map([limit as i64], |row| {
             Ok(TaggingJob {
@@ -1695,10 +1708,7 @@ fn get_pending_tagging_jobs_excluding(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows
-        .into_iter()
-        .filter(|job| !paused_folder_ids.contains(&job.folder_id))
-        .collect())
+    Ok(rows)
 }
 
 pub fn update_ai_tags(

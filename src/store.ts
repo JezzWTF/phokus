@@ -365,8 +365,10 @@ const PAGE_SIZE = 200;
 const AI_CAPTIONS_ENABLED_KEY = "phokus.aiCaptionsEnabled";
 const SIMILAR_DISTANCE_THRESHOLD = 0.24;
 
+// Single token shared by all gallery-producing requests (folder loads, searches,
+// similarity, region search). Any new request increments it so a stale response
+// from a previous collection type cannot overwrite newer results.
 let galleryRequestToken = 0;
-let similarRequestToken = 0;
 let tagCloudRequestToken = 0;
 let exploreTagRequestToken = 0;
 
@@ -902,7 +904,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   showVisualCluster: async (imageIds) => {
-    const requestToken = ++similarRequestToken;
+    const requestToken = ++galleryRequestToken;
     set((state) => ({
       activeView: "gallery",
       search: "",
@@ -923,7 +925,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const images = await invoke<ImageRecord[]>("get_images_by_ids", {
         params: { image_ids: imageIds },
       });
-      if (requestToken !== similarRequestToken) return;
+      if (requestToken !== galleryRequestToken) return;
       set({
         images,
         totalImages: images.length,
@@ -933,7 +935,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         collectionTitle: "Explore Cluster",
       });
     } catch (error) {
-      if (requestToken !== similarRequestToken) return;
+      if (requestToken !== galleryRequestToken) return;
       set({
         images: [],
         totalImages: 0,
@@ -951,7 +953,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   loadSimilarImages: async (imageId, folderId = get().selectedFolderId, reset = true, sourceFolderId = folderId ?? null) => {
-    const requestToken = ++similarRequestToken;
+    const requestToken = ++galleryRequestToken;
     const offset = reset ? 0 : get().loadedCount;
     const similarScope = folderId === null ? "all_media" : "current_folder";
     set((state) => ({
@@ -978,7 +980,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         },
       });
 
-      if (requestToken !== similarRequestToken) return;
+      if (requestToken !== galleryRequestToken) return;
 
       set((state) => {
         const nextImages = reset ? result.images : [...state.images, ...result.images];
@@ -999,7 +1001,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         };
       });
     } catch (error) {
-      if (requestToken !== similarRequestToken) return;
+      if (requestToken !== galleryRequestToken) return;
       console.error("Failed to load similar images:", error);
       set({
         images: [],
@@ -1019,7 +1021,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   loadSimilarByRegion: async (imageId, crop, folderId = get().selectedFolderId, sourceFolderId = folderId ?? null) => {
-    const requestToken = ++similarRequestToken;
+    const requestToken = ++galleryRequestToken;
     const similarScope = folderId === null ? "all_media" : "current_folder";
     set((state) => ({
       images: [],
@@ -1050,7 +1052,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         },
       });
 
-      if (requestToken !== similarRequestToken) return;
+      if (requestToken !== galleryRequestToken) return;
 
       set({
         images: result.images,
@@ -1067,7 +1069,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         similarScope,
       });
     } catch (error) {
-      if (requestToken !== similarRequestToken) return;
+      if (requestToken !== galleryRequestToken) return;
       console.error("Failed to load region search results:", error);
       set({
         images: [],
