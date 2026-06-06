@@ -150,8 +150,19 @@ pub fn index_folder(app: AppHandle, pool: DbPool, folder_id: i64, folder_path: P
         let storage_profile = detect_storage_profile(&folder_path);
         set_folder_storage_profile(folder_id, RuntimeAdaptiveProfile::new(storage_profile));
         set_folder_indexing_state(folder_id, true);
-        if let Err(error) = do_index(app, pool, folder_id, folder_path) {
-            eprintln!("Indexing error: {}", error);
+        if let Err(error) = do_index(app.clone(), pool, folder_id, folder_path) {
+            eprintln!("Indexing error for folder {}: {}", folder_id, error);
+            // Always emit done so the frontend reloads and recovers from partial state.
+            emit_progress(
+                &app,
+                &IndexProgress {
+                    folder_id,
+                    total: 0,
+                    indexed: 0,
+                    current_file: String::new(),
+                    done: true,
+                },
+            );
         }
         set_folder_indexing_state(folder_id, false);
     });

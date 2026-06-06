@@ -901,10 +901,14 @@ pub fn get_folder_media_index(conn: &Connection, folder_id: i64) -> Result<Vec<I
 }
 
 pub fn delete_images_by_ids(conn: &Connection, image_ids: &[i64]) -> Result<()> {
+    // Delete from sqlite-vec virtual tables outside the transaction — sqlite-vec
+    // has known issues with transactional DML in early versions.
+    for image_id in image_ids {
+        vector::delete_embedding(conn, *image_id)?;
+        vector::delete_caption_embedding(conn, *image_id)?;
+    }
     let tx = conn.unchecked_transaction()?;
     for image_id in image_ids {
-        vector::delete_embedding(&tx, *image_id)?;
-        vector::delete_caption_embedding(&tx, *image_id)?;
         tx.execute("DELETE FROM images WHERE id = ?1", [image_id])?;
     }
     tx.commit()?;
