@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
+import { notifyTaskComplete } from "./notifications";
 
 export interface Folder {
   id: number;
@@ -1394,6 +1395,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     try {
       const groups = await invoke<DuplicateGroup[]>("find_duplicates", { folderId: folderId ?? null });
       set({ duplicateGroups: groups, duplicateLastScanned: Math.floor(Date.now() / 1000) });
+      void notifyTaskComplete(
+        "Duplicate scan complete",
+        groups.length === 1 ? "Found 1 duplicate group." : `Found ${groups.length.toLocaleString()} duplicate groups.`,
+      );
     } finally {
       unlisten();
       set({ duplicateScanning: false });
@@ -1466,6 +1471,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   subscribeToProgress: async () => {
     const unlistenProgress = await listen<IndexProgress>("index-progress", (event) => {
       const progress = event.payload;
+      const previous = get().indexingProgress[progress.folder_id];
       set((state) => ({
         indexingProgress: {
           ...state.indexingProgress,
@@ -1474,6 +1480,18 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       }));
 
       if (progress.done) {
+        if (
+          previous &&
+          !previous.done &&
+          progress.total > 0 &&
+          progress.indexed >= progress.total
+        ) {
+          const folderName = get().folders.find((folder) => folder.id === progress.folder_id)?.name;
+          void notifyTaskComplete(
+            "Folder scan complete",
+            folderName ? `${folderName} has finished scanning.` : "A folder has finished scanning.",
+          );
+        }
         void get().loadFolders();
         void get().loadBackgroundJobProgress();
         if (get().activeView !== "explore" && !isDerivedCollectionTitle(get().collectionTitle)) {
@@ -1491,6 +1509,38 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     });
 
     const unlistenMediaJobs = await listen<MediaJobProgressEvent>("media-job-progress", (event) => {
+      const previousProgress = get().mediaJobProgress;
+
+      for (const progress of event.payload.progress) {
+        const previous = previousProgress[progress.folder_id];
+        if (!previous) continue;
+
+        const folderName =
+          get().folders.find((folder) => folder.id === progress.folder_id)?.name ?? "Folder";
+
+        if (previous.embedding_pending > 0 && progress.embedding_pending === 0) {
+          const failureDetail =
+            progress.embedding_failed > 0
+              ? ` ${progress.embedding_failed.toLocaleString()} failed.`
+              : "";
+          void notifyTaskComplete(
+            "Embeddings complete",
+            `${folderName} finished generating embeddings.${failureDetail}`,
+          );
+        }
+
+        if (previous.tagging_pending > 0 && progress.tagging_pending === 0) {
+          const failureDetail =
+            progress.tagging_failed > 0
+              ? ` ${progress.tagging_failed.toLocaleString()} failed.`
+              : "";
+          void notifyTaskComplete(
+            "AI tagging complete",
+            `${folderName} finished generating tags.${failureDetail}`,
+          );
+        }
+      }
+
       set((state) => {
         const next = { ...state.mediaJobProgress };
         for (const progress of event.payload.progress) {

@@ -9,6 +9,7 @@ import { TagCloud } from "./components/TagCloud";
 import { DuplicateFinder } from "./components/DuplicateFinder";
 import { TitleBar } from "./components/TitleBar";
 import { SettingsModal } from "./components/SettingsModal";
+import { initializeNotifications } from "./notifications";
 
 export default function App() {
   const loadFolders = useGalleryStore((state) => state.loadFolders);
@@ -20,6 +21,7 @@ export default function App() {
   const activeView = useGalleryStore((state) => state.activeView);
 
   useEffect(() => {
+    void initializeNotifications();
     loadFolders().then(() => {
       void loadBackgroundJobProgress();
       void loadCaptionModelStatus();

@@ -50,6 +50,7 @@ ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "n
 ureq = { version = "3.3.0", default-features = false, features = ["native-tls"] }
 zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
 csv = "1"
+tauri-plugin-notification = "2"
 
 # ── Dev-mode performance ────────────────────────────────────────────────────
 # opt-level=1 on the main crate keeps incremental compile short.
