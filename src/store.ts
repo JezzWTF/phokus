@@ -238,6 +238,7 @@ interface GalleryState {
   similarHasMore: boolean;
   similarScope: SimilarScope;
   similarFolderId: number | null;
+  similarCrop: { x: number; y: number; w: number; h: number } | null;
   galleryScrollResetKey: number;
   activeView: ActiveView;
   exploreMode: ExploreMode;
@@ -567,6 +568,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   similarHasMore: false,
   similarScope: "all_media",
   similarFolderId: null,
+  similarCrop: null,
   galleryScrollResetKey: 0,
   activeView: "gallery",
   exploreMode: "visual",
@@ -771,12 +773,34 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   loadMoreImages: async () => {
-    const { loadedCount, totalImages, loadingImages, collectionTitle, similarSourceImageId, similarHasMore, similarFolderId } = get();
+    const { loadedCount, totalImages, loadingImages, collectionTitle, similarSourceImageId, similarHasMore, similarFolderId, similarCrop } = get();
     if (loadingImages || loadedCount >= totalImages) return;
     if (collectionTitle === "Explore Cluster") return;
     if (collectionTitle === "Similar Images" && similarSourceImageId !== null) {
       if (!similarHasMore) return;
       await get().loadSimilarImages(similarSourceImageId, similarFolderId, false);
+      return;
+    }
+    if (collectionTitle === "Region Search Results" && similarSourceImageId !== null && similarCrop !== null) {
+      if (!similarHasMore) return;
+      const result = await invoke<SimilarImagesPage>("find_similar_by_region", {
+        params: {
+          image_id: similarSourceImageId,
+          crop_x: similarCrop.x,
+          crop_y: similarCrop.y,
+          crop_w: similarCrop.w,
+          crop_h: similarCrop.h,
+          folder_id: similarFolderId,
+          offset: loadedCount,
+          limit: PAGE_SIZE,
+        },
+      });
+      set((state) => ({
+        images: [...state.images, ...result.images],
+        loadedCount: state.loadedCount + result.images.length,
+        totalImages: result.has_more ? state.loadedCount + result.images.length + 1 : state.loadedCount + result.images.length,
+        similarHasMore: result.has_more,
+      }));
       return;
     }
     await get().loadImages(false);
@@ -1006,6 +1030,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       similarSourceImageId: imageId,
       similarSourceFolderId: sourceFolderId,
       similarFolderId: folderId ?? null,
+      similarCrop: crop,
       similarScope,
       galleryScrollResetKey: state.galleryScrollResetKey + 1,
       selectedImage: null,
@@ -1038,6 +1063,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         similarSourceFolderId: sourceFolderId,
         similarHasMore: result.has_more,
         similarFolderId: folderId ?? null,
+        similarCrop: crop,
         similarScope,
       });
     } catch (error) {

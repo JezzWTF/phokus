@@ -253,8 +253,15 @@ pub fn prepare_tagger_model_with_progress(
     let local_dir = model_dir(app_data_dir);
     std::fs::create_dir_all(&local_dir)?;
 
-    // Only download the two tagger-specific files; ONNX runtime DLLs are
-    // already handled by the captioner download flow.
+    // Ensure the shared ONNX runtime DLLs are present. The tagger shares
+    // them with the captioner; install them here so the tagger is fully
+    // functional even on a clean install where the caption model has never
+    // been downloaded.
+    let caption_model_dir = crate::captioner::model_dir(app_data_dir);
+    std::fs::create_dir_all(&caption_model_dir)?;
+    crate::captioner::ensure_onnx_runtime(&caption_model_dir)?;
+
+    // Download the two tagger-specific files.
     const DOWNLOAD_FILES: &[&str] = &["model.onnx", "selected_tags.csv"];
 
     let api = Api::new()?;

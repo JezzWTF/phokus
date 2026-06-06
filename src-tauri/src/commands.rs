@@ -953,9 +953,11 @@ pub async fn find_duplicates(
     }
 
     // Phase 3: for large-file groups (> 64 KB) the sample hash is not exact;
-    // re-hash the full file contents to avoid false positives before deletion.
+    // re-hash the full file contents to confirm matches. Each distinct full
+    // hash becomes its own DuplicateGroup so disjoint sets (A,A vs B,B that
+    // happened to share size and sample hash) are never merged.
     const COVERED: u64 = (16 * 1024 * 4) as u64;
-    let confirmed: std::collections::HashMap<(u64, u64), Vec<i64>> =
+    let confirmed: Vec<(u64, u64, Vec<i64>)> =
         tokio::task::spawn_blocking(move || {
             use memmap2::Mmap;
             use rayon::prelude::*;
@@ -964,13 +966,13 @@ pub async fn find_duplicates(
             size_hash_map
                 .into_iter()
                 .filter(|(_, entries)| entries.len() > 1)
-                .filter_map(|((sample_hash, file_size), entries)| {
+                .flat_map(|((sample_hash, file_size), entries)| {
                     if file_size <= COVERED {
-                        // Sample was already a full hash — no re-read needed.
-                        let ids = entries.into_iter().map(|(id, _)| id).collect();
-                        return Some(((sample_hash, file_size), ids));
+                        // Sample was already a full hash — one group, no re-read needed.
+                        return vec![(sample_hash, file_size, entries.into_iter().map(|(id, _)| id).collect())];
                     }
-                    // Full-file hash pass to confirm.
+                    // Full-file hash pass. Group by full hash so that two sets of
+                    // files that collide only in the sample produce separate groups.
                     let full_hashes: Vec<(i64, Option<u64>)> = entries
                         .par_iter()
                         .map(|(id, path)| {
@@ -981,8 +983,6 @@ pub async fn find_duplicates(
                             (*id, hash)
                         })
                         .collect();
-                    // Group by full hash; keep only groups where every file hashed
-                    // successfully and at least two share the same hash.
                     let mut by_full: std::collections::HashMap<u64, Vec<i64>> =
                         std::collections::HashMap::new();
                     for (id, maybe_hash) in full_hashes {
@@ -990,20 +990,12 @@ pub async fn find_duplicates(
                             by_full.entry(h).or_default().push(id);
                         }
                     }
-                    // Return the largest confirmed group (same sample_hash/size bucket).
-                    // In practice a single full hash will dominate; emit each sub-group.
-                    // We flatten into one entry using the sample_hash key — callers only
-                    // need confirmed IDs, not the exact full hash.
-                    let confirmed_ids: Vec<i64> = by_full
-                        .into_values()
-                        .filter(|g| g.len() > 1)
-                        .flatten()
-                        .collect();
-                    if confirmed_ids.is_empty() {
-                        None
-                    } else {
-                        Some(((sample_hash, file_size), confirmed_ids))
-                    }
+                    // Emit one entry per distinct full hash that has ≥ 2 members.
+                    by_full
+                        .into_iter()
+                        .filter(|(_, ids)| ids.len() > 1)
+                        .map(|(full_hash, ids)| (full_hash, file_size, ids))
+                        .collect()
                 })
                 .collect()
         })
@@ -1014,7 +1006,7 @@ pub async fn find_duplicates(
     let conn = db.get().map_err(|e| e.to_string())?;
     let mut groups: Vec<DuplicateGroup> = confirmed
         .into_iter()
-        .filter_map(|((hash, file_size), ids)| {
+        .filter_map(|(hash, file_size, ids)| {
             let images = db::get_images_by_ids(&conn, &ids).ok()?;
             Some(DuplicateGroup {
                 file_hash: format!("{:016x}", hash),

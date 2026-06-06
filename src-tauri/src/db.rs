@@ -511,6 +511,7 @@ pub fn reset_inflight_jobs(conn: &Connection) -> Result<()> {
     // Delete any rows that were cancelled before the previous shutdown so
     // they don't silently linger in the DB across restarts.
     conn.execute("DELETE FROM tagging_jobs WHERE status = 'cancelled'", [])?;
+    conn.execute("DELETE FROM caption_jobs WHERE status = 'cancelled'", [])?;
     Ok(())
 }
 
@@ -588,13 +589,22 @@ pub fn requeue_processing_caption_jobs_for_folder(
 }
 
 pub fn clear_caption_jobs(conn: &Connection, folder_id: Option<i64>) -> Result<usize> {
+    // Mirror the tagging worker pattern: mark in-flight rows as cancelled so
+    // the worker can detect cancellation before writing results, then delete
+    // every non-processing row immediately (pending, failed, etc.).
     match folder_id {
         Some(folder_id) => {
+            conn.execute(
+                "UPDATE caption_jobs
+                 SET status = 'cancelled', last_error = NULL, updated_at = datetime('now')
+                 WHERE status = 'processing'
+                   AND image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
+                [folder_id],
+            )?;
             let deleted = conn.execute(
                 "DELETE FROM caption_jobs
-                 WHERE image_id IN (
-                    SELECT id FROM images WHERE folder_id = ?1
-                 )",
+                 WHERE status NOT IN ('processing', 'cancelled')
+                   AND image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
                 [folder_id],
             )?;
             conn.execute(
@@ -607,7 +617,16 @@ pub fn clear_caption_jobs(conn: &Connection, folder_id: Option<i64>) -> Result<u
             Ok(deleted)
         }
         None => {
-            let deleted = conn.execute("DELETE FROM caption_jobs", [])?;
+            conn.execute(
+                "UPDATE caption_jobs
+                 SET status = 'cancelled', last_error = NULL, updated_at = datetime('now')
+                 WHERE status = 'processing'",
+                [],
+            )?;
+            let deleted = conn.execute(
+                "DELETE FROM caption_jobs WHERE status NOT IN ('processing', 'cancelled')",
+                [],
+            )?;
             conn.execute(
                 "UPDATE images
                  SET caption_error = NULL
@@ -617,6 +636,15 @@ pub fn clear_caption_jobs(conn: &Connection, folder_id: Option<i64>) -> Result<u
             Ok(deleted)
         }
     }
+}
+
+pub fn is_caption_job_cancelled(conn: &Connection, image_id: i64) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM caption_jobs WHERE image_id = ?1 AND status = 'cancelled'",
+        [image_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
 }
 
 pub fn reset_generated_captions(conn: &Connection, folder_id: Option<i64>) -> Result<usize> {

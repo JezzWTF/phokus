@@ -839,6 +839,13 @@ fn process_caption_batch(
         let mut updated_images = Vec::with_capacity(caption_results.len());
 
         for (job, caption_result) in &caption_results {
+            if db::is_caption_job_cancelled(&tx, job.image_id)? {
+                tx.execute(
+                    "DELETE FROM caption_jobs WHERE image_id = ?1",
+                    [job.image_id],
+                )?;
+                continue;
+            }
             match caption_result {
                 Ok(caption) => {
                     updated_images.push(db::update_generated_caption(
