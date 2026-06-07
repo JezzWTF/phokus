@@ -1,242 +1,374 @@
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { useGalleryStore, TagCloudEntry } from "../store";
+import { ExploreTagEntry, TagCloudEntry, useGalleryStore } from "../store";
 
-// Accent glow colours for the hover ring — cycled by index
-const GLOWS: string[] = [
-  "rgba(59,130,246,0.5)",
-  "rgba(168,85,247,0.5)",
-  "rgba(16,185,129,0.5)",
-  "rgba(245,158,11,0.5)",
-  "rgba(236,72,153,0.5)",
-  "rgba(6,182,212,0.5)",
-  "rgba(249,115,22,0.5)",
-  "rgba(34,197,94,0.5)",
+const ACCENTS = [
+  "#60a5fa",
+  "#c084fc",
+  "#4ade80",
+  "#fbbf24",
+  "#f472b4",
+  "#2dd4bf",
+  "#fb923c",
+  "#a78bfa",
+  "#34d399",
+  "#f87171",
 ];
 
-function pseudoRandom(seed: number): number {
-  const x = Math.sin(seed + 1) * 10000;
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
+function seeded(n: number): number {
+  const x = Math.sin(n * 9301 + 49297) * 233280;
   return x - Math.floor(x);
 }
 
-// Map cluster size to a tile size bucket (px)
-function getTileSize(count: number, maxCount: number): number {
-  if (maxCount === 0) return 72;
-  const ratio = count / maxCount;
-  if (ratio > 0.75) return 160;
-  if (ratio > 0.45) return 128;
-  if (ratio > 0.22) return 104;
-  if (ratio > 0.08) return 88;
-  return 72;
-}
-
-function TagButton({
-  entry,
-  index,
-  maxCount,
-  onSearch,
-}: {
+interface PlacedNode {
   entry: TagCloudEntry;
   index: number;
-  maxCount: number;
-  onSearch: (imageId: number) => void;
-}) {
-  const size = getTileSize(entry.count, maxCount);
-  const glow = GLOWS[index % GLOWS.length];
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  accent: string;
+  driftX: number;
+  driftY: number;
+  driftDuration: number;
+  rotateSeed: number;
+}
 
-  // Small random rotation for organic feel — larger tiles stay flatter
-  const maxRot = size >= 128 ? 0 : size >= 104 ? 3 : size >= 88 ? 6 : 10;
-  const rotation = (pseudoRandom(index * 7) - 0.5) * 2 * maxRot;
+function buildCloud(entries: TagCloudEntry[], containerW: number, containerH: number): PlacedNode[] {
+  if (!entries.length || containerW <= 0 || containerH <= 0) return [];
 
-  const mt = Math.floor(pseudoRandom(index * 3) * 10) + 4;
-  const mr = Math.floor(pseudoRandom(index * 5) * 12) + 4;
-  const mb = Math.floor(pseudoRandom(index * 11) * 10) + 4;
-  const ml = Math.floor(pseudoRandom(index * 13) * 12) + 4;
+  const maxCount = Math.max(...entries.map((e) => e.count));
+  const cx = containerW / 2;
+  const cy = containerH / 2;
+  // Spread ellipse shrinks slightly to leave room for card half-widths at the edges
+  const spreadX = containerW * 0.42;
+  const spreadY = containerH * 0.36;
+  const n = entries.length;
 
-  const src = entry.thumbnail_path ? convertFileSrc(entry.thumbnail_path) : null;
+  // 1. Build initial positions using phyllotaxis spiral
+  const nodes: PlacedNode[] = entries.map((entry, i) => {
+    const ratio = Math.max(entry.count / maxCount, 0.08);
+    // Cards scale from 110px to 230px wide; height is 3/4 of width
+    const w = 110 + Math.sqrt(ratio) * 120;
+    const h = w * 0.75;
+    const radialRatio = Math.sqrt((i + 0.5) / n);
+    const angle = i * GOLDEN_ANGLE;
+
+    return {
+      entry,
+      index: i,
+      x: cx + Math.cos(angle) * radialRatio * spreadX,
+      y: cy + Math.sin(angle) * radialRatio * spreadY,
+      w,
+      h,
+      accent: ACCENTS[i % ACCENTS.length],
+      driftX: (seeded(i + 11) - 0.5) * 18,
+      driftY: (seeded(i + 17) - 0.5) * 14,
+      driftDuration: 8 + seeded(i + 23) * 7,
+      rotateSeed: (seeded(i + 31) - 0.5) * 4,
+    };
+  });
+
+  // 2. Iterative overlap resolution — no physics, just push apart
+  const PAD = 24;
+  for (let iter = 0; iter < 80; iter++) {
+    for (let a = 0; a < nodes.length; a++) {
+      const na = nodes[a];
+      for (let b = a + 1; b < nodes.length; b++) {
+        const nb = nodes[b];
+        const dx = nb.x - na.x;
+        const dy = nb.y - na.y;
+        const overlapX = (na.w + nb.w) / 2 + PAD - Math.abs(dx);
+        const overlapY = (na.h + nb.h) / 2 + PAD - Math.abs(dy);
+        if (overlapX <= 0 || overlapY <= 0) continue;
+        // Push along the smaller overlap axis
+        if (overlapX < overlapY) {
+          const push = overlapX * 0.5 * (dx >= 0 ? 1 : -1);
+          nb.x += push;
+          na.x -= push;
+        } else {
+          const push = overlapY * 0.5 * (dy >= 0 ? 1 : -1);
+          nb.y += push;
+          na.y -= push;
+        }
+      }
+      // Pull gently back toward anchor to prevent runaway drift
+      na.x += (cx + Math.cos(na.index * GOLDEN_ANGLE) * Math.sqrt((na.index + 0.5) / n) * spreadX - na.x) * 0.05;
+      na.y += (cy + Math.sin(na.index * GOLDEN_ANGLE) * Math.sqrt((na.index + 0.5) / n) * spreadY - na.y) * 0.05;
+    }
+  }
+
+  // 3. Clamp so cards never poke outside the container
+  return nodes.map((node) => ({
+    ...node,
+    x: Math.min(Math.max(node.x, node.w / 2 + 16), containerW - node.w / 2 - 16),
+    y: Math.min(Math.max(node.y, node.h / 2 + 16), containerH - node.h / 2 - 16),
+  }));
+}
+
+function CloudCard({ node, onOpen }: { node: PlacedNode; onOpen: (imageIds: number[]) => void }) {
+  const src = node.entry.thumbnail_path ? convertFileSrc(node.entry.thumbnail_path) : null;
+  const { w, h, accent } = node;
 
   return (
     <motion.button
-      initial={{ opacity: 0, scale: 0.5, rotate: rotation * 2 }}
-      animate={{ opacity: 1, scale: 1, rotate: rotation }}
+      className="group absolute overflow-hidden rounded-2xl border border-white/8 bg-white/[0.04] text-left shadow-[0_8px_40px_rgba(0,0,0,0.5)] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+      style={{ width: w, height: h, left: node.x - w / 2, top: node.y - h / 2 }}
+      initial={{ opacity: 0, scale: 0.75 }}
+      animate={{
+        opacity: 1,
+        scale: 1,
+        x: [0, node.driftX, 0],
+        y: [0, node.driftY, 0],
+        rotate: [node.rotateSeed, node.rotateSeed + 1.4, node.rotateSeed],
+      }}
       transition={{
-        delay: index * 0.025,
-        type: "spring",
-        stiffness: 200,
-        damping: 18,
+        opacity: { duration: 0.3, delay: Math.min(node.index * 0.035, 0.7) },
+        scale:   { duration: 0.3, delay: Math.min(node.index * 0.035, 0.7) },
+        x:       { duration: node.driftDuration, repeat: Infinity, ease: "easeInOut", delay: seeded(node.index + 41) * 3 },
+        y:       { duration: node.driftDuration + 1.6, repeat: Infinity, ease: "easeInOut", delay: seeded(node.index + 51) * 3 },
+        rotate:  { duration: node.driftDuration + 0.9, repeat: Infinity, ease: "easeInOut" },
       }}
-      whileHover={{
-        scale: 1.12,
-        rotate: 0,
-        transition: { type: "spring", stiffness: 400, damping: 22 },
-      }}
-      whileTap={{ scale: 0.92 }}
-      onClick={() => onSearch(entry.representative_image_id)}
-      title={`${entry.count} similar ${entry.count === 1 ? "photo" : "photos"}`}
-      style={{
-        width: size,
-        height: size,
-        margin: `${mt}px ${mr}px ${mb}px ${ml}px`,
-        borderRadius: 12,
-        border: "2px solid rgba(255,255,255,0.08)",
-        background: "rgba(255,255,255,0.04)",
-        cursor: "pointer",
-        padding: 0,
-        overflow: "hidden",
-        position: "relative",
-        flexShrink: 0,
-        boxShadow: "none",
-        transition: "border-color 0.15s, box-shadow 0.15s",
-      }}
-      onMouseEnter={(e) => {
-        const el = e.currentTarget;
-        el.style.borderColor = glow;
-        el.style.boxShadow = `0 0 16px ${glow}, 0 0 32px ${glow.replace("0.5", "0.25")}`;
-      }}
-      onMouseLeave={(e) => {
-        const el = e.currentTarget;
-        el.style.borderColor = "rgba(255,255,255,0.08)";
-        el.style.boxShadow = "none";
-      }}
+      whileHover={{ scale: 1.06, rotate: 0, transition: { duration: 0.18 } }}
+      onClick={() => onOpen(node.entry.image_ids)}
+      title={`Open cluster — ${node.entry.count.toLocaleString()} images`}
     >
       {src ? (
         <img
           src={src}
           alt=""
+          className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
           draggable={false}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            display: "block",
-          }}
         />
       ) : (
-        // Fallback placeholder when no thumbnail exists yet
-        <div
-          style={{
-            width: "100%",
-            height: "100%",
-            background: "rgba(255,255,255,0.06)",
-          }}
-        />
+        <div className="absolute inset-0 bg-gradient-to-br from-white/[0.07] to-transparent" />
       )}
-
-      {/* Count badge — bottom-right corner */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
+      {/* Accent glow on hover */}
       <div
-        style={{
-          position: "absolute",
-          bottom: 5,
-          right: 5,
-          background: "rgba(0,0,0,0.6)",
-          color: "rgba(255,255,255,0.85)",
-          fontSize: 10,
-          fontWeight: 600,
-          lineHeight: 1,
-          padding: "3px 6px",
-          borderRadius: 6,
-          backdropFilter: "blur(4px)",
-          pointerEvents: "none",
-        }}
-      >
-        {entry.count}
+        className="absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+        style={{ background: `radial-gradient(ellipse at bottom, ${accent}25, transparent 70%)` }}
+      />
+      <div className="absolute inset-x-0 bottom-0 p-3">
+        <div className="mb-2 h-px rounded-full" style={{ background: `linear-gradient(to right, ${accent}80, transparent)` }} />
+        <div className="flex items-end justify-between gap-2">
+          <div>
+            <p className="text-[9px] uppercase tracking-[0.18em] text-white/35">Cluster</p>
+            <p className="text-base font-semibold leading-none text-white">{node.entry.count.toLocaleString()}</p>
+          </div>
+          <span
+            className="rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.1em] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+            style={{ borderColor: `${accent}50`, color: accent, backgroundColor: `${accent}12` }}
+          >
+            Open
+          </span>
+        </div>
       </div>
     </motion.button>
   );
 }
 
+// Actual tag cloud — word size driven by log-scaled frequency
+function TagWord({
+  entry,
+  index,
+  logMin,
+  logRange,
+  onSearch,
+}: {
+  entry: ExploreTagEntry;
+  index: number;
+  logMin: number;
+  logRange: number;
+  onSearch: (tag: string) => void;
+}) {
+  const ratio = logRange > 0 ? (Math.log(Math.max(entry.count, 1)) - logMin) / logRange : 0.5;
+  const fontSize = 11 + ratio * 28; // 11px – 39px
+  const accent = ACCENTS[index % ACCENTS.length];
+  const tilt = (seeded(index + 5) - 0.5) * 7;
+
+  return (
+    <motion.button
+      initial={{ opacity: 0, scale: 0.6 }}
+      animate={{ opacity: 0.4 + ratio * 0.6, scale: 1 }}
+      transition={{ delay: Math.min(index * 0.008, 0.55), duration: 0.22 }}
+      whileHover={{ scale: 1.2, opacity: 1, rotate: 0, transition: { duration: 0.14 } }}
+      className="group inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-white/[0.07]"
+      style={{ fontSize, rotate: tilt }}
+      onClick={() => onSearch(entry.tag)}
+      title={`${entry.tag} — ${entry.count.toLocaleString()} images`}
+    >
+      <span
+        className="font-medium leading-none"
+        style={{ color: ratio > 0.55 ? accent : "rgba(255,255,255,0.82)" }}
+      >
+        {entry.tag}
+      </span>
+      <span
+        className="rounded-full px-1.5 py-0.5 text-[9px] tabular-nums opacity-0 transition-opacity group-hover:opacity-100"
+        style={{ backgroundColor: `${accent}22`, color: accent }}
+      >
+        {entry.count.toLocaleString()}
+      </span>
+    </motion.button>
+  );
+}
+
+function Spinner() {
+  return (
+    <motion.div
+      className="h-5 w-5 rounded-full border-2 border-white/15 border-t-white/50"
+      animate={{ rotate: 360 }}
+      transition={{ duration: 0.85, repeat: Infinity, ease: "linear" }}
+    />
+  );
+}
+
+// Separate component so its useLayoutEffect fires when the canvas is actually
+// mounted — not at TagCloud mount time when the container may still be hidden
+// behind a loading state.
+function ClusterCloud({
+  entries,
+  onOpen,
+}: {
+  entries: TagCloudEntry[];
+  onOpen: (imageIds: number[]) => void;
+}) {
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
+
+  useLayoutEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      setCanvasSize({ w: r.width, h: r.height });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const nodes = useMemo(
+    () => buildCloud(entries, canvasSize.w, canvasSize.h),
+    [entries, canvasSize.w, canvasSize.h],
+  );
+
+  return (
+    <div ref={canvasRef} className="relative min-h-0 flex-1 overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:radial-gradient(circle,rgba(255,255,255,0.6)_1px,transparent_1px)] [background-size:28px_28px]" />
+      {nodes.map((node) => (
+        <CloudCard key={`${node.entry.representative_image_id}:${node.index}`} node={node} onOpen={onOpen} />
+      ))}
+    </div>
+  );
+}
+
 export function TagCloud() {
+  const exploreMode = useGalleryStore((state) => state.exploreMode);
+  const setExploreMode = useGalleryStore((state) => state.setExploreMode);
   const tagCloudEntries = useGalleryStore((state) => state.tagCloudEntries);
   const tagCloudLoading = useGalleryStore((state) => state.tagCloudLoading);
   const loadTagCloud = useGalleryStore((state) => state.loadTagCloud);
-  const searchByTag = useGalleryStore((state) => state.searchByTag);
+  const exploreTagEntries = useGalleryStore((state) => state.exploreTagEntries);
+  const exploreTagLoading = useGalleryStore((state) => state.exploreTagLoading);
+  const loadExploreTags = useGalleryStore((state) => state.loadExploreTags);
+  const showVisualCluster = useGalleryStore((state) => state.showVisualCluster);
+  const searchForTag = useGalleryStore((state) => state.searchForTag);
   const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
 
   useEffect(() => {
-    void loadTagCloud();
-  }, [selectedFolderId]);
+    if (exploreMode === "visual") void loadTagCloud();
+    else void loadExploreTags();
+  }, [exploreMode, selectedFolderId, loadTagCloud, loadExploreTags]);
 
-  const maxCount =
-    tagCloudEntries.length > 0
-      ? Math.max(...tagCloudEntries.map((e) => e.count))
-      : 1;
+  const { logMin, logRange } = useMemo(() => {
+    if (!exploreTagEntries.length) return { logMin: 0, logRange: 1 };
+    const logs = exploreTagEntries.map((e) => Math.log(Math.max(e.count, 1)));
+    const lo = Math.min(...logs);
+    const hi = Math.max(...logs);
+    return { logMin: lo, logRange: hi - lo || 1 };
+  }, [exploreTagEntries]);
+
+  const loading = exploreMode === "visual" ? tagCloudLoading : exploreTagLoading;
+  const hasEntries = exploreMode === "visual" ? tagCloudEntries.length > 0 : exploreTagEntries.length > 0;
+  const entryCount = exploreMode === "visual" ? tagCloudEntries.length : exploreTagEntries.length;
 
   return (
-    <div className="flex-1 flex flex-col items-center min-h-0 overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(59,130,246,0.08),transparent_50%),radial-gradient(ellipse_at_80%_75%,rgba(168,85,247,0.07),transparent_40%),#07080f]">
       {/* Header */}
-      <motion.div
-        className="text-center pt-14 pb-8 shrink-0"
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-      >
-        <h2 className="text-[22px] font-semibold text-white/70 tracking-tight mb-2">
-          Explore your library
-        </h2>
-        <p className="text-[13px] text-white/25">
-          Visual clusters from your photos — sized by how many match
-        </p>
-      </motion.div>
-
-      {/* Loading */}
-      {tagCloudLoading && (
-        <div className="flex-1 flex flex-col items-center justify-center gap-4">
-          <motion.svg
-            className="w-8 h-8 text-white/20"
-            viewBox="0 0 24 24"
-            fill="none"
-            animate={{ rotate: 360 }}
-            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-          >
-            <circle
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeOpacity="0.2"
-            />
-            <path
-              d="M4 12a8 8 0 018-8"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-          </motion.svg>
-          <p className="text-[12px] text-white/20">Clustering your library…</p>
+      <div className="shrink-0 border-b border-white/[0.05] px-6 py-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-semibold text-white">Explore</h2>
+            <p className="mt-0.5 truncate text-[11px] text-white/30">
+              {loading
+                ? exploreMode === "visual" ? "Computing visual clusters…" : "Loading tags…"
+                : hasEntries
+                  ? exploreMode === "visual"
+                    ? `${entryCount} cluster${entryCount !== 1 ? "s" : ""} — click any to open`
+                    : `${entryCount} tag${entryCount !== 1 ? "s" : ""} — click any to search`
+                  : exploreMode === "visual"
+                    ? "No clusters — images need embeddings first"
+                    : "No tags — run the AI tagger or add tags manually"}
+            </p>
+          </div>
+          <div className="flex shrink-0 rounded-lg border border-white/8 bg-white/[0.03] p-0.5">
+            <button
+              className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                exploreMode === "visual" ? "bg-white/10 text-white" : "text-gray-500 hover:text-gray-300"
+              }`}
+              onClick={() => setExploreMode("visual")}
+            >
+              Clusters
+            </button>
+            <button
+              className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                exploreMode === "tags" ? "bg-white/10 text-white" : "text-gray-500 hover:text-gray-300"
+              }`}
+              onClick={() => setExploreMode("tags")}
+            >
+              Tag Cloud
+            </button>
+          </div>
         </div>
-      )}
+      </div>
 
-      {/* Empty state */}
-      {!tagCloudLoading && tagCloudEntries.length === 0 && (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-[13px] text-white/25 text-center max-w-xs leading-relaxed">
-            No embeddings yet. Add a folder and wait for the embedding worker to
-            finish, then come back here.
+      {loading ? (
+        <div className="flex flex-1 items-center justify-center gap-3 text-white/25">
+          <Spinner />
+          <span className="text-sm">{exploreMode === "visual" ? "Computing clusters…" : "Loading tags…"}</span>
+        </div>
+      ) : !hasEntries ? (
+        <div className="flex flex-1 items-center justify-center px-8">
+          <p className="max-w-xs text-center text-sm leading-relaxed text-white/25">
+            {exploreMode === "visual"
+              ? "No visual clusters yet. Images need embeddings before they can be grouped. Check indexing progress in the sidebar."
+              : "No tags yet. Run the AI tagger from Settings, or add tags manually in the image preview."}
           </p>
         </div>
-      )}
-
-      {/* Cluster grid */}
-      {!tagCloudLoading && tagCloudEntries.length > 0 && (
-        <div className="flex flex-wrap justify-center px-12 pb-16 max-w-5xl w-full">
-          {tagCloudEntries.map((entry, index) => (
-            <TagButton
-              key={entry.representative_image_id}
-              entry={entry}
-              index={index}
-              maxCount={maxCount}
-              onSearch={searchByTag}
-            />
-          ))}
+      ) : exploreMode === "visual" ? (
+        <ClusterCloud entries={tagCloudEntries} onOpen={showVisualCluster} />
+      ) : (
+        /* Tag cloud — words sized by log-scaled frequency, wrapped freely */
+        <div className="overflow-y-auto px-8 py-8">
+          <div className="flex flex-wrap items-center justify-center gap-x-0.5 gap-y-1 leading-none">
+            {exploreTagEntries.map((entry, index) => (
+              <TagWord
+                key={entry.tag}
+                entry={entry}
+                index={index}
+                logMin={logMin}
+                logRange={logRange}
+                onSearch={searchForTag}
+              />
+            ))}
+          </div>
         </div>
-      )}
-
-      {!tagCloudLoading && tagCloudEntries.length > 0 && (
-        <p className="shrink-0 pb-8 text-[11px] text-white/12 text-center">
-          Grouped by visual similarity · CLIP ViT-B/32
-        </p>
       )}
     </div>
   );

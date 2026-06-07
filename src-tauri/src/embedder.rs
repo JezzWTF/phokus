@@ -74,6 +74,51 @@ impl ClipImageEmbedder {
         Ok(self.embed_images(&[path.to_path_buf()])?.remove(0))
     }
 
+    /// Embed a cropped region of an image without writing a temp file to disk.
+    /// `crop_x`, `crop_y`, `crop_w`, `crop_h` are normalized 0.0–1.0 coordinates.
+    pub fn embed_image_crop(
+        &self,
+        path: &Path,
+        crop_x: f32,
+        crop_y: f32,
+        crop_w: f32,
+        crop_h: f32,
+    ) -> Result<Vec<f32>> {
+        let img = image::ImageReader::open(path)?
+            .with_guessed_format()?
+            .decode()?;
+
+        let img_w = img.width() as f32;
+        let img_h = img.height() as f32;
+
+        let x = ((crop_x * img_w) as u32).min(img.width().saturating_sub(1));
+        let y = ((crop_y * img_h) as u32).min(img.height().saturating_sub(1));
+        let w = ((crop_w * img_w) as u32).max(1).min(img.width() - x);
+        let h = ((crop_h * img_h) as u32).max(1).min(img.height() - y);
+
+        let cropped = img.crop_imm(x, y, w, h);
+        let resized = cropped.resize_to_fill(
+            self.image_size as u32,
+            self.image_size as u32,
+            image::imageops::FilterType::Triangle,
+        );
+
+        let raw = resized.to_rgb8().into_raw();
+        let tensor = candle_core::Tensor::from_vec(
+            raw,
+            (self.image_size, self.image_size, 3),
+            &candle_core::Device::Cpu,
+        )?
+        .permute((2, 0, 1))?
+        .to_dtype(candle_core::DType::F32)?
+        .affine(2.0 / 255.0, -1.0)?;
+
+        let batch = tensor.unsqueeze(0)?.to_device(&self.device)?;
+        let features = self.model.get_image_features(&batch)?;
+        let normalized = candle_transformers::models::clip::div_l2_norm(&features)?;
+        Ok(normalized.get(0)?.flatten_all()?.to_vec1::<f32>()?)
+    }
+
     pub fn embed_images(&self, paths: &[PathBuf]) -> Result<Vec<Vec<f32>>> {
         let images = load_images(paths, self.image_size)?.to_device(&self.device)?;
         let features = self.model.get_image_features(&images)?;

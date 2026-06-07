@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useGalleryStore } from "../store";
 
-type WorkerKey = "thumbnail" | "metadata" | "embedding";
+type WorkerKey = "thumbnail" | "metadata" | "embedding" | "tagging";
 
 const WORKER_FOR_STAGE: Record<string, WorkerKey> = {
   Thumbnails: "thumbnail",
   Metadata: "metadata",
   Embeddings: "embedding",
+  Tags: "tagging",
 };
 
 interface TaskStage {
@@ -22,6 +23,8 @@ interface Task {
   name: string;
   stages: TaskStage[];
   hasFailedEmbeddings: boolean;
+  hasFailedTagging: boolean;
+  hasFailedCaptions: boolean;
   pendingMediaWork: number;
   embeddingProcessed: number;
   embeddingTotal: number;
@@ -35,31 +38,57 @@ interface FailedEmbeddingItem {
   error: string | null;
 }
 
+interface FolderWorkerStates {
+  folder_id: number;
+  thumbnail_paused: boolean;
+  metadata_paused: boolean;
+  embedding_paused: boolean;
+  tagging_paused: boolean;
+}
+
+const DEFAULT_PAUSED_STATE: Record<WorkerKey, boolean> = {
+  thumbnail: false,
+  metadata: false,
+  embedding: false,
+  tagging: false,
+};
+
 export function BackgroundTasks() {
   const folders = useGalleryStore((state) => state.folders);
   const indexingProgress = useGalleryStore((state) => state.indexingProgress);
   const mediaJobProgress = useGalleryStore((state) => state.mediaJobProgress);
   const retryFailedEmbeddings = useGalleryStore((state) => state.retryFailedEmbeddings);
+  const queueTaggingJobs = useGalleryStore((state) => state.queueTaggingJobs);
+  const duplicateScanning = useGalleryStore((state) => state.duplicateScanning);
+  const duplicateScanProgress = useGalleryStore((state) => state.duplicateScanProgress);
   const [expanded, setExpanded] = useState(false);
   const [dismissed, setDismissed] = useState<Record<number, string>>({});
-  const [paused, setPaused] = useState<Record<WorkerKey, boolean>>({
-    thumbnail: false,
-    metadata: false,
-    embedding: false,
-  });
+  const [paused, setPaused] = useState<Record<number, Record<WorkerKey, boolean>>>({});
   const [failedItems, setFailedItems] = useState<Record<number, FailedEmbeddingItem[]>>({});
 
   useEffect(() => {
-    invoke<{ thumbnail_paused: boolean; metadata_paused: boolean; embedding_paused: boolean }>(
-      "get_worker_states",
-    ).then((states) => {
-      setPaused({
-        thumbnail: states.thumbnail_paused,
-        metadata: states.metadata_paused,
-        embedding: states.embedding_paused,
-      });
+    const folderIds = folders.map((folder) => folder.id);
+    if (folderIds.length === 0) {
+      setPaused({});
+      return;
+    }
+
+    invoke<FolderWorkerStates[]>("get_worker_states", { folderIds }).then((states) => {
+      setPaused(
+        Object.fromEntries(
+          states.map((state) => [
+            state.folder_id,
+            {
+              thumbnail: state.thumbnail_paused,
+              metadata: state.metadata_paused,
+              embedding: state.embedding_paused,
+              tagging: state.tagging_paused,
+            },
+          ]),
+        ),
+      );
     });
-  }, []);
+  }, [folders]);
 
   // Fetch failed embedding filenames whenever the expanded panel opens or failure counts change.
   const failedCounts = useMemo(
@@ -83,13 +112,25 @@ export function BackgroundTasks() {
     }
   }, [expanded, failedCounts]);
 
-  const toggleWorker = (worker: WorkerKey) => {
-    const next = !paused[worker];
-    setPaused((prev) => ({ ...prev, [worker]: next }));
-    void invoke("set_worker_paused", { worker, paused: next });
+  const isWorkerPaused = (folderId: number, worker: WorkerKey) => {
+    return paused[folderId]?.[worker] ?? DEFAULT_PAUSED_STATE[worker];
+  };
+
+  const toggleWorker = (folderId: number, worker: WorkerKey) => {
+    const next = !isWorkerPaused(folderId, worker);
+    setPaused((prev) => ({
+      ...prev,
+      [folderId]: {
+        ...DEFAULT_PAUSED_STATE,
+        ...prev[folderId],
+        [worker]: next,
+      },
+    }));
+    void invoke("set_worker_paused", { worker, folderId, paused: next });
   };
 
   const dismissTask = (id: number, snapshot: string) => {
+    if (id < 0) return; // system tasks (duplicate scan) cannot be dismissed
     setDismissed((prev) => ({ ...prev, [id]: snapshot }));
     setExpanded(false);
   };
@@ -105,13 +146,25 @@ export function BackgroundTasks() {
         const embeddingPending = jobs?.embedding_pending ?? 0;
         const embeddingReady = jobs?.embedding_ready ?? 0;
         const embeddingFailed = jobs?.embedding_failed ?? 0;
+        const taggingPending = jobs?.tagging_pending ?? 0;
+        const taggingReady = jobs?.tagging_ready ?? 0;
+        const taggingFailed = jobs?.tagging_failed ?? 0;
+        const captionPending = jobs?.caption_pending ?? 0;
+        const captionReady = jobs?.caption_ready ?? 0;
+        const captionFailed = jobs?.caption_failed ?? 0;
 
-        const pendingMediaWork = thumbnailPending + metadataPending + embeddingPending;
+        const pendingMediaWork = thumbnailPending + metadataPending + embeddingPending + taggingPending + captionPending;
         const embeddingProcessed = embeddingReady + embeddingFailed;
         const embeddingTotal = embeddingProcessed + embeddingPending;
+        const taggingProcessed = taggingReady + taggingFailed;
+        const taggingTotal = taggingProcessed + taggingPending;
+        const captionProcessed = captionReady + captionFailed;
+        const captionTotal = captionProcessed + captionPending;
         const hasFailedEmbeddings = embeddingFailed > 0;
+        const hasFailedTagging = taggingFailed > 0;
+        const hasFailedCaptions = captionFailed > 0;
 
-        if (!index && pendingMediaWork === 0 && !hasFailedEmbeddings) return null;
+        if (!index && pendingMediaWork === 0 && !hasFailedEmbeddings && !hasFailedTagging && !hasFailedCaptions) return null;
 
         const stages: TaskStage[] = [];
 
@@ -153,6 +206,26 @@ export function BackgroundTasks() {
           });
         }
 
+        if (taggingPending > 0) {
+          const pct = taggingTotal > 0 ? (taggingProcessed / taggingTotal) * 100 : 0;
+          stages.push({
+            label: "Tags",
+            detail: `${taggingProcessed.toLocaleString()} / ${taggingTotal.toLocaleString()}`,
+            progress: pct,
+            failed: false,
+          });
+        }
+
+        if (captionPending > 0) {
+          const pct = captionTotal > 0 ? (captionProcessed / captionTotal) * 100 : 0;
+          stages.push({
+            label: "Captions",
+            detail: `${captionProcessed.toLocaleString()} / ${captionTotal.toLocaleString()}`,
+            progress: pct,
+            failed: false,
+          });
+        }
+
         if (hasFailedEmbeddings && pendingMediaWork === 0) {
           stages.push({
             label: "Failed",
@@ -162,13 +235,33 @@ export function BackgroundTasks() {
           });
         }
 
-        const snapshot = `${pendingMediaWork}:${embeddingFailed}`;
+        if (hasFailedTagging && pendingMediaWork === 0) {
+          stages.push({
+            label: "Failed",
+            detail: `${taggingFailed.toLocaleString()} tags`,
+            progress: null,
+            failed: true,
+          });
+        }
+
+        if (hasFailedCaptions && pendingMediaWork === 0) {
+          stages.push({
+            label: "Failed",
+            detail: `${captionFailed.toLocaleString()} captions`,
+            progress: null,
+            failed: true,
+          });
+        }
+
+        const snapshot = `${pendingMediaWork}:${embeddingFailed}:${taggingFailed}:${captionFailed}`;
 
         return {
           id: folder.id,
           name: folder.name,
           stages,
           hasFailedEmbeddings,
+          hasFailedTagging,
+          hasFailedCaptions,
           pendingMediaWork,
           embeddingProcessed,
           embeddingTotal,
@@ -180,17 +273,44 @@ export function BackgroundTasks() {
       .filter((t) => dismissed[t.id] !== t.snapshot);
   }, [folders, indexingProgress, mediaJobProgress, dismissed]);
 
-  if (tasks.length === 0) return null;
+  // Synthetic task for duplicate scanning — negative id so dismiss/retry are suppressed
+  const duplicateScanTask: Task | null = duplicateScanning ? {
+    id: -1,
+    name: "Duplicate Scan",
+    stages: [{
+      label: "Hashing",
+      detail: duplicateScanProgress
+        ? `${duplicateScanProgress.scanned.toLocaleString()} / ${duplicateScanProgress.total.toLocaleString()}`
+        : "Starting…",
+      progress: duplicateScanProgress && duplicateScanProgress.total > 0
+        ? (duplicateScanProgress.scanned / duplicateScanProgress.total) * 100
+        : null,
+      failed: false,
+    }],
+    hasFailedEmbeddings: false,
+    hasFailedTagging: false,
+    hasFailedCaptions: false,
+    pendingMediaWork: 1,
+    embeddingProcessed: 0,
+    embeddingTotal: 0,
+    currentFile: null,
+    snapshot: "",
+  } : null;
 
-  const primary = tasks[0];
-  const extraCount = tasks.length - 1;
-  const hasFailed = tasks.some((t) => t.hasFailedEmbeddings && t.pendingMediaWork === 0);
+  const allTasks = duplicateScanTask ? [duplicateScanTask, ...tasks] : tasks;
+
+  if (allTasks.length === 0) return null;
+
+  const primary = allTasks[0];
+  const extraCount = allTasks.length - 1;
+  const hasFailed = tasks.some((t) => (t.hasFailedEmbeddings || t.hasFailedTagging || t.hasFailedCaptions) && t.pendingMediaWork === 0);
 
   // Best progress bar value: use embedding progress if available (most informative),
-  // otherwise fall back to scanning progress, otherwise indeterminate.
+  // otherwise tagging progress, otherwise fall back to scanning progress, otherwise indeterminate.
   const embeddingStage = primary.stages.find((s) => s.label === "Embeddings");
+  const taggingStage = primary.stages.find((s) => s.label === "Tags");
   const scanningStage = primary.stages.find((s) => s.label === "Scanning");
-  const barProgress = embeddingStage?.progress ?? scanningStage?.progress ?? null;
+  const barProgress = embeddingStage?.progress ?? taggingStage?.progress ?? scanningStage?.progress ?? null;
 
   return (
     <div className="shrink-0 border-b border-white/[0.06]">
@@ -214,7 +334,7 @@ export function BackgroundTasks() {
         <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-hidden">
           {primary.stages.map((stage) => {
             const workerKey = WORKER_FOR_STAGE[stage.label];
-            const isPaused = workerKey ? paused[workerKey] : false;
+            const isPaused = workerKey ? isWorkerPaused(primary.id, workerKey) : false;
             return (
               <span
                 key={stage.label}
@@ -234,7 +354,7 @@ export function BackgroundTasks() {
                   <button
                     className="ml-0.5 opacity-0 group-hover:opacity-100 hover:text-white transition-opacity"
                     title={isPaused ? `Resume ${stage.label}` : `Pause ${stage.label}`}
-                    onClick={(e) => { e.stopPropagation(); toggleWorker(workerKey); }}
+                    onClick={(e) => { e.stopPropagation(); toggleWorker(primary.id, workerKey); }}
                   >
                     {isPaused ? (
                       <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24">
@@ -283,8 +403,8 @@ export function BackgroundTasks() {
           </button>
         )}
 
-        {/* Expand chevron (only when multiple folders) */}
-        {tasks.length > 1 && (
+        {/* Expand chevron (only when multiple tasks) */}
+        {allTasks.length > 1 && (
           <svg
             className={`h-3.5 w-3.5 text-gray-600 transition-transform duration-200 shrink-0 ${expanded ? "rotate-180" : ""}`}
             fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -293,26 +413,29 @@ export function BackgroundTasks() {
           </svg>
         )}
 
-        {/* Dismiss */}
-        <button
-          className="p-1 rounded-md text-gray-600 hover:text-gray-300 hover:bg-white/8 transition-colors shrink-0"
-          title="Dismiss"
-          onClick={(e) => { e.stopPropagation(); dismissTask(primary.id, primary.snapshot); }}
-        >
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        {/* Dismiss — hidden for system tasks like duplicate scan */}
+        {primary.id >= 0 && (
+          <button
+            className="p-1 rounded-md text-gray-600 hover:text-gray-300 hover:bg-white/8 transition-colors shrink-0"
+            title="Dismiss"
+            onClick={(e) => { e.stopPropagation(); dismissTask(primary.id, primary.snapshot); }}
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Expanded panel — one row per folder */}
       {expanded && (
         <div className="border-t border-white/[0.06] bg-white/[0.02] px-5 py-3 space-y-3">
-          {tasks.map((task) => {
+          {allTasks.map((task) => {
             const taskEmbeddingStage = task.stages.find((s) => s.label === "Embeddings");
+            const taskTaggingStage = task.stages.find((s) => s.label === "Tags");
             const taskScanningStage = task.stages.find((s) => s.label === "Scanning");
-            const taskBarProgress = taskEmbeddingStage?.progress ?? taskScanningStage?.progress ?? null;
-            const taskHasFailed = task.hasFailedEmbeddings && task.pendingMediaWork === 0;
+            const taskBarProgress = taskEmbeddingStage?.progress ?? taskTaggingStage?.progress ?? taskScanningStage?.progress ?? null;
+            const taskHasFailed = (task.hasFailedEmbeddings || task.hasFailedTagging || task.hasFailedCaptions) && task.pendingMediaWork === 0;
 
             return (
               <div key={task.id}>
@@ -322,7 +445,7 @@ export function BackgroundTasks() {
                   <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-hidden">
                     {task.stages.map((stage) => {
                       const workerKey = WORKER_FOR_STAGE[stage.label];
-                      const isPaused = workerKey ? paused[workerKey] : false;
+                      const isPaused = workerKey ? isWorkerPaused(task.id, workerKey) : false;
                       return (
                         <span
                           key={stage.label}
@@ -347,7 +470,7 @@ export function BackgroundTasks() {
                             <button
                               className="ml-0.5 text-gray-600 hover:text-white transition-colors"
                               title={isPaused ? `Resume ${stage.label}` : `Pause ${stage.label}`}
-                              onClick={() => toggleWorker(workerKey)}
+                              onClick={() => toggleWorker(task.id, workerKey)}
                             >
                               {isPaused ? (
                                 <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24">
@@ -381,21 +504,26 @@ export function BackgroundTasks() {
                   {taskHasFailed && (
                     <button
                       className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300 hover:bg-amber-500/20 transition-colors shrink-0"
-                      onClick={() => void retryFailedEmbeddings(task.id)}
+                      onClick={() => {
+                        if (task.hasFailedEmbeddings) void retryFailedEmbeddings(task.id);
+                        if (task.hasFailedTagging) void queueTaggingJobs(task.id);
+                      }}
                     >
                       Retry
                     </button>
                   )}
 
-                  <button
-                    className="p-1 rounded-md text-gray-600 hover:text-gray-300 hover:bg-white/8 transition-colors shrink-0"
-                    title="Dismiss"
-                    onClick={() => dismissTask(task.id, task.snapshot)}
-                  >
-                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+                  {task.id >= 0 && (
+                    <button
+                      className="p-1 rounded-md text-gray-600 hover:text-gray-300 hover:bg-white/8 transition-colors shrink-0"
+                      title="Dismiss"
+                      onClick={() => dismissTask(task.id, task.snapshot)}
+                    >
+                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
 
                 {task.currentFile && (

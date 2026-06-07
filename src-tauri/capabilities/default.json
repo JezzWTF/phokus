@@ -13,6 +13,7 @@
     "fs:allow-read-dir",
     "fs:read-files",
     "fs:read-dirs",
+    "notification:default",
     "core:window:allow-minimize",
     "core:window:allow-close",
     "core:window:allow-toggle-maximize",
