@@ -657,8 +657,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     const { selectedFolderId, loadFolders, loadImages, loadBackgroundJobProgress } = get();
     await loadFolders();
     await loadBackgroundJobProgress();
-    // Invalidate tag cloud cache since library content changed
-    set({ tagCloudFolderId: undefined, tagCloudEntries: [] });
+    // Invalidate tag cloud and explore-tags cache since library content changed
+    set({ tagCloudFolderId: undefined, tagCloudEntries: [], exploreTagsFolderId: undefined });
     if (selectedFolderId === folderId) {
       set({ selectedFolderId: null });
       await loadImages(true);
@@ -810,7 +810,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     if (collectionTitle === "Explore Cluster") return;
     if (collectionTitle === "Similar Images" && similarSourceImageId !== null) {
       if (!similarHasMore) return;
-      await get().loadSimilarImages(similarSourceImageId, similarFolderId, false);
+      await get().loadSimilarImages(similarSourceImageId, similarFolderId, false, get().similarSourceFolderId ?? null);
       return;
     }
     if (collectionTitle === "Region Search Results" && similarSourceImageId !== null && similarCrop !== null) {

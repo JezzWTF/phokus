@@ -2074,11 +2074,16 @@ pub fn delete_folder(conn: &Connection, folder_id: i64) -> Result<()> {
         rows
     };
 
-    let tx = conn.unchecked_transaction()?;
-    for image_id in image_ids {
-        vector::delete_embedding(&tx, image_id)?;
-        vector::delete_caption_embedding(&tx, image_id)?;
+    // Delete sqlite-vec rows outside any transaction — DML on virtual tables is
+    // unreliable inside a transaction and will cause remove_folder to fail for
+    // folders that have generated embeddings. The folder cascade (images rows)
+    // is handled by the FK ON DELETE CASCADE when the folder row is deleted.
+    for image_id in &image_ids {
+        vector::delete_embedding(conn, *image_id)?;
+        vector::delete_caption_embedding(conn, *image_id)?;
     }
+
+    let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM folders WHERE id = ?1", params![folder_id])?;
     tx.commit()?;
     Ok(())
