@@ -147,11 +147,39 @@ pub struct MediaJobProgressEvent {
 
 pub fn index_folder(app: AppHandle, pool: DbPool, folder_id: i64, folder_path: PathBuf) {
     std::thread::spawn(move || {
+        set_folder_indexing_state(folder_id, true);
+
+        // If the folder path no longer exists on disk, record the error and
+        // emit done. Images are intentionally kept in the DB so the user can
+        // choose to relocate the folder or remove it explicitly — they should
+        // not be silently destroyed.
+        if !folder_path.is_dir() {
+            let error_msg = format!("Folder not found: {}", folder_path.display());
+            eprintln!("Indexing error for folder {}: {}", folder_id, error_msg);
+            if let Ok(conn) = pool.get() {
+                let _ = db::set_folder_scan_error(&conn, folder_id, &error_msg);
+            }
+            emit_progress(
+                &app,
+                &IndexProgress {
+                    folder_id,
+                    total: 0,
+                    indexed: 0,
+                    current_file: String::new(),
+                    done: true,
+                },
+            );
+            set_folder_indexing_state(folder_id, false);
+            return;
+        }
+
         let storage_profile = detect_storage_profile(&folder_path);
         set_folder_storage_profile(folder_id, RuntimeAdaptiveProfile::new(storage_profile));
-        set_folder_indexing_state(folder_id, true);
-        if let Err(error) = do_index(app.clone(), pool, folder_id, folder_path) {
+        if let Err(error) = do_index(app.clone(), &pool, folder_id, folder_path) {
             eprintln!("Indexing error for folder {}: {}", folder_id, error);
+            if let Ok(conn) = pool.get() {
+                let _ = db::set_folder_scan_error(&conn, folder_id, &error.to_string());
+            }
             // Always emit done so the frontend reloads and recovers from partial state.
             emit_progress(
                 &app,
@@ -246,7 +274,7 @@ pub fn start_tagging_worker(app: AppHandle, pool: DbPool, app_data_dir: PathBuf)
     });
 }
 
-fn do_index(app: AppHandle, pool: DbPool, folder_id: i64, folder_path: PathBuf) -> Result<()> {
+fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf) -> Result<()> {
     let existing_entries = {
         let conn = pool.get()?;
         db::get_folder_media_index(&conn, folder_id)?
@@ -344,6 +372,7 @@ fn do_index(app: AppHandle, pool: DbPool, folder_id: i64, folder_path: PathBuf) 
         }
         let _ = db::backfill_embedding_jobs(&conn)?;
         db::update_folder_count(&conn, folder_id)?;
+        let _ = db::clear_folder_scan_error(&conn, folder_id);
     }
 
     emit_progress(

@@ -10,6 +10,7 @@ export interface Folder {
   name: string;
   image_count: number;
   indexed_at: string | null;
+  scan_error: string | null;
 }
 
 export type MediaKind = "image" | "video";
@@ -279,12 +280,14 @@ interface GalleryState {
   duplicateScanProgress: { scanned: number; total: number } | null;
   duplicateSelectedIds: Set<number>;
   duplicateLastScanned: number | null; // Unix timestamp (seconds)
+  duplicateScanFolderId: number | null | undefined; // undefined = never scanned
 
   loadFolders: () => Promise<void>;
   loadBackgroundJobProgress: () => Promise<void>;
   addFolder: (path: string) => Promise<void>;
   removeFolder: (folderId: number) => Promise<void>;
   reindexFolder: (folderId: number) => Promise<void>;
+  updateFolderPath: (folderId: number, newPath: string) => Promise<void>;
   selectFolder: (folderId: number | null) => void;
   loadImages: (reset?: boolean) => Promise<void>;
   loadMoreImages: () => Promise<void>;
@@ -611,6 +614,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   duplicateScanProgress: null,
   duplicateSelectedIds: new Set(),
   duplicateLastScanned: null,
+  duplicateScanFolderId: undefined,
 
   setCacheDir: (cacheDir) => set({ cacheDir }),
 
@@ -664,6 +668,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     await loadFolders();
     // Invalidate tag cloud cache since embeddings will be regenerated
     set({ tagCloudFolderId: undefined, tagCloudEntries: [] });
+    await loadBackgroundJobProgress();
+  },
+
+  updateFolderPath: async (folderId, newPath) => {
+    const { loadFolders, loadBackgroundJobProgress } = get();
+    await invoke("update_folder_path", { folderId, newPath });
+    await loadFolders();
     await loadBackgroundJobProgress();
   },
 
@@ -785,24 +796,33 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     }
     if (collectionTitle === "Region Search Results" && similarSourceImageId !== null && similarCrop !== null) {
       if (!similarHasMore) return;
-      const result = await invoke<SimilarImagesPage>("find_similar_by_region", {
-        params: {
-          image_id: similarSourceImageId,
-          crop_x: similarCrop.x,
-          crop_y: similarCrop.y,
-          crop_w: similarCrop.w,
-          crop_h: similarCrop.h,
-          folder_id: similarFolderId,
-          offset: loadedCount,
-          limit: PAGE_SIZE,
-        },
-      });
-      set((state) => ({
-        images: [...state.images, ...result.images],
-        loadedCount: state.loadedCount + result.images.length,
-        totalImages: result.has_more ? state.loadedCount + result.images.length + 1 : state.loadedCount + result.images.length,
-        similarHasMore: result.has_more,
-      }));
+      const requestToken = ++galleryRequestToken;
+      set({ loadingImages: true });
+      try {
+        const result = await invoke<SimilarImagesPage>("find_similar_by_region", {
+          params: {
+            image_id: similarSourceImageId,
+            crop_x: similarCrop.x,
+            crop_y: similarCrop.y,
+            crop_w: similarCrop.w,
+            crop_h: similarCrop.h,
+            folder_id: similarFolderId,
+            offset: loadedCount,
+            limit: PAGE_SIZE,
+          },
+        });
+        if (requestToken !== galleryRequestToken) return;
+        set((state) => ({
+          images: [...state.images, ...result.images],
+          loadedCount: state.loadedCount + result.images.length,
+          totalImages: result.has_more ? state.loadedCount + result.images.length + 1 : state.loadedCount + result.images.length,
+          similarHasMore: result.has_more,
+          loadingImages: false,
+        }));
+      } catch {
+        if (requestToken !== galleryRequestToken) return;
+        set({ loadingImages: false });
+      }
       return;
     }
     await get().loadImages(false);
@@ -858,7 +878,17 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   openImage: (image) => set({ selectedImage: image }),
   closeImage: () => set({ selectedImage: null }),
 
-  setView: (activeView) => set({ activeView }),
+  setView: (activeView) => {
+    if (activeView === "duplicates") {
+      const { selectedFolderId, duplicateScanFolderId } = get();
+      if (duplicateScanFolderId !== selectedFolderId) {
+        set({ activeView, duplicateGroups: [], duplicateLastScanned: null, duplicateScanFolderId: undefined });
+        void get().loadDuplicateScanCache(selectedFolderId);
+        return;
+      }
+    }
+    set({ activeView });
+  },
 
   setExploreMode: (exploreMode) => set({ exploreMode }),
 
@@ -1409,7 +1439,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     interface CacheResult { groups: DuplicateGroup[]; scanned_at: number }
     const cached = await invoke<CacheResult | null>("load_duplicate_scan_cache", { folderId: folderId ?? null });
     if (cached) {
-      set({ duplicateGroups: cached.groups, duplicateLastScanned: cached.scanned_at });
+      set({ duplicateGroups: cached.groups, duplicateLastScanned: cached.scanned_at, duplicateScanFolderId: folderId });
     }
   },
 
@@ -1422,7 +1452,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     });
     try {
       const groups = await invoke<DuplicateGroup[]>("find_duplicates", { folderId: folderId ?? null });
-      set({ duplicateGroups: groups, duplicateLastScanned: Math.floor(Date.now() / 1000) });
+      set({ duplicateGroups: groups, duplicateLastScanned: Math.floor(Date.now() / 1000), duplicateScanFolderId: folderId });
       void notifyTaskComplete(
         "Duplicate scan complete",
         groups.length === 1 ? "Found 1 duplicate group." : `Found ${groups.length.toLocaleString()} duplicate groups.`,

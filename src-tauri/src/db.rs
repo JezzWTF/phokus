@@ -30,6 +30,7 @@ pub struct Folder {
     pub name: String,
     pub image_count: i64,
     pub indexed_at: Option<String>,
+    pub scan_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,7 +173,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             path        TEXT NOT NULL UNIQUE,
             name        TEXT NOT NULL,
             image_count INTEGER NOT NULL DEFAULT 0,
-            indexed_at  TEXT
+            indexed_at  TEXT,
+            scan_error  TEXT
         );
 
         CREATE TABLE IF NOT EXISTS images (
@@ -304,6 +306,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     ensure_column(conn, "images", "ai_tagger_model", "TEXT")?;
     ensure_column(conn, "images", "ai_tagged_at", "TEXT")?;
     ensure_column(conn, "images", "ai_tagger_error", "TEXT")?;
+    ensure_column(conn, "folders", "scan_error", "TEXT")?;
 
     vector::migrate(conn)?;
     Ok(())
@@ -1339,7 +1342,7 @@ pub fn get_images_by_ids(conn: &Connection, image_ids: &[i64]) -> Result<Vec<Ima
 
 pub fn get_folders(conn: &Connection) -> Result<Vec<Folder>> {
     let mut stmt =
-        conn.prepare("SELECT id, path, name, image_count, indexed_at FROM folders ORDER BY name")?;
+        conn.prepare("SELECT id, path, name, image_count, indexed_at, scan_error FROM folders ORDER BY name")?;
     let rows = stmt.query_map([], |row| {
         Ok(Folder {
             id: row.get(0)?,
@@ -1347,9 +1350,41 @@ pub fn get_folders(conn: &Connection) -> Result<Vec<Folder>> {
             name: row.get(2)?,
             image_count: row.get(3)?,
             indexed_at: row.get(4)?,
+            scan_error: row.get(5)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub fn update_folder_path(conn: &Connection, folder_id: i64, old_path: &str, new_path: &str, new_name: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE folders SET path = ?2, name = ?3, scan_error = NULL WHERE id = ?1",
+        params![folder_id, new_path, new_name],
+    )?;
+    // Rewrite image paths so the indexer can match them by path and skip
+    // re-generating thumbnails and embeddings for unchanged files.
+    // SQLite's replace() does a literal prefix substitution on each path.
+    conn.execute(
+        "UPDATE images SET path = replace(path, ?1, ?2) WHERE folder_id = ?3",
+        params![old_path, new_path, folder_id],
+    )?;
+    Ok(())
+}
+
+pub fn set_folder_scan_error(conn: &Connection, folder_id: i64, error: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE folders SET scan_error = ?2 WHERE id = ?1",
+        params![folder_id, error],
+    )?;
+    Ok(())
+}
+
+pub fn clear_folder_scan_error(conn: &Connection, folder_id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE folders SET scan_error = NULL WHERE id = ?1",
+        [folder_id],
+    )?;
+    Ok(())
 }
 
 pub fn get_images(

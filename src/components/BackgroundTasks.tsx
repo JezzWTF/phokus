@@ -57,7 +57,6 @@ export function BackgroundTasks() {
   const indexingProgress = useGalleryStore((state) => state.indexingProgress);
   const mediaJobProgress = useGalleryStore((state) => state.mediaJobProgress);
   const retryFailedEmbeddings = useGalleryStore((state) => state.retryFailedEmbeddings);
-  const clearTaggingJobs = useGalleryStore((state) => state.clearTaggingJobs);
   const duplicateScanning = useGalleryStore((state) => state.duplicateScanning);
   const duplicateScanProgress = useGalleryStore((state) => state.duplicateScanProgress);
   const [expanded, setExpanded] = useState(false);
@@ -130,7 +129,6 @@ export function BackgroundTasks() {
 
   const dismissTask = (id: number, snapshot: string) => {
     if (id < 0) return; // system tasks (duplicate scan) cannot be dismissed
-    void clearTaggingJobs(id);
     setDismissed((prev) => ({ ...prev, [id]: snapshot }));
     setExpanded(false);
   };

@@ -326,6 +326,37 @@ pub async fn reindex_folder(
 }
 
 #[tauri::command]
+pub async fn update_folder_path(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    folder_id: i64,
+    new_path: String,
+) -> Result<(), String> {
+    let new_path_buf = PathBuf::from(&new_path);
+    if !new_path_buf.is_dir() {
+        return Err(format!("Path is not a valid directory: {}", new_path));
+    }
+    let new_name = new_path_buf
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| new_path.clone());
+    {
+        let conn = db.get().map_err(|e| e.to_string())?;
+        // Fetch the old path before updating so image paths can be rewritten.
+        let old_path = db::get_folders(&conn)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|f| f.id == folder_id)
+            .map(|f| f.path)
+            .ok_or("Folder not found")?;
+        db::update_folder_path(&conn, folder_id, &old_path, &new_path, &new_name)
+            .map_err(|e| e.to_string())?;
+    }
+    indexer::index_folder(app, db.inner().clone(), folder_id, new_path_buf);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn find_similar_images(
     db: State<'_, DbState>,
     params: FindSimilarImagesParams,
@@ -403,9 +434,10 @@ pub async fn find_similar_by_region(
         )
         .map_err(|e| e.to_string())?,
         None => {
-            let mut ids = vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 1)
+            // Fetch one extra candidate to compensate for the source image that
+            // will be removed, so has_more is accurate and results span multiple pages.
+            let mut ids = vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 2)
                 .map_err(|e| e.to_string())?;
-            // Exclude the source image from global results
             ids.retain(|&id| id != params.image_id);
             ids
         }

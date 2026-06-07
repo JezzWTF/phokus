@@ -133,6 +133,7 @@ pub fn run() {
             commands::find_duplicates,
             commands::load_duplicate_scan_cache,
             commands::delete_images_from_disk,
+            commands::update_folder_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

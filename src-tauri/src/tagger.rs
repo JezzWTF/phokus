@@ -191,6 +191,7 @@ pub fn set_tagger_threshold(app_data_dir: &Path, threshold: f32) -> Result<f32> 
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(path, clamped.to_string())?;
+    TAGGER_SESSION_DIRTY.store(true, Ordering::Relaxed);
     Ok(clamped)
 }
 

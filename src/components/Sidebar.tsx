@@ -11,9 +11,18 @@ function FolderItem({
   selected: boolean;
   progress: IndexProgress | undefined;
 }) {
-  const { selectFolder, removeFolder, reindexFolder } = useGalleryStore();
+  const { selectFolder, removeFolder, reindexFolder, updateFolderPath } = useGalleryStore();
   const isIndexing = progress && !progress.done;
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
+  const isMissing = !!folder.scan_error && !isIndexing;
+
+  const handleLocateFolder = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const selected = await open({ directory: true, multiple: false, title: `Locate "${folder.name}"` });
+    if (selected && typeof selected === "string") {
+      await updateFolderPath(folder.id, selected);
+    }
+  };
 
   useEffect(() => {
     if (!confirmingRemoval) return;
@@ -31,6 +40,7 @@ function FolderItem({
   };
 
   return (
+    <>
     <div
       className={`group relative flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150 ${
         selected
@@ -39,10 +49,19 @@ function FolderItem({
       }`}
       onClick={() => selectFolder(folder.id)}
     >
-      <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-          d="M3 7a2 2 0 012-2h3.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0011.414 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-      </svg>
+      {folder.scan_error ? (
+        <span title={folder.scan_error} className="shrink-0 text-amber-400">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+              d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          </svg>
+        </span>
+      ) : (
+        <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+            d="M3 7a2 2 0 012-2h3.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0011.414 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+        </svg>
+      )}
 
       <div className="flex-1 min-w-0">
         <div className={`truncate text-[13px] font-medium leading-tight ${selected ? "text-white" : ""}`}>
@@ -112,6 +131,29 @@ function FolderItem({
         </div>
       )}
     </div>
+    {isMissing && (
+      <div className="mx-2 mb-1 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+        <p className="text-[11px] text-amber-400 font-medium mb-1.5">Folder not found</p>
+        <p className="text-[10px] text-gray-500 mb-2 leading-snug">
+          This folder may have been moved or renamed. Locate it to resume, or remove it from the app.
+        </p>
+        <div className="flex gap-1.5">
+          <button
+            className="flex-1 px-2 py-1 rounded-md text-[10px] font-medium bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 hover:text-amber-200 transition-colors"
+            onClick={handleLocateFolder}
+          >
+            Locate Folder
+          </button>
+          <button
+            className="flex-1 px-2 py-1 rounded-md text-[10px] font-medium bg-white/5 text-gray-400 hover:bg-red-500/15 hover:text-red-400 transition-colors"
+            onClick={(e) => { e.stopPropagation(); void removeFolder(folder.id); }}
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
