@@ -263,6 +263,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             groups_json     TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS app_kv (
+            key   TEXT PRIMARY KEY,
+            value INTEGER NOT NULL DEFAULT 0
+        );
+
+        INSERT OR IGNORE INTO app_kv (key, value) VALUES ('embedding_revision', 0);
+
         CREATE INDEX IF NOT EXISTS idx_images_folder_id ON images(folder_id);
         CREATE INDEX IF NOT EXISTS idx_images_modified_at ON images(modified_at);
         CREATE INDEX IF NOT EXISTS idx_embedding_jobs_status ON embedding_jobs(status);
@@ -915,6 +922,13 @@ pub fn mark_embedding_ready(conn: &Connection, image_id: i64, model: &str) -> Re
         params![image_id, model],
     )?;
     conn.execute("DELETE FROM embedding_jobs WHERE image_id = ?1", [image_id])?;
+    // Advance the monotonic revision so the HNSW cache is always rebuilt after
+    // any embedding change, regardless of clock resolution.
+    conn.execute(
+        "INSERT INTO app_kv (key, value) VALUES ('embedding_revision', 1)
+         ON CONFLICT(key) DO UPDATE SET value = value + 1",
+        [],
+    )?;
     Ok(())
 }
 

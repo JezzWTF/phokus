@@ -373,6 +373,11 @@ fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf)
         let _ = db::backfill_embedding_jobs(&conn)?;
         db::update_folder_count(&conn, folder_id)?;
         let _ = db::clear_folder_scan_error(&conn, folder_id);
+        // Invalidate duplicate scan cache — any reindex can change file contents
+        // or the set of files, making cached duplicate groups stale.
+        let folder_scope = format!("folder:{}", folder_id);
+        let _ = db::clear_duplicate_scan_cache(&conn, &folder_scope);
+        let _ = db::clear_duplicate_scan_cache(&conn, "all");
     }
 
     emit_progress(

@@ -215,13 +215,17 @@ pub fn get_image_embedding(conn: &Connection, image_id: i64) -> Result<Option<Ve
 }
 
 pub fn get_embedding_revision(conn: &Connection) -> Result<String> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM image_vec", [], |row| row.get(0))?;
-    let max_updated_at: Option<String> = conn.query_row(
-        "SELECT MAX(embedding_updated_at) FROM images WHERE embedding_status = 'ready'",
-        [],
-        |row| row.get(0),
-    )?;
-    Ok(format!("{}:{}", count, max_updated_at.unwrap_or_default()))
+    // Use the monotonically incremented app_kv counter so that two embeddings
+    // saved within the same clock second still advance the revision, preventing
+    // the HNSW cache from serving stale vectors.
+    let revision: i64 = conn
+        .query_row(
+            "SELECT COALESCE((SELECT value FROM app_kv WHERE key = 'embedding_revision'), 0)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    Ok(revision.to_string())
 }
 
 // fn image_ids_for_folder(
