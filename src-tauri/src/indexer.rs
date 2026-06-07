@@ -284,12 +284,32 @@ fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf)
         .map(|entry| (entry.path.clone(), entry))
         .collect::<HashMap<_, _>>();
 
+    // Collect traversal errors separately. An unreadable subdirectory means we
+    // cannot distinguish absent files from inaccessible ones; tracking errors
+    // lets us skip the deletion step for paths under affected subtrees.
+    let mut unreadable_prefixes: Vec<String> = Vec::new();
     let media_paths: Vec<PathBuf> = WalkDir::new(&folder_path)
         .follow_links(true)
         .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().is_file() && is_supported_media(entry.path()))
-        .map(|entry| entry.path().to_path_buf())
+        .filter_map(|entry| match entry {
+            Ok(e) if e.file_type().is_file() && is_supported_media(e.path()) => {
+                Some(e.path().to_path_buf())
+            }
+            Ok(_) => None,
+            Err(err) => {
+                // Record the inaccessible path so we can protect its descendants
+                // from the missing-file deletion pass.
+                if let Some(path) = err.path() {
+                    unreadable_prefixes.push(path.to_string_lossy().into_owned());
+                }
+                eprintln!(
+                    "WalkDir error while scanning folder {}: {}",
+                    folder_path.display(),
+                    err
+                );
+                None
+            }
+        })
         .collect();
 
     let total = media_paths.len();
@@ -362,6 +382,17 @@ fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf)
     let missing_ids = existing_by_path
         .values()
         .filter(|entry| !seen_paths.contains(&entry.path))
+        .filter(|entry| {
+            // If this path lives under a subtree that WalkDir couldn't read,
+            // we don't know whether the file is gone or just temporarily
+            // inaccessible — keep the record to avoid false deletions.
+            // Use Path::starts_with (component-aware) so a sibling directory
+            // whose name shares a prefix is not incorrectly protected.
+            let entry_path = std::path::Path::new(&entry.path);
+            unreadable_prefixes
+                .iter()
+                .all(|prefix| !entry_path.starts_with(prefix))
+        })
         .map(|entry| entry.id)
         .collect::<Vec<_>>();
 
@@ -982,11 +1013,13 @@ fn process_tagging_batch(
         let mut updated_images = Vec::with_capacity(tag_results.len());
 
         for (job, tag_result) in &tag_results {
-            // If the job was cancelled while inference was running, discard
-            // the result and delete the row — don't save tags or mark failed.
-            if db::is_tagging_job_cancelled(&tx, job.image_id)? {
+            // If the job is no longer in 'processing' state it was either
+            // cancelled or reset to 'pending' (pause) while inference was running.
+            // Discard the result in both cases — for cancelled rows also delete
+            // the row; for paused rows leave it so the job is retried later.
+            if !db::is_tagging_job_processing(&tx, job.image_id)? {
                 tx.execute(
-                    "DELETE FROM tagging_jobs WHERE image_id = ?1",
+                    "DELETE FROM tagging_jobs WHERE image_id = ?1 AND status = 'cancelled'",
                     [job.image_id],
                 )?;
                 continue;

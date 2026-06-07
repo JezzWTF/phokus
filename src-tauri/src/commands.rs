@@ -571,6 +571,11 @@ pub async fn semantic_search_images(
             images.truncate(limit);
             return Ok(images);
         }
+        // If we are already at the fetch cap, another iteration would fetch the
+        // exact same IDs — break out rather than looping forever.
+        if batch >= 8192 {
+            return Ok(images);
+        }
         batch = (batch * 2).min(8192);
     }
 }

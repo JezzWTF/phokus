@@ -2024,6 +2024,18 @@ pub fn is_tagging_job_cancelled(conn: &Connection, image_id: i64) -> Result<bool
     Ok(count > 0)
 }
 
+/// Returns `true` when the job row for `image_id` is still `processing`.
+/// A `false` result means the row was reset to `pending` (pause) or `cancelled`
+/// while inference was running — either way the result must be discarded.
+pub fn is_tagging_job_processing(conn: &Connection, image_id: i64) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM tagging_jobs WHERE image_id = ?1 AND status = 'processing'",
+        [image_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
 pub fn requeue_tagging_jobs(conn: &Connection, image_ids: &[i64]) -> Result<()> {
     for image_id in image_ids {
         conn.execute(

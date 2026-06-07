@@ -129,6 +129,11 @@ export function Lightbox() {
   const taggerModelStatus = useGalleryStore((state) => state.taggerModelStatus);
   const queueTaggingForImage = useGalleryStore((state) => state.queueTaggingForImage);
 
+  // Tracks the image id that is currently displayed, used to discard async
+  // tag mutations that resolve after the user has navigated to another image.
+  const currentImageIdRef = useRef<number | null>(null);
+  currentImageIdRef.current = selectedImage?.id ?? null;
+
   const [zoom, setZoom] = useState(1);
   const [imageTags, setImageTags] = useState<ImageTag[]>([]);
   const [tagInput, setTagInput] = useState("");
@@ -668,8 +673,11 @@ export function Lightbox() {
                         const raw = tagInput.trim();
                         if (!raw || tagAdding) return;
                         setTagAdding(true);
-                        void addUserTag(selectedImage.id, raw)
+                        const taggedImageId = selectedImage.id;
+                        void addUserTag(taggedImageId, raw)
                           .then((newTag) => {
+                            // Discard if the user navigated away before the request resolved.
+                            if (currentImageIdRef.current !== taggedImageId) return;
                             setImageTags((prev) => [...prev, newTag]);
                             setTagInput("");
                           })
