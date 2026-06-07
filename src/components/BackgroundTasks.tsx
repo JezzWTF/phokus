@@ -57,6 +57,7 @@ export function BackgroundTasks() {
   const indexingProgress = useGalleryStore((state) => state.indexingProgress);
   const mediaJobProgress = useGalleryStore((state) => state.mediaJobProgress);
   const retryFailedEmbeddings = useGalleryStore((state) => state.retryFailedEmbeddings);
+  const queueTaggingJobs = useGalleryStore((state) => state.queueTaggingJobs);
   const duplicateScanning = useGalleryStore((state) => state.duplicateScanning);
   const duplicateScanProgress = useGalleryStore((state) => state.duplicateScanProgress);
   const [expanded, setExpanded] = useState(false);
@@ -475,7 +476,10 @@ export function BackgroundTasks() {
                   {taskHasFailed && (
                     <button
                       className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300 hover:bg-amber-500/20 transition-colors shrink-0"
-                      onClick={() => void retryFailedEmbeddings(task.id)}
+                      onClick={() => {
+                        if (task.hasFailedEmbeddings) void retryFailedEmbeddings(task.id);
+                        if (task.hasFailedTagging) void queueTaggingJobs(task.id);
+                      }}
                     >
                       Retry
                     </button>

@@ -1126,10 +1126,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   setSimilarScope: (similarScope) => {
     set({ similarScope });
-    const { similarSourceImageId, similarSourceFolderId, selectedFolderId } = get();
+    const { similarSourceImageId, similarSourceFolderId, selectedFolderId, collectionTitle, similarCrop } = get();
     if (similarSourceImageId === null) return;
     const folderId = similarScope === "current_folder" ? (similarSourceFolderId ?? selectedFolderId) : null;
-    void get().loadSimilarImages(similarSourceImageId, folderId, true, similarSourceFolderId);
+    if (collectionTitle === "Region Search Results" && similarCrop !== null) {
+      void get().loadSimilarByRegion(similarSourceImageId, similarCrop, folderId, similarSourceFolderId);
+    } else {
+      void get().loadSimilarImages(similarSourceImageId, folderId, true, similarSourceFolderId);
+    }
   },
 
   suggestImageTags: async (imageId) => {
@@ -1498,7 +1502,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   clearDuplicateSelection: () => set({ duplicateSelectedIds: new Set() }),
 
   deleteSelectedDuplicates: async () => {
-    const { duplicateSelectedIds } = get();
+    const { duplicateSelectedIds, duplicateScanFolderId } = get();
     const ids = Array.from(duplicateSelectedIds);
     if (ids.length === 0) return 0;
     const deleted = await invoke<number>("delete_images_from_disk", { params: { image_ids: ids } });
@@ -1509,6 +1513,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         .map((g) => ({ ...g, images: g.images.filter((img) => !duplicateSelectedIds.has(img.id)) }))
         .filter((g) => g.images.length > 1),
     }));
+    // Invalidate the persisted cache so a restart doesn't reload stale entries
+    await invoke("invalidate_duplicate_scan_cache", { folderId: duplicateScanFolderId ?? null });
     return deleted;
   },
 

@@ -1371,9 +1371,10 @@ pub fn update_folder_path(conn: &Connection, folder_id: i64, old_path: &str, new
     )?;
     // Rewrite image paths so the indexer can match them by path and skip
     // re-generating thumbnails and embeddings for unchanged files.
-    // SQLite's replace() does a literal prefix substitution on each path.
+    // Use SUBSTR to replace only the leading prefix; SQLite's replace()
+    // would corrupt paths where the old folder name also appears deeper in the tree.
     conn.execute(
-        "UPDATE images SET path = replace(path, ?1, ?2) WHERE folder_id = ?3",
+        "UPDATE images SET path = ?2 || SUBSTR(path, LENGTH(?1) + 1) WHERE folder_id = ?3",
         params![old_path, new_path, folder_id],
     )?;
     Ok(())
@@ -1887,7 +1888,11 @@ pub fn add_user_tag(conn: &Connection, image_id: i64, tag: &str) -> Result<Image
     conn.execute(
         "INSERT INTO image_tags (image_id, tag, source, ai_model, confidence, created_at)
          VALUES (?1, ?2, 'user', NULL, NULL, datetime('now'))
-         ON CONFLICT(image_id, tag) DO NOTHING",
+         ON CONFLICT(image_id, tag) DO UPDATE SET
+             source = 'user',
+             ai_model = NULL,
+             confidence = NULL
+         WHERE source = 'ai'",
         params![image_id, tag],
     )?;
     let row = conn.query_row(
@@ -2128,6 +2133,15 @@ pub fn get_duplicate_scan_cache(
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+/// Deletes the duplicate scan cache for the given scope.
+pub fn clear_duplicate_scan_cache(conn: &Connection, folder_scope: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM duplicate_scan_cache WHERE folder_scope = ?1",
+        params![folder_scope],
+    )?;
+    Ok(())
 }
 
 /// Upserts the duplicate scan cache for the given scope.

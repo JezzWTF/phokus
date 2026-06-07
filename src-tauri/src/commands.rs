@@ -753,15 +753,6 @@ pub struct TagCloudEntry {
     pub image_ids: Vec<i64>,
 }
 
-fn fnv_hash_ids(ids: &[i64]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for &id in ids {
-        for b in id.to_le_bytes() {
-            h = h.wrapping_mul(0x100000001b3) ^ (b as u64);
-        }
-    }
-    h
-}
 
 /// Clusters the library's image embeddings with k-means and returns one representative
 /// image per cluster — the member whose embedding is closest to its cluster centroid.
@@ -782,11 +773,22 @@ pub async fn get_tag_cloud(
         return Ok(vec![]);
     }
 
-    // Compute a hash of the current embedded image IDs (sorted for stability)
-    let mut sorted_ids: Vec<i64> = embeddings_with_ids.iter().map(|(id, _)| *id).collect();
-    sorted_ids.sort_unstable();
-    let current_hash = fnv_hash_ids(&sorted_ids);
-
+    // Sort by ID for stable ordering; hash both IDs and embedding bytes so that
+    // replacing a file and regenerating its embedding invalidates the cache even
+    // when the set of image IDs hasn't changed.
+    let mut sorted_pairs: Vec<_> = embeddings_with_ids.iter().collect();
+    sorted_pairs.sort_unstable_by_key(|(id, _)| *id);
+    let current_hash = {
+        use xxhash_rust::xxh3::Xxh3;
+        let mut hasher = Xxh3::new();
+        for (id, embedding) in &sorted_pairs {
+            hasher.update(&id.to_le_bytes());
+            for val in embedding.iter() {
+                hasher.update(&val.to_le_bytes());
+            }
+        }
+        hasher.digest()
+    };
     let folder_scope = match folder_id {
         Some(id) => format!("folder_{}", id),
         None => "all".to_string(),
@@ -1095,6 +1097,19 @@ pub async fn load_duplicate_scan_cache(
         }
         None => Ok(None),
     }
+}
+
+#[tauri::command]
+pub async fn invalidate_duplicate_scan_cache(
+    db: State<'_, DbState>,
+    folder_id: Option<i64>,
+) -> Result<(), String> {
+    let folder_scope = match folder_id {
+        Some(id) => format!("folder:{}", id),
+        None => "all".to_string(),
+    };
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::clear_duplicate_scan_cache(&conn, &folder_scope).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

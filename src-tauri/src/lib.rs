@@ -132,6 +132,7 @@ pub fn run() {
             commands::search_tags_autocomplete,
             commands::find_duplicates,
             commands::load_duplicate_scan_cache,
+            commands::invalidate_duplicate_scan_cache,
             commands::delete_images_from_disk,
             commands::rename_folder,
             commands::update_folder_path,
