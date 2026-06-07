@@ -151,6 +151,15 @@ pub struct TagSearchParams {
     pub favorites_only: Option<bool>,
     pub rating_min: Option<i64>,
     pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct TagSearchPage {
+    pub images: Vec<ImageRecord>,
+    pub total: usize,
+    pub offset: usize,
+    pub limit: usize,
 }
 
 #[derive(Deserialize)]
@@ -522,7 +531,17 @@ pub async fn semantic_search_images(
 
     let conn = db.get().map_err(|e| e.to_string())?;
     let limit = params.limit.unwrap_or(64);
-    let ids = vector::search_image_ids_by_embedding(&conn, &embedding, limit)
+
+    // When post-query filters are active the vector search may discard many
+    // candidates ranked just beyond the bare limit. Over-fetch by 4× so that
+    // well-rated or folder-scoped matches are not silently omitted.
+    let has_filters = params.folder_id.is_some()
+        || params.media_kind.is_some()
+        || params.favorites_only.unwrap_or(false)
+        || params.rating_min.map_or(false, |r| r > 0);
+    let fetch_limit = if has_filters { limit * 4 } else { limit };
+
+    let ids = vector::search_image_ids_by_embedding(&conn, &embedding, fetch_limit)
         .map_err(|e| e.to_string())?;
     let mut images = db::get_images_by_ids(&conn, &ids).map_err(|e| e.to_string())?;
 
@@ -538,6 +557,7 @@ pub async fn semantic_search_images(
     if let Some(rating_min) = params.rating_min {
         images.retain(|image| image.rating >= rating_min);
     }
+    images.truncate(limit);
 
     Ok(images)
 }
@@ -546,18 +566,22 @@ pub async fn semantic_search_images(
 pub async fn search_images_by_tag(
     db: State<'_, DbState>,
     params: TagSearchParams,
-) -> Result<Vec<ImageRecord>, String> {
+) -> Result<TagSearchPage, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
-    db::search_images_by_tag(
+    let limit = params.limit.unwrap_or(64);
+    let offset = params.offset.unwrap_or(0);
+    let (images, total) = db::search_images_by_tag(
         &conn,
         &params.query,
         params.folder_id,
         params.media_kind.as_deref(),
         params.favorites_only.unwrap_or(false),
         params.rating_min.unwrap_or(0),
-        params.limit.unwrap_or(64),
+        limit,
+        offset,
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    Ok(TagSearchPage { images, total, offset, limit })
 }
 
 #[tauri::command]

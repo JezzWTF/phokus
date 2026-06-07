@@ -1385,7 +1385,10 @@ pub fn rename_folder(conn: &Connection, folder_id: i64, new_name: &str) -> Resul
 }
 
 pub fn update_folder_path(conn: &Connection, folder_id: i64, old_path: &str, new_path: &str, new_name: &str) -> Result<()> {
-    conn.execute(
+    // Both updates must be atomic: if the image path rewrite fails (e.g. a
+    // uniqueness collision) the folder row must not remain at the new location.
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
         "UPDATE folders SET path = ?2, name = ?3, scan_error = NULL WHERE id = ?1",
         params![folder_id, new_path, new_name],
     )?;
@@ -1393,10 +1396,11 @@ pub fn update_folder_path(conn: &Connection, folder_id: i64, old_path: &str, new
     // re-generating thumbnails and embeddings for unchanged files.
     // Use SUBSTR to replace only the leading prefix; SQLite's replace()
     // would corrupt paths where the old folder name also appears deeper in the tree.
-    conn.execute(
+    tx.execute(
         "UPDATE images SET path = ?2 || SUBSTR(path, LENGTH(?1) + 1) WHERE folder_id = ?3",
         params![old_path, new_path, folder_id],
     )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -1522,12 +1526,27 @@ pub fn search_images_by_tag(
     favorites_only: bool,
     rating_min: i64,
     limit: usize,
-) -> Result<Vec<ImageRecord>> {
+    offset: usize,
+) -> Result<(Vec<ImageRecord>, usize)> {
     let normalized_query = query.trim().to_ascii_lowercase();
     if normalized_query.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), 0));
     }
     let favorites_flag = i64::from(favorites_only);
+
+    // Total count (for pagination)
+    let total: usize = conn.query_row(
+        "SELECT COUNT(DISTINCT i.id)
+         FROM images i
+         JOIN image_tags t ON t.image_id = i.id
+         WHERE (?1 IS NULL OR i.folder_id = ?1)
+           AND (?2 IS NULL OR i.media_kind = ?2)
+           AND (?3 = 0 OR i.favorite = 1)
+           AND i.rating >= ?4
+           AND LOWER(TRIM(t.tag)) = ?5",
+        params![folder_id, media_kind, favorites_flag, rating_min, normalized_query],
+        |row| row.get::<_, i64>(0),
+    )? as usize;
 
     let mut stmt = conn.prepare(
         "SELECT DISTINCT i.id
@@ -1539,7 +1558,7 @@ pub fn search_images_by_tag(
            AND i.rating >= ?4
            AND LOWER(TRIM(t.tag)) = ?5
          ORDER BY i.rating DESC, i.modified_at DESC NULLS LAST, i.filename ASC
-         LIMIT ?6",
+         LIMIT ?6 OFFSET ?7",
     )?;
 
     let image_ids = stmt
@@ -1550,13 +1569,14 @@ pub fn search_images_by_tag(
                 favorites_flag,
                 rating_min,
                 normalized_query,
-                limit as i64
+                limit as i64,
+                offset as i64
             ],
             |row| row.get::<_, i64>(0),
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    get_images_by_ids(conn, &image_ids)
+    Ok((get_images_by_ids(conn, &image_ids)?, total))
 }
 
 pub fn search_tags_autocomplete(

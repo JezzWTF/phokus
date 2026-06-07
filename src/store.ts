@@ -725,7 +725,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       }
 
       if (parsedSearch.mode === "tag" && parsedSearch.query) {
-        const images = await invoke<ImageRecord[]>("search_images_by_tag", {
+        const offset = reset ? 0 : loadedCount;
+        const result = await invoke<{ images: ImageRecord[]; total: number; offset: number; limit: number }>("search_images_by_tag", {
           params: {
             query: parsedSearch.query,
             folder_id: selectedFolderId,
@@ -733,22 +734,32 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
             favorites_only: favoritesOnly,
             rating_min: minimumRating > 0 ? minimumRating : null,
             limit: PAGE_SIZE,
+            offset,
           },
         });
 
         if (requestToken !== galleryRequestToken) return;
-        set({
-          images,
-          totalImages: images.length,
-          loadedCount: images.length,
-          loadingImages: false,
-          collectionTitle: `Tag search: ${parsedSearch.query}`,
-          selectedFolderId,
-          similarSourceImageId: null,
-          similarSourceFolderId: null,
-          similarHasMore: false,
-          similarFolderId: null,
-        });
+        if (reset) {
+          set({
+            images: result.images,
+            totalImages: result.total,
+            loadedCount: result.images.length,
+            loadingImages: false,
+            collectionTitle: `Tag search: ${parsedSearch.query}`,
+            selectedFolderId,
+            similarSourceImageId: null,
+            similarSourceFolderId: null,
+            similarHasMore: false,
+            similarFolderId: null,
+          });
+        } else {
+          set((state) => ({
+            images: [...state.images, ...result.images],
+            loadedCount: state.loadedCount + result.images.length,
+            totalImages: result.total,
+            loadingImages: false,
+          }));
+        }
         return;
       }
 
@@ -1608,6 +1619,9 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
             "AI tagging complete",
             `${folderName} finished generating tags.${failureDetail}`,
           );
+          // New tags are now in the DB — invalidate the Explore tag cache so
+          // reopening Explore reflects the updated tag distribution.
+          set({ exploreTagsFolderId: undefined });
         }
       }
 
