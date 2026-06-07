@@ -287,6 +287,7 @@ interface GalleryState {
   addFolder: (path: string) => Promise<void>;
   removeFolder: (folderId: number) => Promise<void>;
   reindexFolder: (folderId: number) => Promise<void>;
+  renameFolder: (folderId: number, newName: string) => Promise<void>;
   updateFolderPath: (folderId: number, newPath: string) => Promise<void>;
   selectFolder: (folderId: number | null) => void;
   loadImages: (reset?: boolean) => Promise<void>;
@@ -669,6 +670,11 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     // Invalidate tag cloud cache since embeddings will be regenerated
     set({ tagCloudFolderId: undefined, tagCloudEntries: [] });
     await loadBackgroundJobProgress();
+  },
+
+  renameFolder: async (folderId, newName) => {
+    await invoke("rename_folder", { folderId, newName });
+    await get().loadFolders();
   },
 
   updateFolderPath: async (folderId, newPath) => {

@@ -1356,6 +1356,14 @@ pub fn get_folders(conn: &Connection) -> Result<Vec<Folder>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+pub fn rename_folder(conn: &Connection, folder_id: i64, new_name: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE folders SET name = ?2 WHERE id = ?1",
+        params![folder_id, new_name],
+    )?;
+    Ok(())
+}
+
 pub fn update_folder_path(conn: &Connection, folder_id: i64, old_path: &str, new_path: &str, new_name: &str) -> Result<()> {
     conn.execute(
         "UPDATE folders SET path = ?2, name = ?3, scan_error = NULL WHERE id = ?1",

@@ -326,6 +326,20 @@ pub async fn reindex_folder(
 }
 
 #[tauri::command]
+pub async fn rename_folder(
+    db: State<'_, DbState>,
+    folder_id: i64,
+    new_name: String,
+) -> Result<(), String> {
+    let new_name = new_name.trim().to_string();
+    if new_name.is_empty() {
+        return Err("Folder name cannot be empty".to_string());
+    }
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::rename_folder(&conn, folder_id, &new_name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn update_folder_path(
     app: AppHandle,
     db: State<'_, DbState>,
