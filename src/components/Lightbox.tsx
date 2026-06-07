@@ -175,9 +175,13 @@ export function Lightbox() {
 
   useEffect(() => {
     if (!selectedImage) return;
+    // Capture the ID so a stale response for image A cannot overwrite B's tags
+    // when the user navigates before the request resolves.
+    let cancelled = false;
     void getImageTags(selectedImage.id)
-      .then(setImageTags)
-      .catch(() => setImageTags([]));
+      .then((tags) => { if (!cancelled) setImageTags(tags); })
+      .catch(() => { if (!cancelled) setImageTags([]); });
+    return () => { cancelled = true; };
   }, [selectedImage?.id, selectedImage?.ai_tagged_at, getImageTags]);
 
   // Reset the queued state once the worker finishes so the button is usable again

@@ -1153,9 +1153,9 @@ pub async fn invalidate_duplicate_scan_cache(
 pub async fn delete_images_from_disk(
     db: State<'_, DbState>,
     params: DeleteImagesFromDiskParams,
-) -> Result<usize, String> {
+) -> Result<Vec<i64>, String> {
     if params.image_ids.is_empty() {
-        return Ok(0);
+        return Ok(Vec::new());
     }
     let conn = db.get().map_err(|e| e.to_string())?;
     let records = db::get_all_image_paths(&conn, None).map_err(|e| e.to_string())?;
@@ -1170,11 +1170,11 @@ pub async fn delete_images_from_disk(
             succeeded_ids.push(r.id);
         }
     }
-    let deleted = succeeded_ids.len();
     if !succeeded_ids.is_empty() {
         db::delete_images_by_ids(&conn, &succeeded_ids).map_err(|e| e.to_string())?;
     }
-    Ok(deleted)
+    // Return the IDs that were actually removed so the caller can update state precisely.
+    Ok(succeeded_ids)
 }
 
 #[tauri::command]

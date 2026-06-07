@@ -1513,20 +1513,33 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   clearDuplicateSelection: () => set({ duplicateSelectedIds: new Set() }),
 
   deleteSelectedDuplicates: async () => {
-    const { duplicateSelectedIds, duplicateScanFolderId } = get();
+    const { duplicateSelectedIds, duplicateGroups } = get();
     const ids = Array.from(duplicateSelectedIds);
     if (ids.length === 0) return 0;
-    const deleted = await invoke<number>("delete_images_from_disk", { params: { image_ids: ids } });
-    // Remove deleted images from groups and drop now-trivial groups
+    // Backend returns only the IDs that were actually removed from disk.
+    const succeededIds = await invoke<number[]>("delete_images_from_disk", { params: { image_ids: ids } });
+    const succeededSet = new Set(succeededIds);
+    // Only remove images confirmed deleted — failed files remain visible so the user can retry.
     set((state) => ({
       duplicateSelectedIds: new Set(),
       duplicateGroups: state.duplicateGroups
-        .map((g) => ({ ...g, images: g.images.filter((img) => !duplicateSelectedIds.has(img.id)) }))
+        .map((g) => ({ ...g, images: g.images.filter((img) => !succeededSet.has(img.id)) }))
         .filter((g) => g.images.length > 1),
     }));
-    // Invalidate the persisted cache so a restart doesn't reload stale entries
-    await invoke("invalidate_duplicate_scan_cache", { folderId: duplicateScanFolderId ?? null });
-    return deleted;
+    // Invalidate the persisted cache for every affected scope:
+    // - global "all" cache (always, since a folder-scoped deletion still makes the global result stale)
+    // - each folder that contained a deleted image (so a folder-scoped scan is also evicted)
+    const affectedFolderIds = new Set<number>(
+      duplicateGroups
+        .flatMap((g) => g.images)
+        .filter((img) => succeededSet.has(img.id))
+        .map((img) => img.folder_id),
+    );
+    await invoke("invalidate_duplicate_scan_cache", { folderId: null }); // global
+    for (const folderId of affectedFolderIds) {
+      await invoke("invalidate_duplicate_scan_cache", { folderId });
+    }
+    return succeededIds.length;
   },
 
   retryFailedEmbeddings: async (folderId) => {
