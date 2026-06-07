@@ -278,6 +278,7 @@ interface GalleryState {
   duplicateGroups: DuplicateGroup[];
   duplicateScanning: boolean;
   duplicateScanProgress: { scanned: number; total: number } | null;
+  duplicateScanError: string | null;
   duplicateSelectedIds: Set<number>;
   duplicateLastScanned: number | null; // Unix timestamp (seconds)
   duplicateScanFolderId: number | null | undefined; // undefined = never scanned
@@ -613,6 +614,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   duplicateGroups: [],
   duplicateScanning: false,
   duplicateScanProgress: null,
+  duplicateScanError: null,
   duplicateSelectedIds: new Set(),
   duplicateLastScanned: null,
   duplicateScanFolderId: undefined,
@@ -1466,7 +1468,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   scanDuplicates: async (folderId = null) => {
     const { listen } = await import("@tauri-apps/api/event");
-    set({ duplicateScanning: true, duplicateGroups: [], duplicateScanProgress: null, duplicateSelectedIds: new Set() });
+    set({ duplicateScanning: true, duplicateGroups: [], duplicateScanProgress: null, duplicateScanError: null, duplicateSelectedIds: new Set() });
     const unlisten = await listen<[number, number]>("duplicate_scan_progress", (event) => {
       const [scanned, total] = event.payload;
       set({ duplicateScanProgress: { scanned, total } });
@@ -1478,6 +1480,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         "Duplicate scan complete",
         groups.length === 1 ? "Found 1 duplicate group." : `Found ${groups.length.toLocaleString()} duplicate groups.`,
       );
+    } catch (e) {
+      set({ duplicateScanError: String(e) });
     } finally {
       unlisten();
       set({ duplicateScanning: false });

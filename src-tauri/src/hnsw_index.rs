@@ -103,16 +103,29 @@ pub fn find_similar_image_matches(
         None => return Ok(Vec::new()),
     };
 
+    // Fetch folder image IDs *before* acquiring the read lock so we don't hold
+    // the lock across a potentially slow SQLite query, which would delay any
+    // concurrent ensure_index call waiting for a write lock.
+    let folder_image_ids: Option<Vec<i64>> = if let Some(folder_id) = folder_id {
+        let ids = vector::get_all_image_embeddings_with_ids(conn, Some(folder_id))?
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        Some(ids)
+    } else {
+        None
+    };
+
     let guard = cache().read().expect("hnsw cache poisoned");
     let Some(cached) = guard.as_ref() else {
         return Ok(Vec::new());
     };
 
     let knbn = (offset + limit).max(limit).saturating_add(32);
-    let neighbours: Vec<Neighbour> = if let Some(folder_id) = folder_id {
-        let mut allowed_ids = vector::get_all_image_embeddings_with_ids(conn, Some(folder_id))?
+    let neighbours: Vec<Neighbour> = if let Some(image_ids) = folder_image_ids {
+        let mut allowed_ids = image_ids
             .into_iter()
-            .filter_map(|(allowed_image_id, _)| {
+            .filter_map(|allowed_image_id| {
                 cached.external_by_image_id.get(&allowed_image_id).copied()
             })
             .collect::<Vec<_>>();

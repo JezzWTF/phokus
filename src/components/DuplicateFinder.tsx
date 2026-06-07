@@ -116,6 +116,7 @@ export function DuplicateFinder() {
   const duplicateGroups = useGalleryStore((state) => state.duplicateGroups);
   const duplicateScanning = useGalleryStore((state) => state.duplicateScanning);
   const duplicateScanProgress = useGalleryStore((state) => state.duplicateScanProgress);
+  const duplicateScanError = useGalleryStore((state) => state.duplicateScanError);
   const duplicateSelectedIds = useGalleryStore((state) => state.duplicateSelectedIds);
   const duplicateLastScanned = useGalleryStore((state) => state.duplicateLastScanned);
   const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
@@ -228,6 +229,9 @@ export function DuplicateFinder() {
           </div>
         ) : null}
 
+        {duplicateScanError ? (
+          <p className="mt-2 text-[11px] text-red-400/80">{duplicateScanError}</p>
+        ) : null}
         {deleteResult ? (
           <p className="mt-2 text-[11px] text-white/40">{deleteResult}</p>
         ) : null}
