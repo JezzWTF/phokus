@@ -37,6 +37,7 @@ export interface ImageRecord {
   file_size: number;
   created_at: string | null;
   modified_at: string | null;
+  taken_at: string | null;
   mime_type: string;
   media_kind: MediaKind;
   duration_ms: number | null;
@@ -214,7 +215,9 @@ export type SortOrder =
   | "rating_desc"
   | "rating_asc"
   | "duration_desc"
-  | "duration_asc";
+  | "duration_asc"
+  | "taken_desc"
+  | "taken_asc";
 
 interface GalleryState {
   folders: Folder[];
@@ -494,6 +497,10 @@ function compareImages(a: ImageRecord, b: ImageRecord, sort: SortOrder): number 
       return compareNullableNumber(a.duration_ms, b.duration_ms);
     case "duration_desc":
       return compareNullableNumber(b.duration_ms, a.duration_ms);
+    case "taken_asc":
+      return compareNullableDate(a.taken_at ?? a.created_at, b.taken_at ?? b.created_at);
+    case "taken_desc":
+      return compareNullableDate(b.taken_at ?? b.created_at, a.taken_at ?? a.created_at);
     default:
       return compareNullableDate(b.modified_at, a.modified_at);
   }

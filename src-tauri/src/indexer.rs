@@ -425,6 +425,49 @@ fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf)
     Ok(())
 }
 
+/// Extract the capture date from EXIF metadata, returned as an ISO 8601 string
+/// (`"YYYY-MM-DDTHH:MM:SS"`). Tries `DateTimeOriginal` first, then
+/// `DateTimeDigitized`, then `DateTime`. Returns `None` for video files or
+/// images with no readable EXIF date.
+fn extract_exif_date(path: &Path) -> Option<String> {
+    use exif::{In, Tag, Value};
+    use std::io::BufReader;
+
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+    let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
+
+    for tag in [Tag::DateTimeOriginal, Tag::DateTimeDigitized, Tag::DateTime] {
+        if let Some(field) = exif.get_field(tag, In::PRIMARY) {
+            if let Value::Ascii(ref parts) = field.value {
+                if let Some(bytes) = parts.first() {
+                    // EXIF datetime format: "YYYY:MM:DD HH:MM:SS" (19 bytes)
+                    if bytes.len() >= 19 {
+                        let s = String::from_utf8_lossy(bytes);
+                        // Reject all-zero sentinel dates written by some cameras
+                        // for uninitialised EXIF fields ("0000:00:00 00:00:00").
+                        let year: u32 = s[0..4].parse().unwrap_or(0);
+                        if year == 0 {
+                            continue;
+                        }
+                        let iso = format!(
+                            "{}-{}-{}T{}:{}:{}",
+                            &s[0..4],
+                            &s[5..7],
+                            &s[8..10],
+                            &s[11..13],
+                            &s[14..16],
+                            &s[17..19]
+                        );
+                        return Some(iso);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn build_record(
     path: &Path,
     folder_id: i64,
@@ -465,6 +508,7 @@ fn build_record(
         file_size,
         created_at: None,
         modified_at,
+        taken_at: extract_exif_date(path),
         mime_type: mime_for_ext(ext).to_string(),
         media_kind: media_kind.clone(),
         duration_ms: None,
