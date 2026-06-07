@@ -238,6 +238,7 @@ pub fn set_caption_detail(app_data_dir: &Path, detail: CaptionDetail) -> Result<
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(path, detail.as_str())?;
+    CAPTION_SESSION_DIRTY.store(true, Ordering::Relaxed);
     Ok(detail)
 }
 

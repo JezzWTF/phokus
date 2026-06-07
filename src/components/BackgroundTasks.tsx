@@ -24,6 +24,7 @@ interface Task {
   stages: TaskStage[];
   hasFailedEmbeddings: boolean;
   hasFailedTagging: boolean;
+  hasFailedCaptions: boolean;
   pendingMediaWork: number;
   embeddingProcessed: number;
   embeddingTotal: number;
@@ -148,16 +149,22 @@ export function BackgroundTasks() {
         const taggingPending = jobs?.tagging_pending ?? 0;
         const taggingReady = jobs?.tagging_ready ?? 0;
         const taggingFailed = jobs?.tagging_failed ?? 0;
+        const captionPending = jobs?.caption_pending ?? 0;
+        const captionReady = jobs?.caption_ready ?? 0;
+        const captionFailed = jobs?.caption_failed ?? 0;
 
-        const pendingMediaWork = thumbnailPending + metadataPending + embeddingPending + taggingPending;
+        const pendingMediaWork = thumbnailPending + metadataPending + embeddingPending + taggingPending + captionPending;
         const embeddingProcessed = embeddingReady + embeddingFailed;
         const embeddingTotal = embeddingProcessed + embeddingPending;
         const taggingProcessed = taggingReady + taggingFailed;
         const taggingTotal = taggingProcessed + taggingPending;
+        const captionProcessed = captionReady + captionFailed;
+        const captionTotal = captionProcessed + captionPending;
         const hasFailedEmbeddings = embeddingFailed > 0;
         const hasFailedTagging = taggingFailed > 0;
+        const hasFailedCaptions = captionFailed > 0;
 
-        if (!index && pendingMediaWork === 0 && !hasFailedEmbeddings && !hasFailedTagging) return null;
+        if (!index && pendingMediaWork === 0 && !hasFailedEmbeddings && !hasFailedTagging && !hasFailedCaptions) return null;
 
         const stages: TaskStage[] = [];
 
@@ -209,6 +216,16 @@ export function BackgroundTasks() {
           });
         }
 
+        if (captionPending > 0) {
+          const pct = captionTotal > 0 ? (captionProcessed / captionTotal) * 100 : 0;
+          stages.push({
+            label: "Captions",
+            detail: `${captionProcessed.toLocaleString()} / ${captionTotal.toLocaleString()}`,
+            progress: pct,
+            failed: false,
+          });
+        }
+
         if (hasFailedEmbeddings && pendingMediaWork === 0) {
           stages.push({
             label: "Failed",
@@ -227,7 +244,16 @@ export function BackgroundTasks() {
           });
         }
 
-        const snapshot = `${pendingMediaWork}:${embeddingFailed}:${taggingFailed}`;
+        if (hasFailedCaptions && pendingMediaWork === 0) {
+          stages.push({
+            label: "Failed",
+            detail: `${captionFailed.toLocaleString()} captions`,
+            progress: null,
+            failed: true,
+          });
+        }
+
+        const snapshot = `${pendingMediaWork}:${embeddingFailed}:${taggingFailed}:${captionFailed}`;
 
         return {
           id: folder.id,
@@ -235,6 +261,7 @@ export function BackgroundTasks() {
           stages,
           hasFailedEmbeddings,
           hasFailedTagging,
+          hasFailedCaptions,
           pendingMediaWork,
           embeddingProcessed,
           embeddingTotal,
@@ -262,6 +289,7 @@ export function BackgroundTasks() {
     }],
     hasFailedEmbeddings: false,
     hasFailedTagging: false,
+    hasFailedCaptions: false,
     pendingMediaWork: 1,
     embeddingProcessed: 0,
     embeddingTotal: 0,
@@ -275,7 +303,7 @@ export function BackgroundTasks() {
 
   const primary = allTasks[0];
   const extraCount = allTasks.length - 1;
-  const hasFailed = tasks.some((t) => (t.hasFailedEmbeddings || t.hasFailedTagging) && t.pendingMediaWork === 0);
+  const hasFailed = tasks.some((t) => (t.hasFailedEmbeddings || t.hasFailedTagging || t.hasFailedCaptions) && t.pendingMediaWork === 0);
 
   // Best progress bar value: use embedding progress if available (most informative),
   // otherwise tagging progress, otherwise fall back to scanning progress, otherwise indeterminate.
@@ -407,7 +435,7 @@ export function BackgroundTasks() {
             const taskTaggingStage = task.stages.find((s) => s.label === "Tags");
             const taskScanningStage = task.stages.find((s) => s.label === "Scanning");
             const taskBarProgress = taskEmbeddingStage?.progress ?? taskTaggingStage?.progress ?? taskScanningStage?.progress ?? null;
-            const taskHasFailed = (task.hasFailedEmbeddings || task.hasFailedTagging) && task.pendingMediaWork === 0;
+            const taskHasFailed = (task.hasFailedEmbeddings || task.hasFailedTagging || task.hasFailedCaptions) && task.pendingMediaWork === 0;
 
             return (
               <div key={task.id}>

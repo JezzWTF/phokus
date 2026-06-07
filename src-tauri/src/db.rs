@@ -693,9 +693,19 @@ pub fn reset_generated_captions(conn: &Connection, folder_id: Option<i64>) -> Re
                  WHERE folder_id = ?1",
                 [folder_id],
             )?;
+            // Mark in-flight jobs cancelled so the worker skips writing back;
+            // delete all others.
+            tx.execute(
+                "UPDATE caption_jobs
+                 SET status = 'cancelled', last_error = NULL, updated_at = datetime('now')
+                 WHERE status = 'processing'
+                   AND image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
+                [folder_id],
+            )?;
             tx.execute(
                 "DELETE FROM caption_jobs
-                 WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
+                 WHERE status NOT IN ('processing', 'cancelled')
+                   AND image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
                 [folder_id],
             )?;
         }
@@ -708,7 +718,17 @@ pub fn reset_generated_captions(conn: &Connection, folder_id: Option<i64>) -> Re
                      caption_error = NULL",
                 [],
             )?;
-            tx.execute("DELETE FROM caption_jobs", [])?;
+            // Same cancellation protocol as clear_caption_jobs.
+            tx.execute(
+                "UPDATE caption_jobs
+                 SET status = 'cancelled', last_error = NULL, updated_at = datetime('now')
+                 WHERE status = 'processing'",
+                [],
+            )?;
+            tx.execute(
+                "DELETE FROM caption_jobs WHERE status NOT IN ('processing', 'cancelled')",
+                [],
+            )?;
         }
     }
 
