@@ -23,41 +23,53 @@ fn cache() -> &'static RwLock<Option<CachedHnswIndex>> {
 }
 
 fn build_index(conn: &Connection) -> Result<CachedHnswIndex> {
-    let embeddings = vector::get_all_image_embeddings_with_ids(conn, None)?;
-    let max_elements = embeddings.len().max(1);
-    let max_layer = 16.min((max_elements as f32).ln().trunc() as usize).max(1);
-    let mut hnsw = Hnsw::<f32, DistCosine>::new(
-        HNSW_MAX_CONNECTIONS,
-        max_elements,
-        max_layer,
-        HNSW_EF_CONSTRUCTION,
-        DistCosine {},
-    );
+    // Read the revision *before* fetching embeddings so we can detect any write
+    // that races with the build. If the revision advances while we are building,
+    // the resulting index would be stale — retry until it is stable.
+    loop {
+        let revision_before = vector::get_embedding_revision(conn)?;
 
-    let image_ids_by_external = embeddings
-        .iter()
-        .map(|(image_id, _)| *image_id)
-        .collect::<Vec<_>>();
-    let external_by_image_id = image_ids_by_external
-        .iter()
-        .enumerate()
-        .map(|(external_id, image_id)| (*image_id, external_id))
-        .collect::<HashMap<_, _>>();
-    let data_with_id = embeddings
-        .iter()
-        .enumerate()
-        .map(|(external_id, (_, embedding))| (embedding, external_id))
-        .collect::<Vec<_>>();
+        let embeddings = vector::get_all_image_embeddings_with_ids(conn, None)?;
+        let max_elements = embeddings.len().max(1);
+        let max_layer = 16.min((max_elements as f32).ln().trunc() as usize).max(1);
+        let mut hnsw = Hnsw::<f32, DistCosine>::new(
+            HNSW_MAX_CONNECTIONS,
+            max_elements,
+            max_layer,
+            HNSW_EF_CONSTRUCTION,
+            DistCosine {},
+        );
 
-    hnsw.parallel_insert(&data_with_id);
-    hnsw.set_searching_mode(true);
+        let image_ids_by_external = embeddings
+            .iter()
+            .map(|(image_id, _)| *image_id)
+            .collect::<Vec<_>>();
+        let external_by_image_id = image_ids_by_external
+            .iter()
+            .enumerate()
+            .map(|(external_id, image_id)| (*image_id, external_id))
+            .collect::<HashMap<_, _>>();
+        let data_with_id = embeddings
+            .iter()
+            .enumerate()
+            .map(|(external_id, (_, embedding))| (embedding, external_id))
+            .collect::<Vec<_>>();
 
-    Ok(CachedHnswIndex {
-        revision: vector::get_embedding_revision(conn)?,
-        image_ids_by_external,
-        external_by_image_id,
-        hnsw,
-    })
+        hnsw.parallel_insert(&data_with_id);
+        hnsw.set_searching_mode(true);
+
+        // If the revision is unchanged the index reflects a consistent snapshot.
+        let revision_after = vector::get_embedding_revision(conn)?;
+        if revision_before == revision_after {
+            return Ok(CachedHnswIndex {
+                revision: revision_after,
+                image_ids_by_external,
+                external_by_image_id,
+                hnsw,
+            });
+        }
+        // A concurrent write advanced the revision — discard this build and retry.
+    }
 }
 
 fn ensure_index(conn: &Connection) -> Result<()> {

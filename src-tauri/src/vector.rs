@@ -33,6 +33,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 #[allow(dead_code)]
 pub fn delete_embedding(conn: &Connection, image_id: i64) -> Result<()> {
     conn.execute("DELETE FROM image_vec WHERE image_id = ?1", [image_id])?;
+    // Advance the revision so any cached HNSW index is invalidated after deletions.
+    conn.execute(
+        "INSERT INTO app_kv (key, value) VALUES ('embedding_revision', 1)
+         ON CONFLICT(key) DO UPDATE SET value = value + 1",
+        [],
+    )?;
     Ok(())
 }
 

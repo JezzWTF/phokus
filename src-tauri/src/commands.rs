@@ -532,34 +532,47 @@ pub async fn semantic_search_images(
     let conn = db.get().map_err(|e| e.to_string())?;
     let limit = params.limit.unwrap_or(64);
 
-    // When post-query filters are active the vector search may discard many
-    // candidates ranked just beyond the bare limit. Over-fetch by 4× so that
-    // well-rated or folder-scoped matches are not silently omitted.
     let has_filters = params.folder_id.is_some()
         || params.media_kind.is_some()
         || params.favorites_only.unwrap_or(false)
         || params.rating_min.map_or(false, |r| r > 0);
-    let fetch_limit = if has_filters { limit * 4 } else { limit };
 
-    let ids = vector::search_image_ids_by_embedding(&conn, &embedding, fetch_limit)
-        .map_err(|e| e.to_string())?;
-    let mut images = db::get_images_by_ids(&conn, &ids).map_err(|e| e.to_string())?;
+    if !has_filters {
+        // No post-query filtering — a single fetch of exactly `limit` results is optimal.
+        let ids = vector::search_image_ids_by_embedding(&conn, &embedding, limit)
+            .map_err(|e| e.to_string())?;
+        return db::get_images_by_ids(&conn, &ids).map_err(|e| e.to_string());
+    }
 
-    if let Some(folder_id) = params.folder_id {
-        images.retain(|image| image.folder_id == folder_id);
-    }
-    if let Some(media_kind) = params.media_kind.as_deref() {
-        images.retain(|image| image.media_kind == media_kind);
-    }
-    if params.favorites_only.unwrap_or(false) {
-        images.retain(|image| image.favorite);
-    }
-    if let Some(rating_min) = params.rating_min {
-        images.retain(|image| image.rating >= rating_min);
-    }
-    images.truncate(limit);
+    // Post-query filters are active. Progressively double the fetch batch until we
+    // collect enough results or exhaust the vector table, so we never over-fetch
+    // more than necessary while still filling the requested page.
+    let mut batch = limit;
+    loop {
+        let ids = vector::search_image_ids_by_embedding(&conn, &embedding, batch)
+            .map_err(|e| e.to_string())?;
+        let exhausted = ids.len() < batch;
+        let mut images = db::get_images_by_ids(&conn, &ids).map_err(|e| e.to_string())?;
 
-    Ok(images)
+        if let Some(folder_id) = params.folder_id {
+            images.retain(|image| image.folder_id == folder_id);
+        }
+        if let Some(media_kind) = params.media_kind.as_deref() {
+            images.retain(|image| image.media_kind == media_kind);
+        }
+        if params.favorites_only.unwrap_or(false) {
+            images.retain(|image| image.favorite);
+        }
+        if let Some(rating_min) = params.rating_min {
+            images.retain(|image| image.rating >= rating_min);
+        }
+
+        if images.len() >= limit || exhausted {
+            images.truncate(limit);
+            return Ok(images);
+        }
+        batch = (batch * 2).min(8192);
+    }
 }
 
 #[tauri::command]
