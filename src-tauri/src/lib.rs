@@ -144,6 +144,8 @@ pub fn run() {
             commands::get_tagging_queue_folder_ids,
             commands::set_tagging_queue_folder_ids,
             commands::open_app_data_folder,
+            commands::get_database_info,
+            commands::vacuum_database,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

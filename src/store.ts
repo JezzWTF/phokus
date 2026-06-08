@@ -71,6 +71,17 @@ export interface ImageTag {
   created_at: string;
 }
 
+export interface DatabaseInfo {
+  size_mb: number;
+  reclaimable_mb: number;
+}
+
+export interface VacuumResult {
+  before_mb: number;
+  after_mb: number;
+  freed_mb: number;
+}
+
 export interface TaggerModelStatus {
   model_id: string;
   model_name: string;
@@ -340,6 +351,8 @@ interface GalleryState {
   toggleTaggingQueueFolder: (folderId: number) => void;
   setTaggingQueueFolderIds: (folderIds: number[]) => void;
   openAppDataFolder: () => Promise<void>;
+  getDatabaseInfo: () => Promise<DatabaseInfo>;
+  vacuumDatabase: () => Promise<VacuumResult>;
   retryFailedEmbeddings: (folderId: number) => Promise<void>;
   updateImageDetails: (imageId: number, updates: { favorite?: boolean; rating?: number }) => Promise<void>;
   setCacheDir: (dir: string) => void;
@@ -1349,6 +1362,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   openAppDataFolder: async () => {
     await invoke("open_app_data_folder");
   },
+
+  getDatabaseInfo: () => invoke<DatabaseInfo>("get_database_info"),
+
+  vacuumDatabase: () => invoke<VacuumResult>("vacuum_database"),
 
   loadTaggerModelStatus: async () => {
     try {

@@ -1696,3 +1696,54 @@ pub async fn open_app_data_folder(app: AppHandle) -> Result<(), String> {
         .open_path(app_dir.to_string_lossy().as_ref(), None::<&str>)
         .map_err(|e| e.to_string())
 }
+
+// ---------------------------------------------------------------------------
+// Database maintenance
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct DatabaseInfo {
+    pub size_mb: f64,
+    pub reclaimable_mb: f64,
+}
+
+#[derive(Serialize)]
+pub struct VacuumResult {
+    pub before_mb: f64,
+    pub after_mb: f64,
+    pub freed_mb: f64,
+}
+
+#[tauri::command]
+pub async fn get_database_info(app: AppHandle, db: State<'_, DbState>) -> Result<DatabaseInfo, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db_path = app_dir.join("gallery.db");
+    let size_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    let freelist_count: i64 = conn.query_row("PRAGMA freelist_count", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+
+    Ok(DatabaseInfo {
+        size_mb: size_bytes as f64 / 1_048_576.0,
+        reclaimable_mb: (freelist_count * page_size) as f64 / 1_048_576.0,
+    })
+}
+
+#[tauri::command]
+pub async fn vacuum_database(app: AppHandle, db: State<'_, DbState>) -> Result<VacuumResult, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db_path = app_dir.join("gallery.db");
+    let before_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA wal_checkpoint(FULL); VACUUM;").map_err(|e| e.to_string())?;
+    drop(conn);
+
+    let after_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+    Ok(VacuumResult {
+        before_mb: before_bytes as f64 / 1_048_576.0,
+        after_mb: after_bytes as f64 / 1_048_576.0,
+        freed_mb: before_bytes.saturating_sub(after_bytes) as f64 / 1_048_576.0,
+    })
+}

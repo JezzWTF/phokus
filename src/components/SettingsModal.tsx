@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { TaggerAcceleration, TaggingQueueScope, useGalleryStore } from "../store";
+import { DatabaseInfo, TaggerAcceleration, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
 
 type SettingsSection = "workspace" | "general";
 
@@ -117,6 +117,9 @@ export function SettingsModal() {
   const [taggerBatchSizeSaving, setTaggerBatchSizeSaving] = useState(false);
   const [taggerBatchSizeError, setTaggerBatchSizeError] = useState<string | null>(null);
   const [openingDataFolder, setOpeningDataFolder] = useState(false);
+  const [dbInfo, setDbInfo] = useState<DatabaseInfo | null>(null);
+  const [vacuuming, setVacuuming] = useState(false);
+  const [vacuumResult, setVacuumResult] = useState<VacuumResult | null>(null);
 
   const thresholdErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const batchSizeErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -156,6 +159,8 @@ export function SettingsModal() {
   const clearTaggingJobs = useGalleryStore((state) => state.clearTaggingJobs);
   const clearTaggingJobsForFolders = useGalleryStore((state) => state.clearTaggingJobsForFolders);
   const openAppDataFolder = useGalleryStore((state) => state.openAppDataFolder);
+  const getDatabaseInfo = useGalleryStore((state) => state.getDatabaseInfo);
+  const vacuumDatabase = useGalleryStore((state) => state.vacuumDatabase);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -172,6 +177,12 @@ export function SettingsModal() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [settingsOpen, loadTaggerModelStatus, loadTaggerAcceleration, loadTaggerThreshold, loadTaggerBatchSize, loadTaggingQueueScope, loadTaggingQueueFolderIds, setSettingsOpen]);
+
+  useEffect(() => {
+    if (!settingsOpen || activeSection !== "general") return;
+    setVacuumResult(null);
+    void getDatabaseInfo().then(setDbInfo).catch(() => {});
+  }, [settingsOpen, activeSection, getDatabaseInfo]);
 
   // Clean up error timers on unmount
   useEffect(() => {
@@ -580,6 +591,62 @@ export function SettingsModal() {
                       >
                         {openingDataFolder ? "Opening..." : "Open data folder"}
                       </button>
+                    </div>
+                  </SettingsCard>
+
+                  <SettingsCard
+                    title="Compact database"
+                    description="Reclaims wasted space left behind when images or tags are deleted. Safe to run at any time."
+                  >
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Database size</p>
+                          <p className="mt-2 text-2xl font-semibold text-white">
+                            {vacuumResult
+                              ? `${vacuumResult.after_mb.toFixed(1)} MB`
+                              : dbInfo
+                                ? `${dbInfo.size_mb.toFixed(1)} MB`
+                                : "—"}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Reclaimable</p>
+                          <p className={`mt-2 text-2xl font-semibold ${vacuumResult ? "text-emerald-300" : "text-white"}`}>
+                            {vacuumResult
+                              ? `−${vacuumResult.freed_mb.toFixed(1)} MB freed`
+                              : dbInfo
+                                ? `${dbInfo.reclaimable_mb.toFixed(1)} MB`
+                                : "—"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-4 rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                        <p className="text-sm text-gray-400">
+                          {vacuumResult
+                            ? `Compacted from ${vacuumResult.before_mb.toFixed(1)} MB to ${vacuumResult.after_mb.toFixed(1)} MB.`
+                            : dbInfo && dbInfo.reclaimable_mb < 0.5
+                              ? "Database is already compact."
+                              : "Run this after removing folders or bulk-deleting images."}
+                        </p>
+                        <button
+                          className="shrink-0 rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                          onClick={() => {
+                            setVacuuming(true);
+                            setVacuumResult(null);
+                            void vacuumDatabase()
+                              .then((result) => {
+                                setVacuumResult(result);
+                                setDbInfo({ size_mb: result.after_mb, reclaimable_mb: 0 });
+                              })
+                              .catch(() => {})
+                              .finally(() => setVacuuming(false));
+                          }}
+                          disabled={vacuuming || (dbInfo !== null && dbInfo.reclaimable_mb < 0.5 && vacuumResult === null)}
+                        >
+                          {vacuuming ? "Compacting..." : "Compact now"}
+                        </button>
+                      </div>
                     </div>
                   </SettingsCard>
                 </SectionShell>
