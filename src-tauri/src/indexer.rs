@@ -1480,8 +1480,17 @@ fn process_watcher_path(
 
         match commit_batch(pool, &[record]) {
             Ok(committed) if !committed.is_empty() => {
+                // Always emit the images — they are committed to the DB.
                 emit_images(app, &IndexedImagesBatch { folder_id, images: committed });
                 emit_folder_job_progress(app, pool, &[folder_id], false);
+                // Update the sidebar count only if we successfully write the new
+                // count; skip the frontend notification on pool/DB failure to
+                // avoid showing a stale number.
+                if let Ok(count_conn) = pool.get() {
+                    if db::update_folder_count(&count_conn, folder_id).is_ok() {
+                        let _ = app.emit("folder-counts-changed", ());
+                    }
+                }
             }
             Ok(_) => {}
             Err(e) => eprintln!("Watcher: commit error for {:?}: {}", path, e),
@@ -1494,6 +1503,7 @@ fn process_watcher_path(
                 if db::delete_images_by_ids(&conn, &[image_id]).is_ok() {
                     db::update_folder_count(&conn, folder_id).ok();
                     let _ = app.emit("watcher-deleted", vec![image_id]);
+                    let _ = app.emit("folder-counts-changed", ());
                 }
             }
             Ok(None) => {} // never indexed or already removed

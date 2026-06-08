@@ -22,7 +22,7 @@ function buildLabel(key: string): string {
 function groupImages(images: ImageRecord[]): TimelineGroup[] {
   const map = new Map<string, ImageRecord[]>();
   for (const img of images) {
-    const ds = img.taken_at ?? img.created_at;
+    const ds = img.taken_at ?? img.modified_at;
     const key = ds ? ds.substring(0, 7) : "unknown";
     let bucket = map.get(key);
     if (bucket === undefined) {

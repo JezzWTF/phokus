@@ -273,7 +273,6 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_images_folder_id ON images(folder_id);
         CREATE INDEX IF NOT EXISTS idx_images_modified_at ON images(modified_at);
-        CREATE INDEX IF NOT EXISTS idx_images_taken_at ON images(taken_at);
         CREATE INDEX IF NOT EXISTS idx_embedding_jobs_status ON embedding_jobs(status);
         CREATE INDEX IF NOT EXISTS idx_thumbnail_jobs_status ON thumbnail_jobs(status);
         CREATE INDEX IF NOT EXISTS idx_metadata_jobs_status ON metadata_jobs(status);
@@ -316,6 +315,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     ensure_column(conn, "images", "ai_tagged_at", "TEXT")?;
     ensure_column(conn, "images", "ai_tagger_error", "TEXT")?;
     ensure_column(conn, "images", "taken_at", "TEXT")?;
+    // Index must be created after ensure_column adds the column; it cannot live
+    // in the execute_batch above because that batch runs before the column exists
+    // on databases that predate Phase 1.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_images_taken_at ON images(taken_at);",
+    )?;
     ensure_column(conn, "folders", "scan_error", "TEXT")?;
 
     vector::migrate(conn)?;
@@ -1500,8 +1505,8 @@ pub fn get_images(
         "rating_desc" => "rating DESC, modified_at DESC NULLS LAST",
         "duration_asc" => "duration_ms ASC NULLS LAST",
         "duration_desc" => "duration_ms DESC NULLS LAST",
-        "taken_asc" => "COALESCE(taken_at, created_at) ASC NULLS LAST",
-        "taken_desc" => "COALESCE(taken_at, created_at) DESC NULLS LAST",
+        "taken_asc" => "COALESCE(taken_at, modified_at) ASC NULLS LAST",
+        "taken_desc" => "COALESCE(taken_at, modified_at) DESC NULLS LAST",
         _ => "modified_at DESC NULLS LAST",
     };
 
@@ -1671,7 +1676,6 @@ pub fn search_tags_autocomplete(
 pub struct ImagePathRecord {
     pub id: i64,
     pub path: String,
-    pub thumbnail_path: Option<String>,
 }
 
 pub fn get_all_image_paths(
@@ -1679,14 +1683,13 @@ pub fn get_all_image_paths(
     folder_id: Option<i64>,
 ) -> Result<Vec<ImagePathRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, path, thumbnail_path FROM images WHERE (?1 IS NULL OR folder_id = ?1) ORDER BY id",
+        "SELECT id, path FROM images WHERE (?1 IS NULL OR folder_id = ?1) ORDER BY id",
     )?;
     let rows = stmt
         .query_map(params![folder_id], |row| {
             Ok(ImagePathRecord {
                 id: row.get(0)?,
                 path: row.get(1)?,
-                thumbnail_path: row.get(2)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2055,18 +2058,6 @@ pub fn requeue_processing_tagging_jobs_for_folder(conn: &Connection, folder_id: 
         [folder_id],
     )?;
     Ok(())
-}
-
-/// Returns `true` when the job row for `image_id` currently has status = 'cancelled'.
-/// Used by the worker to discard inference results for jobs that were cancelled
-/// while inference was running.
-pub fn is_tagging_job_cancelled(conn: &Connection, image_id: i64) -> Result<bool> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM tagging_jobs WHERE image_id = ?1 AND status = 'cancelled'",
-        [image_id],
-        |row| row.get(0),
-    )?;
-    Ok(count > 0)
 }
 
 /// Returns `true` when the job row for `image_id` is still `processing`.

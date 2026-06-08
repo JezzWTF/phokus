@@ -498,9 +498,9 @@ function compareImages(a: ImageRecord, b: ImageRecord, sort: SortOrder): number 
     case "duration_desc":
       return compareNullableNumber(b.duration_ms, a.duration_ms);
     case "taken_asc":
-      return compareNullableDate(a.taken_at ?? a.created_at, b.taken_at ?? b.created_at);
+      return compareNullableDate(a.taken_at ?? a.modified_at, b.taken_at ?? b.modified_at);
     case "taken_desc":
-      return compareNullableDate(b.taken_at ?? b.created_at, a.taken_at ?? a.created_at);
+      return compareNullableDate(b.taken_at ?? b.modified_at, a.taken_at ?? a.modified_at);
     default:
       return compareNullableDate(b.modified_at, a.modified_at);
   }
@@ -1770,6 +1770,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       });
     });
 
+    const unlistenFolderCounts = await listen("folder-counts-changed", () => {
+      void get().loadFolders();
+    });
+
     return () => {
       unlistenProgress();
       unlistenMediaJobs();
@@ -1778,6 +1782,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       unlistenImages();
       unlistenThumbnails();
       unlistenWatcherDeleted();
+      unlistenFolderCounts();
     };
   },
 }));
