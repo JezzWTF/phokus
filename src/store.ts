@@ -1747,6 +1747,24 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       });
     });
 
+    const unlistenWatcherDeleted = await listen<number[]>("watcher-deleted", (event) => {
+      const deletedIds = new Set(event.payload);
+      set((state) => {
+        const removed = state.images.filter((img) => deletedIds.has(img.id)).length;
+        const images = state.images.filter((img) => !deletedIds.has(img.id));
+        const selectedImage =
+          state.selectedImage && deletedIds.has(state.selectedImage.id)
+            ? null
+            : state.selectedImage;
+        return {
+          images,
+          totalImages: Math.max(0, state.totalImages - removed),
+          loadedCount: Math.max(0, state.loadedCount - removed),
+          selectedImage,
+        };
+      });
+    });
+
     return () => {
       unlistenProgress();
       unlistenMediaJobs();
@@ -1754,6 +1772,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       unlistenTaggerModelProgress();
       unlistenImages();
       unlistenThumbnails();
+      unlistenWatcherDeleted();
     };
   },
 }));

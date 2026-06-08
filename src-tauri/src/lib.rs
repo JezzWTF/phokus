@@ -74,8 +74,11 @@ pub fn run() {
             // indexer::start_caption_worker(app.handle().clone(), pool.clone(), app_dir.clone());
             indexer::start_tagging_worker(app.handle().clone(), pool.clone(), app_dir.clone());
 
+            let watcher_handle = indexer::start_watcher(app.handle().clone(), pool.clone());
+
             app.manage(pool);
             app.manage(media_tools);
+            app.manage(watcher_handle);
 
             Ok(())
         })

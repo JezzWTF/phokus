@@ -1352,6 +1352,44 @@ pub fn update_image_details(
     .map_err(Into::into)
 }
 
+/// Look up the lightweight indexed-media entry for a single path.
+/// Used by the filesystem watcher to run change-detection before upserting.
+pub fn get_indexed_entry_by_path(conn: &Connection, path: &str) -> Result<Option<IndexedMediaEntry>> {
+    let result = conn.query_row(
+        "SELECT id, path, modified_at, file_size, media_kind FROM images WHERE path = ?1",
+        [path],
+        |row| {
+            Ok(IndexedMediaEntry {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                modified_at: row.get(2)?,
+                file_size: row.get(3)?,
+                media_kind: row.get(4)?,
+            })
+        },
+    );
+    match result {
+        Ok(entry) => Ok(Some(entry)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Look up just the image id for a path. Used by the filesystem watcher
+/// to find the DB row to delete when a file is removed from disk.
+pub fn get_image_id_by_path(conn: &Connection, path: &str) -> Result<Option<i64>> {
+    let result = conn.query_row(
+        "SELECT id FROM images WHERE path = ?1",
+        [path],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(id) => Ok(Some(id)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 pub fn get_image_by_id(conn: &Connection, image_id: i64) -> Result<ImageRecord> {
     conn.query_row(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, taken_at, mime_type,

@@ -5,7 +5,7 @@ use crate::captioner::{
 use crate::db::{self, DbPool, ExploreTagEntry, Folder, FolderJobProgress, ImageRecord, ImageTag};
 use crate::embedder;
 use crate::hnsw_index;
-use crate::indexer;
+use crate::indexer::{self, WatcherHandle};
 use crate::tagger::{self, TaggerAcceleration, TaggerModelStatus, TaggerRuntimeProbe};
 use crate::vector;
 use serde::{Deserialize, Serialize};
@@ -202,6 +202,7 @@ pub struct GetImagesByIdsParams {
 pub async fn add_folder(
     app: AppHandle,
     db: State<'_, DbState>,
+    watcher: State<'_, WatcherHandle>,
     path: String,
 ) -> Result<Folder, String> {
     let folder_path = PathBuf::from(&path);
@@ -230,6 +231,7 @@ pub async fn add_folder(
         .find(|f| f.id == folder_id)
         .ok_or("Folder not found after insert")?;
 
+    watcher.add_folder(folder_path.clone(), folder_id);
     indexer::index_folder(app, db.inner().clone(), folder_id, folder_path);
 
     Ok(folder)
@@ -250,9 +252,23 @@ pub async fn get_background_job_progress(
 }
 
 #[tauri::command]
-pub async fn remove_folder(db: State<'_, DbState>, folder_id: i64) -> Result<(), String> {
+pub async fn remove_folder(
+    db: State<'_, DbState>,
+    watcher: State<'_, WatcherHandle>,
+    folder_id: i64,
+) -> Result<(), String> {
     let conn = db.get().map_err(|e| e.to_string())?;
-    db::delete_folder(&conn, folder_id).map_err(|e| e.to_string())
+    // Capture the path before deletion so we can unregister the watcher.
+    let folder_path = db::get_folders(&conn)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|f| f.id == folder_id)
+        .map(|f| PathBuf::from(f.path));
+    db::delete_folder(&conn, folder_id).map_err(|e| e.to_string())?;
+    if let Some(path) = folder_path {
+        watcher.remove_folder(&path);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -352,6 +368,7 @@ pub async fn rename_folder(
 pub async fn update_folder_path(
     app: AppHandle,
     db: State<'_, DbState>,
+    watcher: State<'_, WatcherHandle>,
     folder_id: i64,
     new_path: String,
 ) -> Result<(), String> {
@@ -363,7 +380,7 @@ pub async fn update_folder_path(
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| new_path.clone());
-    {
+    let old_path = {
         let conn = db.get().map_err(|e| e.to_string())?;
         // Fetch the old path before updating so image paths can be rewritten.
         let old_path = db::get_folders(&conn)
@@ -374,7 +391,9 @@ pub async fn update_folder_path(
             .ok_or("Folder not found")?;
         db::update_folder_path(&conn, folder_id, &old_path, &new_path, &new_name)
             .map_err(|e| e.to_string())?;
-    }
+        old_path
+    };
+    watcher.update_folder(&PathBuf::from(old_path), new_path_buf.clone(), folder_id);
     indexer::index_folder(app, db.inner().clone(), folder_id, new_path_buf);
     Ok(())
 }
