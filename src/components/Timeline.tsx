@@ -15,7 +15,11 @@ interface TimelineGroup {
 function buildLabel(key: string): string {
   if (key === "unknown") return "Unknown Date";
   const [yearStr, monthStr] = key.split("-");
-  const date = new Date(Number(yearStr), Number(monthStr) - 1);
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  if (!isFinite(year) || !isFinite(month) || month < 1 || month > 12) return "Unknown Date";
+  const date = new Date(year, month - 1);
+  if (isNaN(date.getTime())) return "Unknown Date";
   return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
@@ -32,7 +36,11 @@ function groupImages(images: ImageRecord[]): TimelineGroup[] {
     bucket.push(img);
   }
   return Array.from(map.entries())
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .sort(([a], [b]) => {
+      if (a === "unknown") return 1;
+      if (b === "unknown") return -1;
+      return a < b ? -1 : a > b ? 1 : 0;
+    })
     .map(([key, imgs]) => ({ key, label: buildLabel(key), images: imgs }));
 }
 
@@ -67,7 +75,7 @@ export function Timeline() {
 
   const tileSize = tileSizeForZoom(zoomPreset);
   const cols = useMemo(
-    () => Math.max(1, Math.floor((containerWidth + GAP) / (tileSize + GAP))),
+    () => Math.max(1, Math.floor((containerWidth - GAP) / (tileSize + GAP))),
     [containerWidth, tileSize],
   );
 

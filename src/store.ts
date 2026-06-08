@@ -906,7 +906,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   setView: (activeView) => {
     if (activeView === "timeline") {
-      set({ activeView, sort: "taken_asc", images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
+      set({ activeView, sort: "taken_asc", images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarSourceFolderId: null, similarFolderId: null, similarHasMore: false, similarCrop: null, imageLoadError: null });
       void get().loadImages(true);
       return;
     }
