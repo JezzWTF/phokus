@@ -7,6 +7,7 @@ import { Gallery } from "./components/Gallery";
 import { Lightbox } from "./components/Lightbox";
 import { TagCloud } from "./components/TagCloud";
 import { DuplicateFinder } from "./components/DuplicateFinder";
+import { Timeline } from "./components/Timeline";
 import { TitleBar } from "./components/TitleBar";
 import { SettingsModal } from "./components/SettingsModal";
 import { initializeNotifications } from "./notifications";
@@ -46,7 +47,13 @@ export default function App() {
       <div className="flex flex-1 min-h-0">
         <Sidebar />
         <main className="flex-1 flex flex-col min-w-0">
-          {activeView === "explore" ? (
+          {activeView === "timeline" ? (
+            <>
+              <Toolbar />
+              <BackgroundTasks />
+              <Timeline />
+            </>
+          ) : activeView === "explore" ? (
             <>
               <BackgroundTasks />
               <TagCloud />

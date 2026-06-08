@@ -122,7 +122,7 @@ export interface ThumbnailBatch {
   images: ImageRecord[];
 }
 
-export type ActiveView = "gallery" | "explore" | "duplicates";
+export type ActiveView = "gallery" | "explore" | "duplicates" | "timeline";
 
 export interface TagCloudEntry {
   count: number;
@@ -905,6 +905,11 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   closeImage: () => set({ selectedImage: null }),
 
   setView: (activeView) => {
+    if (activeView === "timeline") {
+      set({ activeView, sort: "taken_asc", images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
+      void get().loadImages(true);
+      return;
+    }
     if (activeView === "duplicates") {
       const { selectedFolderId, duplicateScanFolderId } = get();
       if (duplicateScanFolderId !== selectedFolderId) {
