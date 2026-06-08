@@ -1614,3 +1614,85 @@ pub async fn remove_tag(db: State<'_, DbState>, params: RemoveTagParams) -> Resu
     let conn = db.get().map_err(|e| e.to_string())?;
     db::remove_tag(&conn, params.tag_id).map_err(|e| e.to_string())
 }
+
+// ---------------------------------------------------------------------------
+// Queue scope / folder-id persistence
+// ---------------------------------------------------------------------------
+
+const TAGGING_QUEUE_SCOPE_FILE: &str = "settings/tagging_queue_scope.txt";
+const TAGGING_QUEUE_FOLDER_IDS_FILE: &str = "settings/tagging_queue_folder_ids.txt";
+
+#[derive(Deserialize)]
+pub struct SetTaggingQueueScopeParams {
+    pub scope: String,
+}
+
+#[derive(Deserialize)]
+pub struct SetTaggingQueueFolderIdsParams {
+    pub folder_ids: Vec<i64>,
+}
+
+#[tauri::command]
+pub async fn get_tagging_queue_scope(app: AppHandle) -> Result<String, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(TAGGING_QUEUE_SCOPE_FILE);
+    let value = std::fs::read_to_string(path).unwrap_or_default();
+    Ok(if value.trim() == "selected" { "selected".to_string() } else { "all".to_string() })
+}
+
+#[tauri::command]
+pub async fn set_tagging_queue_scope(
+    app: AppHandle,
+    params: SetTaggingQueueScopeParams,
+) -> Result<String, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(TAGGING_QUEUE_SCOPE_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let value = if params.scope == "selected" { "selected" } else { "all" };
+    std::fs::write(path, value).map_err(|e| e.to_string())?;
+    Ok(value.to_string())
+}
+
+#[tauri::command]
+pub async fn get_tagging_queue_folder_ids(app: AppHandle) -> Result<Vec<i64>, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(TAGGING_QUEUE_FOLDER_IDS_FILE);
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Ok(vec![]);
+    };
+    let ids = content
+        .split(',')
+        .filter_map(|s| s.trim().parse::<i64>().ok())
+        .collect();
+    Ok(ids)
+}
+
+#[tauri::command]
+pub async fn set_tagging_queue_folder_ids(
+    app: AppHandle,
+    params: SetTaggingQueueFolderIdsParams,
+) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(TAGGING_QUEUE_FOLDER_IDS_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content: Vec<String> = params.folder_ids.iter().map(|id| id.to_string()).collect();
+    std::fs::write(path, content.join(",")).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// App data folder
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn open_app_data_folder(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(app_dir.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(|e| e.to_string())
+}

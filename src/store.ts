@@ -334,9 +334,12 @@ interface GalleryState {
   setCaptionDetail: (detail: CaptionDetail) => Promise<void>;
   setAiCaptionsEnabled: (enabled: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  loadTaggingQueueScope: () => Promise<void>;
   setTaggingQueueScope: (scope: TaggingQueueScope) => void;
+  loadTaggingQueueFolderIds: () => Promise<void>;
   toggleTaggingQueueFolder: (folderId: number) => void;
   setTaggingQueueFolderIds: (folderIds: number[]) => void;
+  openAppDataFolder: () => Promise<void>;
   retryFailedEmbeddings: (folderId: number) => Promise<void>;
   updateImageDetails: (imageId: number, updates: { favorite?: boolean; rating?: number }) => Promise<void>;
   setCacheDir: (dir: string) => void;
@@ -1299,6 +1302,15 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
 
+  loadTaggingQueueScope: async () => {
+    try {
+      const scope = await invoke<TaggingQueueScope>("get_tagging_queue_scope");
+      set({ taggingQueueScope: scope });
+    } catch {
+      // silently fall back to in-memory default
+    }
+  },
+
   setTaggingQueueScope: (taggingQueueScope) => {
     set((state) => ({
       taggingQueueScope,
@@ -1307,6 +1319,16 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           ? [state.folders[0].id]
           : state.taggingQueueFolderIds,
     }));
+    void invoke("set_tagging_queue_scope", { scope: taggingQueueScope }).catch(() => {});
+  },
+
+  loadTaggingQueueFolderIds: async () => {
+    try {
+      const folderIds = await invoke<number[]>("get_tagging_queue_folder_ids");
+      set({ taggingQueueFolderIds: folderIds });
+    } catch {
+      // silently fall back to in-memory default
+    }
   },
 
   toggleTaggingQueueFolder: (folderId) => {
@@ -1314,11 +1336,19 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const next = state.taggingQueueFolderIds.includes(folderId)
         ? state.taggingQueueFolderIds.filter((id) => id !== folderId)
         : [...state.taggingQueueFolderIds, folderId].sort((a, b) => a - b);
+      void invoke("set_tagging_queue_folder_ids", { folderIds: next }).catch(() => {});
       return { taggingQueueFolderIds: next };
     });
   },
 
-  setTaggingQueueFolderIds: (taggingQueueFolderIds) => set({ taggingQueueFolderIds }),
+  setTaggingQueueFolderIds: (taggingQueueFolderIds) => {
+    set({ taggingQueueFolderIds });
+    void invoke("set_tagging_queue_folder_ids", { folderIds: taggingQueueFolderIds }).catch(() => {});
+  },
+
+  openAppDataFolder: async () => {
+    await invoke("open_app_data_folder");
+  },
 
   loadTaggerModelStatus: async () => {
     try {

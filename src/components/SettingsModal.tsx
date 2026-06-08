@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TaggerAcceleration, TaggingQueueScope, useGalleryStore } from "../store";
 
-type SettingsSection = "workspace" | "workers";
+type SettingsSection = "workspace" | "general";
 
 const SECTIONS: { id: SettingsSection; label: string; detail: string }[] = [
   { id: "workspace", label: "AI Workspace", detail: "Tagging models and queue targets" },
-  { id: "workers", label: "Workers", detail: "Queue activity and background processing" },
+  { id: "general", label: "General", detail: "App data and diagnostics" },
 ];
 
 function StatusPill({ children, tone }: { children: React.ReactNode; tone: "ready" | "muted" | "busy" }) {
@@ -109,19 +109,29 @@ export function SettingsModal() {
   const [taggerQueueing, setTaggerQueueing] = useState(false);
   const [taggerClearing, setTaggerClearing] = useState(false);
   const [taggerAccelerationSaving, setTaggerAccelerationSaving] = useState(false);
+  const [taggerAccelerationError, setTaggerAccelerationError] = useState<string | null>(null);
   const [taggerThresholdDraft, setTaggerThresholdDraft] = useState<string | null>(null);
   const [taggerThresholdSaving, setTaggerThresholdSaving] = useState(false);
+  const [taggerThresholdError, setTaggerThresholdError] = useState<string | null>(null);
   const [taggerBatchSizeDraft, setTaggerBatchSizeDraft] = useState<string | null>(null);
   const [taggerBatchSizeSaving, setTaggerBatchSizeSaving] = useState(false);
+  const [taggerBatchSizeError, setTaggerBatchSizeError] = useState<string | null>(null);
+  const [openingDataFolder, setOpeningDataFolder] = useState(false);
+
+  const thresholdErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const batchSizeErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const settingsOpen = useGalleryStore((state) => state.settingsOpen);
   const setSettingsOpen = useGalleryStore((state) => state.setSettingsOpen);
   const folders = useGalleryStore((state) => state.folders);
   const mediaJobProgress = useGalleryStore((state) => state.mediaJobProgress);
   const taggingQueueScope = useGalleryStore((state) => state.taggingQueueScope);
   const taggingQueueFolderIds = useGalleryStore((state) => state.taggingQueueFolderIds);
+  const loadTaggingQueueScope = useGalleryStore((state) => state.loadTaggingQueueScope);
   const setTaggingQueueScope = useGalleryStore((state) => state.setTaggingQueueScope);
   const toggleTaggingQueueFolder = useGalleryStore((state) => state.toggleTaggingQueueFolder);
   const setTaggingQueueFolderIds = useGalleryStore((state) => state.setTaggingQueueFolderIds);
+  const loadTaggingQueueFolderIds = useGalleryStore((state) => state.loadTaggingQueueFolderIds);
   const taggerModelStatus = useGalleryStore((state) => state.taggerModelStatus);
   const taggerModelPreparing = useGalleryStore((state) => state.taggerModelPreparing);
   const taggerModelProgress = useGalleryStore((state) => state.taggerModelProgress);
@@ -145,6 +155,7 @@ export function SettingsModal() {
   const queueTaggingJobsForFolders = useGalleryStore((state) => state.queueTaggingJobsForFolders);
   const clearTaggingJobs = useGalleryStore((state) => state.clearTaggingJobs);
   const clearTaggingJobsForFolders = useGalleryStore((state) => state.clearTaggingJobsForFolders);
+  const openAppDataFolder = useGalleryStore((state) => state.openAppDataFolder);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -152,22 +163,27 @@ export function SettingsModal() {
     void loadTaggerAcceleration();
     void loadTaggerThreshold();
     void loadTaggerBatchSize();
+    void loadTaggingQueueScope();
+    void loadTaggingQueueFolderIds();
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setSettingsOpen(false);
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [settingsOpen, loadTaggerModelStatus, loadTaggerAcceleration, loadTaggerThreshold, loadTaggerBatchSize, setSettingsOpen]);
+  }, [settingsOpen, loadTaggerModelStatus, loadTaggerAcceleration, loadTaggerThreshold, loadTaggerBatchSize, loadTaggingQueueScope, loadTaggingQueueFolderIds, setSettingsOpen]);
+
+  // Clean up error timers on unmount
+  useEffect(() => {
+    return () => {
+      if (thresholdErrorTimerRef.current) clearTimeout(thresholdErrorTimerRef.current);
+      if (batchSizeErrorTimerRef.current) clearTimeout(batchSizeErrorTimerRef.current);
+    };
+  }, []);
 
   const selectedFolders = useMemo(
     () => folders.filter((folder) => taggingQueueFolderIds.includes(folder.id)),
     [folders, taggingQueueFolderIds],
-  );
-
-  const totalQueuedJobs = useMemo(
-    () => Object.values(mediaJobProgress).reduce((sum, progress) => sum + (progress?.tagging_pending ?? 0), 0),
-    [mediaJobProgress],
   );
 
   if (!settingsOpen) return null;
@@ -268,8 +284,8 @@ export function SettingsModal() {
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/[0.07] px-6">
             <div>
-              <p className="text-sm font-medium text-white">{activeSection === "workspace" ? "AI Workspace" : "Workers"}</p>
-              <p className="text-xs text-gray-600">{activeSection === "workspace" ? "Model setup and queue targets" : "Background processing status"}</p>
+              <p className="text-sm font-medium text-white">{activeSection === "workspace" ? "AI Workspace" : "General"}</p>
+              <p className="text-xs text-gray-600">{activeSection === "workspace" ? "Model setup and queue targets" : "App data and diagnostics"}</p>
             </div>
             <button
               className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
@@ -344,8 +360,9 @@ export function SettingsModal() {
                                   current={taggerAcceleration}
                                   onSelect={(nextAcceleration) => {
                                     setTaggerAccelerationSaving(true);
+                                    setTaggerAccelerationError(null);
                                     void setTaggerAcceleration(nextAcceleration)
-                                      .catch((error) => setTaggerQueueStatus(String(error)))
+                                      .catch((error: unknown) => setTaggerAccelerationError(String(error)))
                                       .finally(() => setTaggerAccelerationSaving(false));
                                   }}
                                 >
@@ -353,7 +370,11 @@ export function SettingsModal() {
                                 </TaggerAccelerationButton>
                               ))}
                             </div>
-                            <p className="text-[11px] text-gray-600">{taggerAccelerationSaving ? "Saving..." : `Current: ${taggerAcceleration}`}</p>
+                            {taggerAccelerationError ? (
+                              <p className="text-[11px] text-amber-300">{taggerAccelerationError}</p>
+                            ) : (
+                              <p className="text-[11px] text-gray-600">{taggerAccelerationSaving ? "Saving..." : `Current: ${taggerAcceleration}`}</p>
+                            )}
                           </div>
                         </SettingsRow>
 
@@ -370,19 +391,27 @@ export function SettingsModal() {
                               onBlur={() => {
                                 const value = parseFloat(thresholdDisplay);
                                 if (!isNaN(value) && value >= 0.05 && value <= 0.99) {
+                                  setTaggerThresholdError(null);
                                   setTaggerThresholdSaving(true);
                                   void setTaggerThreshold(value)
-                                    .catch((error) => setTaggerQueueStatus(String(error)))
+                                    .catch((error: unknown) => setTaggerQueueStatus(String(error)))
                                     .finally(() => {
                                       setTaggerThresholdDraft(null);
                                       setTaggerThresholdSaving(false);
                                     });
                                 } else {
                                   setTaggerThresholdDraft(null);
+                                  setTaggerThresholdError("Must be 0.05 – 0.99");
+                                  if (thresholdErrorTimerRef.current) clearTimeout(thresholdErrorTimerRef.current);
+                                  thresholdErrorTimerRef.current = setTimeout(() => setTaggerThresholdError(null), 2000);
                                 }
                               }}
                             />
-                            <p className="text-[11px] text-gray-600">{taggerThresholdSaving ? "Saving..." : "Default: 0.35"}</p>
+                            {taggerThresholdError ? (
+                              <p className="text-[11px] text-amber-300">{taggerThresholdError}</p>
+                            ) : (
+                              <p className="text-[11px] text-gray-600">{taggerThresholdSaving ? "Saving..." : "Default: 0.35"}</p>
+                            )}
                           </div>
                         </SettingsRow>
 
@@ -399,6 +428,7 @@ export function SettingsModal() {
                               onBlur={() => {
                                 const value = parseInt(batchSizeDisplay, 10);
                                 if (!isNaN(value) && value >= 1 && value <= 100) {
+                                  setTaggerBatchSizeError(null);
                                   setTaggerBatchSizeSaving(true);
                                   void setTaggerBatchSize(value)
                                     .catch((error: unknown) => setTaggerQueueStatus(String(error)))
@@ -408,10 +438,17 @@ export function SettingsModal() {
                                     });
                                 } else {
                                   setTaggerBatchSizeDraft(null);
+                                  setTaggerBatchSizeError("Must be 1 – 100");
+                                  if (batchSizeErrorTimerRef.current) clearTimeout(batchSizeErrorTimerRef.current);
+                                  batchSizeErrorTimerRef.current = setTimeout(() => setTaggerBatchSizeError(null), 2000);
                                 }
                               }}
                             />
-                            <p className="text-[11px] text-gray-600">{taggerBatchSizeSaving ? "Saving..." : "Default: 8"}</p>
+                            {taggerBatchSizeError ? (
+                              <p className="text-[11px] text-amber-300">{taggerBatchSizeError}</p>
+                            ) : (
+                              <p className="text-[11px] text-gray-600">{taggerBatchSizeSaving ? "Saving..." : "Default: 8"}</p>
+                            )}
                           </div>
                         </SettingsRow>
 
@@ -453,16 +490,16 @@ export function SettingsModal() {
                         </div>
                         <div className="flex gap-2">
                           <button
-                            className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40"
+                            className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
                             onClick={() => setTaggingQueueFolderIds(folders.map((folder) => folder.id))}
-                            disabled={folders.length === 0}
+                            disabled={taggingQueueScope === "all" || folders.length === 0}
                           >
                             Select all
                           </button>
                           <button
-                            className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40"
+                            className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
                             onClick={() => setTaggingQueueFolderIds([])}
-                            disabled={taggingQueueFolderIds.length === 0}
+                            disabled={taggingQueueScope === "all" || taggingQueueFolderIds.length === 0}
                           >
                             Clear
                           </button>
@@ -477,12 +514,13 @@ export function SettingsModal() {
                             <button
                               key={folder.id}
                               type="button"
-                              className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left transition-colors ${
+                              className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed ${
                                 active
                                   ? "border-emerald-400/30 bg-emerald-500/10 text-white"
                                   : "border-white/[0.07] bg-black/20 text-gray-300 hover:border-white/15 hover:bg-white/[0.04]"
                               }`}
                               onClick={() => toggleTaggingQueueFolder(folder.id)}
+                              disabled={taggingQueueScope === "all"}
                             >
                               <div>
                                 <p className="text-sm font-medium">{folder.name}</p>
@@ -520,41 +558,28 @@ export function SettingsModal() {
 
                     {taggerQueueStatus ? <p className="pt-4 text-xs text-gray-500">{taggerQueueStatus}</p> : null}
                   </SettingsCard>
-
-                  <SettingsCard title="Captioning">
-                    <div className="rounded-xl border border-dashed border-white/[0.09] bg-black/20 px-4 py-4">
-                      <p className="text-sm font-medium text-white/50">Coming soon</p>
-                    </div>
-                  </SettingsCard>
                 </SectionShell>
               </div>
             ) : (
               <div className="space-y-8">
                 <SectionShell
-                  eyebrow="Workers"
-                  title="Background processing"
+                  eyebrow="General"
+                  title="App data"
+                  description="Access the folder where Phokus stores its database, thumbnails, AI models, and settings."
                 >
-                  <SettingsCard title="Queue summary" description="Live totals across all folder workers.">
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Tagging queued</p>
-                        <p className="mt-2 text-2xl font-semibold text-white">{totalQueuedJobs.toLocaleString()}</p>
-                      </div>
-                      <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Selected folders</p>
-                        <p className="mt-2 text-2xl font-semibold text-white">{selectedFolders.length.toLocaleString()}</p>
-                      </div>
-                      <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Library folders</p>
-                        <p className="mt-2 text-2xl font-semibold text-white">{folders.length.toLocaleString()}</p>
-                      </div>
-                    </div>
-                  </SettingsCard>
-
-                  <SettingsCard title="Worker controls" description="Pause, resume, retry, and per-folder failure details are available in the background tasks panel.">
+                  <SettingsCard title="Storage location">
                     <div className="flex items-center justify-between gap-4 rounded-xl border border-white/[0.07] bg-black/20 p-4">
-                      <p className="text-sm text-gray-400">Workers are running in the background.</p>
-                      <StatusPill tone="ready">Live</StatusPill>
+                      <p className="text-sm text-gray-400">Open the app data folder in Explorer to inspect or back up files.</p>
+                      <button
+                        className="shrink-0 rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                        onClick={() => {
+                          setOpeningDataFolder(true);
+                          void openAppDataFolder().finally(() => setOpeningDataFolder(false));
+                        }}
+                        disabled={openingDataFolder}
+                      >
+                        {openingDataFolder ? "Opening..." : "Open data folder"}
+                      </button>
                     </div>
                   </SettingsCard>
                 </SectionShell>

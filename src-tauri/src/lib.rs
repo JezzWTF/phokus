@@ -139,6 +139,11 @@ pub fn run() {
             commands::delete_images_from_disk,
             commands::rename_folder,
             commands::update_folder_path,
+            commands::get_tagging_queue_scope,
+            commands::set_tagging_queue_scope,
+            commands::get_tagging_queue_folder_ids,
+            commands::set_tagging_queue_folder_ids,
+            commands::open_app_data_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
