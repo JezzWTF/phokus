@@ -1336,14 +1336,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const next = state.taggingQueueFolderIds.includes(folderId)
         ? state.taggingQueueFolderIds.filter((id) => id !== folderId)
         : [...state.taggingQueueFolderIds, folderId].sort((a, b) => a - b);
-      void invoke("set_tagging_queue_folder_ids", { folderIds: next }).catch(() => {});
+      void invoke("set_tagging_queue_folder_ids", { folder_ids: next }).catch(() => {});
       return { taggingQueueFolderIds: next };
     });
   },
 
   setTaggingQueueFolderIds: (taggingQueueFolderIds) => {
     set({ taggingQueueFolderIds });
-    void invoke("set_tagging_queue_folder_ids", { folderIds: taggingQueueFolderIds }).catch(() => {});
+    void invoke("set_tagging_queue_folder_ids", { folder_ids: taggingQueueFolderIds }).catch(() => {});
   },
 
   openAppDataFolder: async () => {

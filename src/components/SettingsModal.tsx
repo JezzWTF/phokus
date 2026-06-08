@@ -394,7 +394,7 @@ export function SettingsModal() {
                                   setTaggerThresholdError(null);
                                   setTaggerThresholdSaving(true);
                                   void setTaggerThreshold(value)
-                                    .catch((error: unknown) => setTaggerQueueStatus(String(error)))
+                                    .catch((error: unknown) => setTaggerThresholdError(String(error)))
                                     .finally(() => {
                                       setTaggerThresholdDraft(null);
                                       setTaggerThresholdSaving(false);
