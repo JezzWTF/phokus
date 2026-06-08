@@ -37,6 +37,7 @@ export interface ImageRecord {
   file_size: number;
   created_at: string | null;
   modified_at: string | null;
+  taken_at: string | null;
   mime_type: string;
   media_kind: MediaKind;
   duration_ms: number | null;
@@ -121,7 +122,7 @@ export interface ThumbnailBatch {
   images: ImageRecord[];
 }
 
-export type ActiveView = "gallery" | "explore" | "duplicates";
+export type ActiveView = "gallery" | "explore" | "duplicates" | "timeline";
 
 export interface TagCloudEntry {
   count: number;
@@ -214,7 +215,9 @@ export type SortOrder =
   | "rating_desc"
   | "rating_asc"
   | "duration_desc"
-  | "duration_asc";
+  | "duration_asc"
+  | "taken_desc"
+  | "taken_asc";
 
 interface GalleryState {
   folders: Folder[];
@@ -494,6 +497,10 @@ function compareImages(a: ImageRecord, b: ImageRecord, sort: SortOrder): number 
       return compareNullableNumber(a.duration_ms, b.duration_ms);
     case "duration_desc":
       return compareNullableNumber(b.duration_ms, a.duration_ms);
+    case "taken_asc":
+      return compareNullableDate(a.taken_at ?? a.modified_at, b.taken_at ?? b.modified_at);
+    case "taken_desc":
+      return compareNullableDate(b.taken_at ?? b.modified_at, a.taken_at ?? a.modified_at);
     default:
       return compareNullableDate(b.modified_at, a.modified_at);
   }
@@ -898,6 +905,11 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   closeImage: () => set({ selectedImage: null }),
 
   setView: (activeView) => {
+    if (activeView === "timeline") {
+      set({ activeView, sort: "taken_asc", images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarSourceFolderId: null, similarFolderId: null, similarHasMore: false, similarCrop: null, imageLoadError: null });
+      void get().loadImages(true);
+      return;
+    }
     if (activeView === "duplicates") {
       const { selectedFolderId, duplicateScanFolderId } = get();
       if (duplicateScanFolderId !== selectedFolderId) {
@@ -1740,6 +1752,28 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       });
     });
 
+    const unlistenWatcherDeleted = await listen<number[]>("watcher-deleted", (event) => {
+      const deletedIds = new Set(event.payload);
+      set((state) => {
+        const removed = state.images.filter((img) => deletedIds.has(img.id)).length;
+        const images = state.images.filter((img) => !deletedIds.has(img.id));
+        const selectedImage =
+          state.selectedImage && deletedIds.has(state.selectedImage.id)
+            ? null
+            : state.selectedImage;
+        return {
+          images,
+          totalImages: Math.max(0, state.totalImages - removed),
+          loadedCount: Math.max(0, state.loadedCount - removed),
+          selectedImage,
+        };
+      });
+    });
+
+    const unlistenFolderCounts = await listen("folder-counts-changed", () => {
+      void get().loadFolders();
+    });
+
     return () => {
       unlistenProgress();
       unlistenMediaJobs();
@@ -1747,6 +1781,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       unlistenTaggerModelProgress();
       unlistenImages();
       unlistenThumbnails();
+      unlistenWatcherDeleted();
+      unlistenFolderCounts();
     };
   },
 }));

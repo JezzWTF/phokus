@@ -45,6 +45,7 @@ pub struct ImageRecord {
     pub file_size: i64,
     pub created_at: Option<String>,
     pub modified_at: Option<String>,
+    pub taken_at: Option<String>,
     pub mime_type: String,
     pub media_kind: String,
     pub duration_ms: Option<i64>,
@@ -313,6 +314,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     ensure_column(conn, "images", "ai_tagger_model", "TEXT")?;
     ensure_column(conn, "images", "ai_tagged_at", "TEXT")?;
     ensure_column(conn, "images", "ai_tagger_error", "TEXT")?;
+    ensure_column(conn, "images", "taken_at", "TEXT")?;
+    // Index must be created after ensure_column adds the column; it cannot live
+    // in the execute_batch above because that batch runs before the column exists
+    // on databases that predate Phase 1.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_images_taken_at ON images(taken_at);",
+    )?;
     ensure_column(conn, "folders", "scan_error", "TEXT")?;
 
     vector::migrate(conn)?;
@@ -334,8 +342,8 @@ pub fn insert_folder(conn: &Connection, path: &str, name: &str) -> Result<i64> {
 
 pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
     let id = conn.query_row(
-        "INSERT INTO images (folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type, media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error, generated_caption, caption_model, caption_updated_at, caption_error, ai_rating, ai_tagger_model, ai_tagged_at, ai_tagger_error)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)
+        "INSERT INTO images (folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, taken_at, mime_type, media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error, favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error, generated_caption, caption_model, caption_updated_at, caption_error, ai_rating, ai_tagger_model, ai_tagged_at, ai_tagger_error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)
          ON CONFLICT(path) DO UPDATE SET
             folder_id = excluded.folder_id,
             filename = excluded.filename,
@@ -345,6 +353,7 @@ pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
             file_size = excluded.file_size,
             created_at = excluded.created_at,
             modified_at = excluded.modified_at,
+            taken_at = excluded.taken_at,
             mime_type = excluded.mime_type,
             media_kind = excluded.media_kind,
             duration_ms = excluded.duration_ms,
@@ -375,6 +384,7 @@ pub fn upsert_image(conn: &Connection, img: &ImageRecord) -> Result<i64> {
             img.file_size,
             img.created_at,
             img.modified_at,
+            img.taken_at,
             img.mime_type,
             img.media_kind,
             img.duration_ms,
@@ -1334,7 +1344,7 @@ pub fn update_image_details(
     )?;
 
     conn.query_row(
-        "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
+        "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, taken_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
                 favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error,
                 generated_caption, caption_model, caption_updated_at, caption_error,
@@ -1347,9 +1357,47 @@ pub fn update_image_details(
     .map_err(Into::into)
 }
 
+/// Look up the lightweight indexed-media entry for a single path.
+/// Used by the filesystem watcher to run change-detection before upserting.
+pub fn get_indexed_entry_by_path(conn: &Connection, path: &str) -> Result<Option<IndexedMediaEntry>> {
+    let result = conn.query_row(
+        "SELECT id, path, modified_at, file_size, media_kind FROM images WHERE path = ?1",
+        [path],
+        |row| {
+            Ok(IndexedMediaEntry {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                modified_at: row.get(2)?,
+                file_size: row.get(3)?,
+                media_kind: row.get(4)?,
+            })
+        },
+    );
+    match result {
+        Ok(entry) => Ok(Some(entry)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Look up just the image id for a path. Used by the filesystem watcher
+/// to find the DB row to delete when a file is removed from disk.
+pub fn get_image_id_by_path(conn: &Connection, path: &str) -> Result<Option<i64>> {
+    let result = conn.query_row(
+        "SELECT id FROM images WHERE path = ?1",
+        [path],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(id) => Ok(Some(id)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 pub fn get_image_by_id(conn: &Connection, image_id: i64) -> Result<ImageRecord> {
     conn.query_row(
-        "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
+        "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, taken_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
                 favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error,
                 generated_caption, caption_model, caption_updated_at, caption_error,
@@ -1457,6 +1505,8 @@ pub fn get_images(
         "rating_desc" => "rating DESC, modified_at DESC NULLS LAST",
         "duration_asc" => "duration_ms ASC NULLS LAST",
         "duration_desc" => "duration_ms DESC NULLS LAST",
+        "taken_asc" => "COALESCE(taken_at, modified_at) ASC NULLS LAST",
+        "taken_desc" => "COALESCE(taken_at, modified_at) DESC NULLS LAST",
         _ => "modified_at DESC NULLS LAST",
     };
 
@@ -1464,7 +1514,7 @@ pub fn get_images(
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
     let sql = format!(
-        "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, mime_type,
+        "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, taken_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
                 favorite, rating, embedding_status, embedding_model, embedding_updated_at, embedding_error,
                 generated_caption, caption_model, caption_updated_at, caption_error,
@@ -1626,7 +1676,6 @@ pub fn search_tags_autocomplete(
 pub struct ImagePathRecord {
     pub id: i64,
     pub path: String,
-    pub thumbnail_path: Option<String>,
 }
 
 pub fn get_all_image_paths(
@@ -1634,14 +1683,13 @@ pub fn get_all_image_paths(
     folder_id: Option<i64>,
 ) -> Result<Vec<ImagePathRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, path, thumbnail_path FROM images WHERE (?1 IS NULL OR folder_id = ?1) ORDER BY id",
+        "SELECT id, path FROM images WHERE (?1 IS NULL OR folder_id = ?1) ORDER BY id",
     )?;
     let rows = stmt
         .query_map(params![folder_id], |row| {
             Ok(ImagePathRecord {
                 id: row.get(0)?,
                 path: row.get(1)?,
-                thumbnail_path: row.get(2)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2012,18 +2060,6 @@ pub fn requeue_processing_tagging_jobs_for_folder(conn: &Connection, folder_id: 
     Ok(())
 }
 
-/// Returns `true` when the job row for `image_id` currently has status = 'cancelled'.
-/// Used by the worker to discard inference results for jobs that were cancelled
-/// while inference was running.
-pub fn is_tagging_job_cancelled(conn: &Connection, image_id: i64) -> Result<bool> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM tagging_jobs WHERE image_id = ?1 AND status = 'cancelled'",
-        [image_id],
-        |row| row.get(0),
-    )?;
-    Ok(count > 0)
-}
-
 /// Returns `true` when the job row for `image_id` is still `processing`.
 /// A `false` result means the row was reset to `pending` (pause) or `cancelled`
 /// while inference was running — either way the result must be discarded.
@@ -2128,27 +2164,28 @@ fn map_image_row(row: &Row<'_>) -> rusqlite::Result<ImageRecord> {
         file_size: row.get(7)?,
         created_at: row.get(8)?,
         modified_at: row.get(9)?,
-        mime_type: row.get(10)?,
-        media_kind: row.get(11)?,
-        duration_ms: row.get(12)?,
-        video_codec: row.get(13)?,
-        audio_codec: row.get(14)?,
-        metadata_updated_at: row.get(15)?,
-        metadata_error: row.get(16)?,
-        favorite: row.get::<_, i64>(17)? != 0,
-        rating: row.get(18)?,
-        embedding_status: row.get(19)?,
-        embedding_model: row.get(20)?,
-        embedding_updated_at: row.get(21)?,
-        embedding_error: row.get(22)?,
-        generated_caption: row.get(23)?,
-        caption_model: row.get(24)?,
-        caption_updated_at: row.get(25)?,
-        caption_error: row.get(26)?,
-        ai_rating: row.get(27)?,
-        ai_tagger_model: row.get(28)?,
-        ai_tagged_at: row.get(29)?,
-        ai_tagger_error: row.get(30)?,
+        taken_at: row.get(10)?,
+        mime_type: row.get(11)?,
+        media_kind: row.get(12)?,
+        duration_ms: row.get(13)?,
+        video_codec: row.get(14)?,
+        audio_codec: row.get(15)?,
+        metadata_updated_at: row.get(16)?,
+        metadata_error: row.get(17)?,
+        favorite: row.get::<_, i64>(18)? != 0,
+        rating: row.get(19)?,
+        embedding_status: row.get(20)?,
+        embedding_model: row.get(21)?,
+        embedding_updated_at: row.get(22)?,
+        embedding_error: row.get(23)?,
+        generated_caption: row.get(24)?,
+        caption_model: row.get(25)?,
+        caption_updated_at: row.get(26)?,
+        caption_error: row.get(27)?,
+        ai_rating: row.get(28)?,
+        ai_tagger_model: row.get(29)?,
+        ai_tagged_at: row.get(30)?,
+        ai_tagger_error: row.get(31)?,
     })
 }
 

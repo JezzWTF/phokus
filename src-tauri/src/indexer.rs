@@ -9,9 +9,10 @@ use crate::vector;
 use anyhow::Result;
 use rayon::prelude::*;
 use serde::Serialize;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
@@ -425,6 +426,49 @@ fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf)
     Ok(())
 }
 
+/// Extract the capture date from EXIF metadata, returned as an ISO 8601 string
+/// (`"YYYY-MM-DDTHH:MM:SS"`). Tries `DateTimeOriginal` first, then
+/// `DateTimeDigitized`, then `DateTime`. Returns `None` for video files or
+/// images with no readable EXIF date.
+fn extract_exif_date(path: &Path) -> Option<String> {
+    use exif::{In, Tag, Value};
+    use std::io::BufReader;
+
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+    let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
+
+    for tag in [Tag::DateTimeOriginal, Tag::DateTimeDigitized, Tag::DateTime] {
+        if let Some(field) = exif.get_field(tag, In::PRIMARY) {
+            if let Value::Ascii(ref parts) = field.value {
+                if let Some(bytes) = parts.first() {
+                    // EXIF datetime format: "YYYY:MM:DD HH:MM:SS" (19 bytes)
+                    if bytes.len() >= 19 {
+                        let s = String::from_utf8_lossy(bytes);
+                        // Reject all-zero sentinel dates written by some cameras
+                        // for uninitialised EXIF fields ("0000:00:00 00:00:00").
+                        let year: u32 = s[0..4].parse().unwrap_or(0);
+                        if year == 0 {
+                            continue;
+                        }
+                        let iso = format!(
+                            "{}-{}-{}T{}:{}:{}",
+                            &s[0..4],
+                            &s[5..7],
+                            &s[8..10],
+                            &s[11..13],
+                            &s[14..16],
+                            &s[17..19]
+                        );
+                        return Some(iso);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn build_record(
     path: &Path,
     folder_id: i64,
@@ -465,6 +509,7 @@ fn build_record(
         file_size,
         created_at: None,
         modified_at,
+        taken_at: extract_exif_date(path),
         mime_type: mime_for_ext(ext).to_string(),
         media_kind: media_kind.clone(),
         duration_ms: None,
@@ -1236,5 +1281,233 @@ fn mime_for_ext(ext: &str) -> &'static str {
         "mov" => "video/quicktime",
         "webm" => "video/webm",
         _ => "image/jpeg",
+    }
+}
+
+// ── Filesystem watcher ────────────────────────────────────────────────────────
+
+/// How long to wait after the last event for a path before processing it.
+/// Absorbs bursts of OS events that accompany a single logical file write.
+const WATCHER_DEBOUNCE: Duration = Duration::from_millis(500);
+
+struct WatcherInner {
+    watcher: Mutex<RecommendedWatcher>,
+    /// Maps each watched folder root → its folder_id in the DB.
+    folder_map: Arc<Mutex<HashMap<PathBuf, i64>>>,
+}
+
+/// Shared handle that lets command handlers register and deregister watched
+/// directories without touching the debounce thread directly.
+#[derive(Clone)]
+pub struct WatcherHandle {
+    inner: Arc<WatcherInner>,
+}
+
+impl WatcherHandle {
+    pub fn add_folder(&self, path: PathBuf, folder_id: i64) {
+        {
+            let mut w = self.inner.watcher.lock().unwrap();
+            if path.is_dir() {
+                if let Err(e) = w.watch(&path, RecursiveMode::Recursive) {
+                    eprintln!("Watcher: failed to watch {:?}: {}", path, e);
+                }
+            }
+        }
+        self.inner.folder_map.lock().unwrap().insert(path, folder_id);
+    }
+
+    pub fn remove_folder(&self, path: &Path) {
+        {
+            let mut w = self.inner.watcher.lock().unwrap();
+            let _ = w.unwatch(path);
+        }
+        self.inner.folder_map.lock().unwrap().remove(path);
+    }
+
+    pub fn update_folder(&self, old_path: &Path, new_path: PathBuf, folder_id: i64) {
+        {
+            let mut w = self.inner.watcher.lock().unwrap();
+            let _ = w.unwatch(old_path);
+            if new_path.is_dir() {
+                if let Err(e) = w.watch(&new_path, RecursiveMode::Recursive) {
+                    eprintln!("Watcher: failed to watch {:?}: {}", new_path, e);
+                }
+            }
+        }
+        let mut map = self.inner.folder_map.lock().unwrap();
+        map.remove(old_path);
+        map.insert(new_path, folder_id);
+    }
+}
+
+/// Start the filesystem watcher. Watches all folders currently in the DB and
+/// returns a handle that command handlers can use to add/remove watched paths.
+///
+/// The debounce loop uses adaptive blocking:
+/// - `recv()` when no events are pending — zero CPU
+/// - `recv_timeout(earliest_deadline)` when events are pending — wakes exactly
+///   when the soonest debounce window expires, no busy-polling
+pub fn start_watcher(app: AppHandle, pool: DbPool) -> WatcherHandle {
+    let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+
+    let raw_watcher = notify::recommended_watcher(move |result| {
+        let _ = tx.send(result);
+    })
+    .expect("Failed to create filesystem watcher");
+
+    // Seed the folder map from the DB so existing folders are watched on startup.
+    let folder_map: Arc<Mutex<HashMap<PathBuf, i64>>> = Arc::new(Mutex::new(HashMap::new()));
+    {
+        let conn = pool.get().expect("Watcher: failed to get DB connection for init");
+        let folders = db::get_folders(&conn).unwrap_or_default();
+        let mut map = folder_map.lock().unwrap();
+        for f in folders {
+            map.insert(PathBuf::from(f.path), f.id);
+        }
+    }
+
+    // Register each known folder with the OS watcher.
+    let raw_watcher = {
+        let mut w = raw_watcher;
+        let map = folder_map.lock().unwrap();
+        for path in map.keys() {
+            if path.is_dir() {
+                if let Err(e) = w.watch(path, RecursiveMode::Recursive) {
+                    eprintln!("Watcher: failed to watch {:?}: {}", path, e);
+                }
+            }
+        }
+        w
+    };
+
+    let handle = WatcherHandle {
+        inner: Arc::new(WatcherInner {
+            watcher: Mutex::new(raw_watcher),
+            folder_map: Arc::clone(&folder_map),
+        }),
+    };
+
+    // Spawn the debounce loop on its own thread.
+    let folder_map_thread = Arc::clone(&folder_map);
+    std::thread::spawn(move || {
+        // path → deadline: the earliest instant at which this path should be processed.
+        let mut pending: HashMap<PathBuf, Instant> = HashMap::new();
+
+        loop {
+            // Adaptive blocking: block forever when idle, wake at the earliest
+            // deadline when events are queued.
+            let received = if pending.is_empty() {
+                match rx.recv() {
+                    Ok(e) => Some(e),
+                    Err(_) => break, // sender dropped — app is shutting down
+                }
+            } else {
+                let earliest = pending.values().copied().min().unwrap(); // safe: non-empty
+                let timeout = earliest.saturating_duration_since(Instant::now());
+                match rx.recv_timeout(timeout) {
+                    Ok(e) => Some(e),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            };
+
+            let now = Instant::now();
+
+            // Absorb incoming event — coalesces rapid writes into one deadline.
+            if let Some(Ok(event)) = received {
+                use notify::EventKind;
+                // Skip pure access events (reads); they never change file content.
+                if !matches!(event.kind, EventKind::Access(_)) {
+                    for path in event.paths {
+                        if is_supported_media(&path) {
+                            pending.insert(path, now + WATCHER_DEBOUNCE);
+                        }
+                    }
+                }
+            }
+
+            // Process all paths whose debounce window has expired.
+            let ready: Vec<PathBuf> = pending
+                .iter()
+                .filter(|(_, &deadline)| deadline <= now)
+                .map(|(p, _)| p.clone())
+                .collect();
+
+            for path in ready {
+                pending.remove(&path);
+                process_watcher_path(&app, &pool, &folder_map_thread, &path);
+            }
+        }
+    });
+
+    handle
+}
+
+/// Decide what to do with a path whose debounce window just expired.
+/// If the file exists → upsert (with change-detection to avoid clobbering
+/// metadata like thumbnail_path). If the file is gone → delete from DB.
+fn process_watcher_path(
+    app: &AppHandle,
+    pool: &DbPool,
+    folder_map: &Arc<Mutex<HashMap<PathBuf, i64>>>,
+    path: &Path,
+) {
+    // Determine which registered folder owns this file.
+    let folder_id = {
+        let map = folder_map.lock().unwrap();
+        map.iter()
+            .find(|(folder_path, _)| path.starts_with(folder_path.as_path()))
+            .map(|(_, &id)| id)
+    };
+    let Some(folder_id) = folder_id else { return };
+
+    let conn = match pool.get() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Watcher: DB pool error: {}", e);
+            return;
+        }
+    };
+
+    if path.exists() {
+        // File still on disk — upsert if content changed.
+        let path_str = path.to_string_lossy();
+        let existing = db::get_indexed_entry_by_path(&conn, &path_str).unwrap_or(None);
+        let Some(record) = build_record(path, folder_id, existing.as_ref()) else {
+            return; // file unchanged (same size + mtime) — nothing to do
+        };
+        drop(conn); // commit_batch acquires its own connection from the pool
+
+        match commit_batch(pool, &[record]) {
+            Ok(committed) if !committed.is_empty() => {
+                // Always emit the images — they are committed to the DB.
+                emit_images(app, &IndexedImagesBatch { folder_id, images: committed });
+                emit_folder_job_progress(app, pool, &[folder_id], false);
+                // Update the sidebar count only if we successfully write the new
+                // count; skip the frontend notification on pool/DB failure to
+                // avoid showing a stale number.
+                if let Ok(count_conn) = pool.get() {
+                    if db::update_folder_count(&count_conn, folder_id).is_ok() {
+                        let _ = app.emit("folder-counts-changed", ());
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("Watcher: commit error for {:?}: {}", path, e),
+        }
+    } else {
+        // File removed from disk — clean up DB row.
+        let path_str = path.to_string_lossy();
+        match db::get_image_id_by_path(&conn, &path_str) {
+            Ok(Some(image_id)) => {
+                if db::delete_images_by_ids(&conn, &[image_id]).is_ok() {
+                    db::update_folder_count(&conn, folder_id).ok();
+                    let _ = app.emit("watcher-deleted", vec![image_id]);
+                    let _ = app.emit("folder-counts-changed", ());
+                }
+            }
+            Ok(None) => {} // never indexed or already removed
+            Err(e) => eprintln!("Watcher: lookup error for {:?}: {}", path, e),
+        }
     }
 }

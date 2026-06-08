@@ -16,7 +16,7 @@ function formatDuration(durationMs: number | null): string | null {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-function ContextMenu({
+export function ContextMenu({
   x,
   y,
   image,
@@ -104,7 +104,7 @@ function ContextMenu({
   );
 }
 
-function ImageTile({
+export function ImageTile({
   image,
   onClick,
   onContextMenu,

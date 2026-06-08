@@ -5,6 +5,8 @@ import { tileSizeForZoom, useGalleryStore, SortOrder, MediaFilter, SearchCommand
 const BASE_SORT_OPTIONS: { value: SortOrder; label: string }[] = [
   { value: "date_desc", label: "Newest first" },
   { value: "date_asc", label: "Oldest first" },
+  { value: "taken_desc", label: "Taken: newest" },
+  { value: "taken_asc", label: "Taken: oldest" },
   { value: "name_asc", label: "Name A–Z" },
   { value: "name_desc", label: "Name Z–A" },
   { value: "rating_desc", label: "Highest rated" },
