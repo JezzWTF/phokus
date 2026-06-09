@@ -666,31 +666,39 @@ export function SettingsModal() {
                         <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
                           <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Orphaned files</p>
                           <p className="mt-2 text-2xl font-semibold text-white">
-                            {thumbnailCleanupResult
-                              ? thumbnailCleanupResult.deleted_count.toLocaleString()
-                              : thumbnailInfo
-                                ? thumbnailInfo.count.toLocaleString()
-                                : "—"}
+                            {cleaningThumbnails
+                              ? "—"
+                              : thumbnailCleanupResult
+                                ? "0"
+                                : thumbnailInfo
+                                  ? thumbnailInfo.count.toLocaleString()
+                                  : "—"}
                           </p>
                         </div>
                         <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
                           <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Reclaimable</p>
                           <p className={`mt-2 text-2xl font-semibold ${thumbnailCleanupResult ? "text-emerald-300" : "text-white"}`}>
-                            {thumbnailCleanupResult
-                              ? `−${thumbnailCleanupResult.freed_mb.toFixed(1)} MB freed`
-                              : thumbnailInfo
-                                ? `${thumbnailInfo.size_mb.toFixed(1)} MB`
-                                : "—"}
+                            {cleaningThumbnails
+                              ? "—"
+                              : thumbnailCleanupResult
+                                ? "0 MB"
+                                : thumbnailInfo
+                                  ? `${thumbnailInfo.size_mb.toFixed(1)} MB`
+                                  : "—"}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center justify-between gap-4 rounded-xl border border-white/[0.07] bg-black/20 p-4">
                         <p className="text-sm text-gray-400">
-                          {thumbnailCleanupResult
-                            ? `Removed ${thumbnailCleanupResult.deleted_count.toLocaleString()} orphaned thumbnail${thumbnailCleanupResult.deleted_count === 1 ? "" : "s"}.`
-                            : thumbnailInfo && thumbnailInfo.count === 0
-                              ? "No orphaned thumbnails found."
-                              : "Remove thumbnails no longer associated with any indexed image."}
+                          {cleaningThumbnails
+                            ? "Scanning and removing orphaned thumbnails…"
+                            : thumbnailCleanupResult
+                              ? `Removed ${thumbnailCleanupResult.deleted_count.toLocaleString()} file${thumbnailCleanupResult.deleted_count === 1 ? "" : "s"}, freed ${thumbnailCleanupResult.freed_mb.toFixed(1)} MB.`
+                              : thumbnailInfo && thumbnailInfo.count === 0
+                                ? "No orphaned thumbnails found."
+                                : thumbnailInfo && thumbnailInfo.count > 1000
+                                  ? "Remove thumbnails no longer associated with any indexed image. This may take a few minutes for large collections."
+                                  : "Remove thumbnails no longer associated with any indexed image."}
                         </p>
                         <button
                           className="shrink-0 rounded-lg bg-white/[0.07] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/[0.11] disabled:cursor-not-allowed disabled:opacity-40"
@@ -706,7 +714,7 @@ export function SettingsModal() {
                           }}
                           disabled={cleaningThumbnails || thumbnailCleanupResult !== null || (thumbnailInfo !== null && thumbnailInfo.count === 0)}
                         >
-                          {cleaningThumbnails ? "Cleaning..." : "Clean up"}
+                          {cleaningThumbnails ? "Cleaning…" : "Clean up"}
                         </button>
                       </div>
                     </div>
