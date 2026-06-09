@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { TaggerAcceleration, TaggingQueueScope, useGalleryStore } from "../store";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, TaggerAcceleration, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
 
-type SettingsSection = "workspace" | "workers";
+type SettingsSection = "workspace" | "general";
 
 const SECTIONS: { id: SettingsSection; label: string; detail: string }[] = [
   { id: "workspace", label: "AI Workspace", detail: "Tagging models and queue targets" },
-  { id: "workers", label: "Workers", detail: "Queue activity and background processing" },
+  { id: "general", label: "General", detail: "App data and diagnostics" },
 ];
 
 function StatusPill({ children, tone }: { children: React.ReactNode; tone: "ready" | "muted" | "busy" }) {
@@ -109,19 +109,35 @@ export function SettingsModal() {
   const [taggerQueueing, setTaggerQueueing] = useState(false);
   const [taggerClearing, setTaggerClearing] = useState(false);
   const [taggerAccelerationSaving, setTaggerAccelerationSaving] = useState(false);
+  const [taggerAccelerationError, setTaggerAccelerationError] = useState<string | null>(null);
   const [taggerThresholdDraft, setTaggerThresholdDraft] = useState<string | null>(null);
   const [taggerThresholdSaving, setTaggerThresholdSaving] = useState(false);
+  const [taggerThresholdError, setTaggerThresholdError] = useState<string | null>(null);
   const [taggerBatchSizeDraft, setTaggerBatchSizeDraft] = useState<string | null>(null);
   const [taggerBatchSizeSaving, setTaggerBatchSizeSaving] = useState(false);
+  const [taggerBatchSizeError, setTaggerBatchSizeError] = useState<string | null>(null);
+  const [openingDataFolder, setOpeningDataFolder] = useState(false);
+  const [dbInfo, setDbInfo] = useState<DatabaseInfo | null>(null);
+  const [vacuuming, setVacuuming] = useState(false);
+  const [vacuumResult, setVacuumResult] = useState<VacuumResult | null>(null);
+  const [thumbnailInfo, setThumbnailInfo] = useState<OrphanedThumbnailsInfo | null>(null);
+  const [cleaningThumbnails, setCleaningThumbnails] = useState(false);
+  const [thumbnailCleanupResult, setThumbnailCleanupResult] = useState<CleanupOrphanedThumbnailsResult | null>(null);
+
+  const thresholdErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const batchSizeErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const settingsOpen = useGalleryStore((state) => state.settingsOpen);
   const setSettingsOpen = useGalleryStore((state) => state.setSettingsOpen);
   const folders = useGalleryStore((state) => state.folders);
   const mediaJobProgress = useGalleryStore((state) => state.mediaJobProgress);
   const taggingQueueScope = useGalleryStore((state) => state.taggingQueueScope);
   const taggingQueueFolderIds = useGalleryStore((state) => state.taggingQueueFolderIds);
+  const loadTaggingQueueScope = useGalleryStore((state) => state.loadTaggingQueueScope);
   const setTaggingQueueScope = useGalleryStore((state) => state.setTaggingQueueScope);
   const toggleTaggingQueueFolder = useGalleryStore((state) => state.toggleTaggingQueueFolder);
   const setTaggingQueueFolderIds = useGalleryStore((state) => state.setTaggingQueueFolderIds);
+  const loadTaggingQueueFolderIds = useGalleryStore((state) => state.loadTaggingQueueFolderIds);
   const taggerModelStatus = useGalleryStore((state) => state.taggerModelStatus);
   const taggerModelPreparing = useGalleryStore((state) => state.taggerModelPreparing);
   const taggerModelProgress = useGalleryStore((state) => state.taggerModelProgress);
@@ -145,6 +161,11 @@ export function SettingsModal() {
   const queueTaggingJobsForFolders = useGalleryStore((state) => state.queueTaggingJobsForFolders);
   const clearTaggingJobs = useGalleryStore((state) => state.clearTaggingJobs);
   const clearTaggingJobsForFolders = useGalleryStore((state) => state.clearTaggingJobsForFolders);
+  const openAppDataFolder = useGalleryStore((state) => state.openAppDataFolder);
+  const getDatabaseInfo = useGalleryStore((state) => state.getDatabaseInfo);
+  const vacuumDatabase = useGalleryStore((state) => state.vacuumDatabase);
+  const getOrphanedThumbnailsInfo = useGalleryStore((state) => state.getOrphanedThumbnailsInfo);
+  const cleanupOrphanedThumbnails = useGalleryStore((state) => state.cleanupOrphanedThumbnails);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -152,22 +173,35 @@ export function SettingsModal() {
     void loadTaggerAcceleration();
     void loadTaggerThreshold();
     void loadTaggerBatchSize();
+    void loadTaggingQueueScope();
+    void loadTaggingQueueFolderIds();
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setSettingsOpen(false);
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [settingsOpen, loadTaggerModelStatus, loadTaggerAcceleration, loadTaggerThreshold, loadTaggerBatchSize, setSettingsOpen]);
+  }, [settingsOpen, loadTaggerModelStatus, loadTaggerAcceleration, loadTaggerThreshold, loadTaggerBatchSize, loadTaggingQueueScope, loadTaggingQueueFolderIds, setSettingsOpen]);
+
+  useEffect(() => {
+    if (!settingsOpen || activeSection !== "general") return;
+    setVacuumResult(null);
+    setThumbnailCleanupResult(null);
+    void getDatabaseInfo().then(setDbInfo).catch(() => {});
+    void getOrphanedThumbnailsInfo().then(setThumbnailInfo).catch(() => {});
+  }, [settingsOpen, activeSection, getDatabaseInfo, getOrphanedThumbnailsInfo]);
+
+  // Clean up error timers on unmount
+  useEffect(() => {
+    return () => {
+      if (thresholdErrorTimerRef.current) clearTimeout(thresholdErrorTimerRef.current);
+      if (batchSizeErrorTimerRef.current) clearTimeout(batchSizeErrorTimerRef.current);
+    };
+  }, []);
 
   const selectedFolders = useMemo(
     () => folders.filter((folder) => taggingQueueFolderIds.includes(folder.id)),
     [folders, taggingQueueFolderIds],
-  );
-
-  const totalQueuedJobs = useMemo(
-    () => Object.values(mediaJobProgress).reduce((sum, progress) => sum + (progress?.tagging_pending ?? 0), 0),
-    [mediaJobProgress],
   );
 
   if (!settingsOpen) return null;
@@ -268,8 +302,8 @@ export function SettingsModal() {
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/[0.07] px-6">
             <div>
-              <p className="text-sm font-medium text-white">{activeSection === "workspace" ? "AI Workspace" : "Workers"}</p>
-              <p className="text-xs text-gray-600">{activeSection === "workspace" ? "Model setup and queue targets" : "Background processing status"}</p>
+              <p className="text-sm font-medium text-white">{activeSection === "workspace" ? "AI Workspace" : "General"}</p>
+              <p className="text-xs text-gray-600">{activeSection === "workspace" ? "Model setup and queue targets" : "App data and diagnostics"}</p>
             </div>
             <button
               className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
@@ -344,8 +378,9 @@ export function SettingsModal() {
                                   current={taggerAcceleration}
                                   onSelect={(nextAcceleration) => {
                                     setTaggerAccelerationSaving(true);
+                                    setTaggerAccelerationError(null);
                                     void setTaggerAcceleration(nextAcceleration)
-                                      .catch((error) => setTaggerQueueStatus(String(error)))
+                                      .catch((error: unknown) => setTaggerAccelerationError(String(error)))
                                       .finally(() => setTaggerAccelerationSaving(false));
                                   }}
                                 >
@@ -353,7 +388,11 @@ export function SettingsModal() {
                                 </TaggerAccelerationButton>
                               ))}
                             </div>
-                            <p className="text-[11px] text-gray-600">{taggerAccelerationSaving ? "Saving..." : `Current: ${taggerAcceleration}`}</p>
+                            {taggerAccelerationError ? (
+                              <p className="text-[11px] text-amber-300">{taggerAccelerationError}</p>
+                            ) : (
+                              <p className="text-[11px] text-gray-600">{taggerAccelerationSaving ? "Saving..." : `Current: ${taggerAcceleration}`}</p>
+                            )}
                           </div>
                         </SettingsRow>
 
@@ -370,19 +409,27 @@ export function SettingsModal() {
                               onBlur={() => {
                                 const value = parseFloat(thresholdDisplay);
                                 if (!isNaN(value) && value >= 0.05 && value <= 0.99) {
+                                  setTaggerThresholdError(null);
                                   setTaggerThresholdSaving(true);
                                   void setTaggerThreshold(value)
-                                    .catch((error) => setTaggerQueueStatus(String(error)))
+                                    .catch((error: unknown) => setTaggerThresholdError(String(error)))
                                     .finally(() => {
                                       setTaggerThresholdDraft(null);
                                       setTaggerThresholdSaving(false);
                                     });
                                 } else {
                                   setTaggerThresholdDraft(null);
+                                  setTaggerThresholdError("Must be 0.05 – 0.99");
+                                  if (thresholdErrorTimerRef.current) clearTimeout(thresholdErrorTimerRef.current);
+                                  thresholdErrorTimerRef.current = setTimeout(() => setTaggerThresholdError(null), 2000);
                                 }
                               }}
                             />
-                            <p className="text-[11px] text-gray-600">{taggerThresholdSaving ? "Saving..." : "Default: 0.35"}</p>
+                            {taggerThresholdError ? (
+                              <p className="text-[11px] text-amber-300">{taggerThresholdError}</p>
+                            ) : (
+                              <p className="text-[11px] text-gray-600">{taggerThresholdSaving ? "Saving..." : "Default: 0.35"}</p>
+                            )}
                           </div>
                         </SettingsRow>
 
@@ -399,6 +446,7 @@ export function SettingsModal() {
                               onBlur={() => {
                                 const value = parseInt(batchSizeDisplay, 10);
                                 if (!isNaN(value) && value >= 1 && value <= 100) {
+                                  setTaggerBatchSizeError(null);
                                   setTaggerBatchSizeSaving(true);
                                   void setTaggerBatchSize(value)
                                     .catch((error: unknown) => setTaggerQueueStatus(String(error)))
@@ -408,10 +456,17 @@ export function SettingsModal() {
                                     });
                                 } else {
                                   setTaggerBatchSizeDraft(null);
+                                  setTaggerBatchSizeError("Must be 1 – 100");
+                                  if (batchSizeErrorTimerRef.current) clearTimeout(batchSizeErrorTimerRef.current);
+                                  batchSizeErrorTimerRef.current = setTimeout(() => setTaggerBatchSizeError(null), 2000);
                                 }
                               }}
                             />
-                            <p className="text-[11px] text-gray-600">{taggerBatchSizeSaving ? "Saving..." : "Default: 8"}</p>
+                            {taggerBatchSizeError ? (
+                              <p className="text-[11px] text-amber-300">{taggerBatchSizeError}</p>
+                            ) : (
+                              <p className="text-[11px] text-gray-600">{taggerBatchSizeSaving ? "Saving..." : "Default: 8"}</p>
+                            )}
                           </div>
                         </SettingsRow>
 
@@ -453,16 +508,16 @@ export function SettingsModal() {
                         </div>
                         <div className="flex gap-2">
                           <button
-                            className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40"
+                            className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
                             onClick={() => setTaggingQueueFolderIds(folders.map((folder) => folder.id))}
-                            disabled={folders.length === 0}
+                            disabled={taggingQueueScope === "all" || folders.length === 0}
                           >
                             Select all
                           </button>
                           <button
-                            className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40"
+                            className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
                             onClick={() => setTaggingQueueFolderIds([])}
-                            disabled={taggingQueueFolderIds.length === 0}
+                            disabled={taggingQueueScope === "all" || taggingQueueFolderIds.length === 0}
                           >
                             Clear
                           </button>
@@ -477,12 +532,13 @@ export function SettingsModal() {
                             <button
                               key={folder.id}
                               type="button"
-                              className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left transition-colors ${
+                              className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed ${
                                 active
                                   ? "border-emerald-400/30 bg-emerald-500/10 text-white"
                                   : "border-white/[0.07] bg-black/20 text-gray-300 hover:border-white/15 hover:bg-white/[0.04]"
                               }`}
                               onClick={() => toggleTaggingQueueFolder(folder.id)}
+                              disabled={taggingQueueScope === "all"}
                             >
                               <div>
                                 <p className="text-sm font-medium">{folder.name}</p>
@@ -520,41 +576,139 @@ export function SettingsModal() {
 
                     {taggerQueueStatus ? <p className="pt-4 text-xs text-gray-500">{taggerQueueStatus}</p> : null}
                   </SettingsCard>
-
-                  <SettingsCard title="Captioning">
-                    <div className="rounded-xl border border-dashed border-white/[0.09] bg-black/20 px-4 py-4">
-                      <p className="text-sm font-medium text-white/50">Coming soon</p>
-                    </div>
-                  </SettingsCard>
                 </SectionShell>
               </div>
             ) : (
               <div className="space-y-8">
                 <SectionShell
-                  eyebrow="Workers"
-                  title="Background processing"
+                  eyebrow="General"
+                  title="App data"
+                  description="Access the folder where Phokus stores its database, thumbnails, AI models, and settings."
                 >
-                  <SettingsCard title="Queue summary" description="Live totals across all folder workers.">
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Tagging queued</p>
-                        <p className="mt-2 text-2xl font-semibold text-white">{totalQueuedJobs.toLocaleString()}</p>
+                  <SettingsCard title="Storage location">
+                    <div className="flex items-center justify-between gap-4 rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                      <p className="text-sm text-gray-400">Open the app data folder in Explorer to inspect or back up files.</p>
+                      <button
+                        className="shrink-0 rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                        onClick={() => {
+                          setOpeningDataFolder(true);
+                          void openAppDataFolder().finally(() => setOpeningDataFolder(false));
+                        }}
+                        disabled={openingDataFolder}
+                      >
+                        {openingDataFolder ? "Opening..." : "Open data folder"}
+                      </button>
+                    </div>
+                  </SettingsCard>
+
+                  <SettingsCard
+                    title="Compact database"
+                    description="Reclaims wasted space left behind when images or tags are deleted. Safe to run at any time."
+                  >
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Database size</p>
+                          <p className="mt-2 text-2xl font-semibold text-white">
+                            {vacuumResult
+                              ? `${vacuumResult.after_mb.toFixed(1)} MB`
+                              : dbInfo
+                                ? `${dbInfo.size_mb.toFixed(1)} MB`
+                                : "—"}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Reclaimable</p>
+                          <p className={`mt-2 text-2xl font-semibold ${vacuumResult ? "text-emerald-300" : "text-white"}`}>
+                            {vacuumResult
+                              ? `−${vacuumResult.freed_mb.toFixed(1)} MB freed`
+                              : dbInfo
+                                ? `${dbInfo.reclaimable_mb.toFixed(1)} MB`
+                                : "—"}
+                          </p>
+                        </div>
                       </div>
-                      <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Selected folders</p>
-                        <p className="mt-2 text-2xl font-semibold text-white">{selectedFolders.length.toLocaleString()}</p>
-                      </div>
-                      <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Library folders</p>
-                        <p className="mt-2 text-2xl font-semibold text-white">{folders.length.toLocaleString()}</p>
+                      <div className="flex items-center justify-between gap-4 rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                        <p className="text-sm text-gray-400">
+                          {vacuumResult
+                            ? `Compacted from ${vacuumResult.before_mb.toFixed(1)} MB to ${vacuumResult.after_mb.toFixed(1)} MB.`
+                            : dbInfo && dbInfo.reclaimable_mb < 0.5
+                              ? "Database is already compact."
+                              : "Run this after removing folders or bulk-deleting images."}
+                        </p>
+                        <button
+                          className="shrink-0 rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                          onClick={() => {
+                            setVacuuming(true);
+                            setVacuumResult(null);
+                            void vacuumDatabase()
+                              .then((result) => {
+                                setVacuumResult(result);
+                                setDbInfo({ size_mb: result.after_mb, reclaimable_mb: 0 });
+                              })
+                              .catch(() => {})
+                              .finally(() => setVacuuming(false));
+                          }}
+                          disabled={vacuuming || (dbInfo !== null && dbInfo.reclaimable_mb < 0.5 && vacuumResult === null)}
+                        >
+                          {vacuuming ? "Compacting..." : "Compact now"}
+                        </button>
                       </div>
                     </div>
                   </SettingsCard>
 
-                  <SettingsCard title="Worker controls" description="Pause, resume, retry, and per-folder failure details are available in the background tasks panel.">
-                    <div className="flex items-center justify-between gap-4 rounded-xl border border-white/[0.07] bg-black/20 p-4">
-                      <p className="text-sm text-gray-400">Workers are running in the background.</p>
-                      <StatusPill tone="ready">Live</StatusPill>
+                  <SettingsCard
+                    title="Thumbnail cache"
+                    description="Thumbnails left behind when folders or images are removed. Safe to delete — they will be regenerated if the original files are re-indexed."
+                  >
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Orphaned files</p>
+                          <p className="mt-2 text-2xl font-semibold text-white">
+                            {thumbnailCleanupResult
+                              ? thumbnailCleanupResult.deleted_count.toLocaleString()
+                              : thumbnailInfo
+                                ? thumbnailInfo.count.toLocaleString()
+                                : "—"}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Reclaimable</p>
+                          <p className={`mt-2 text-2xl font-semibold ${thumbnailCleanupResult ? "text-emerald-300" : "text-white"}`}>
+                            {thumbnailCleanupResult
+                              ? `−${thumbnailCleanupResult.freed_mb.toFixed(1)} MB freed`
+                              : thumbnailInfo
+                                ? `${thumbnailInfo.size_mb.toFixed(1)} MB`
+                                : "—"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-4 rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                        <p className="text-sm text-gray-400">
+                          {thumbnailCleanupResult
+                            ? `Removed ${thumbnailCleanupResult.deleted_count.toLocaleString()} orphaned thumbnail${thumbnailCleanupResult.deleted_count === 1 ? "" : "s"}.`
+                            : thumbnailInfo && thumbnailInfo.count === 0
+                              ? "No orphaned thumbnails found."
+                              : "Remove thumbnails no longer associated with any indexed image."}
+                        </p>
+                        <button
+                          className="shrink-0 rounded-lg bg-white/[0.07] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/[0.11] disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() => {
+                            setCleaningThumbnails(true);
+                            cleanupOrphanedThumbnails()
+                              .then((result) => {
+                                setThumbnailCleanupResult(result);
+                                setThumbnailInfo(null);
+                              })
+                              .catch(() => {})
+                              .finally(() => setCleaningThumbnails(false));
+                          }}
+                          disabled={cleaningThumbnails || thumbnailCleanupResult !== null || (thumbnailInfo !== null && thumbnailInfo.count === 0)}
+                        >
+                          {cleaningThumbnails ? "Cleaning..." : "Clean up"}
+                        </button>
+                      </div>
                     </div>
                   </SettingsCard>
                 </SectionShell>

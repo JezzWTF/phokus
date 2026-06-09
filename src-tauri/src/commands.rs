@@ -1614,3 +1614,233 @@ pub async fn remove_tag(db: State<'_, DbState>, params: RemoveTagParams) -> Resu
     let conn = db.get().map_err(|e| e.to_string())?;
     db::remove_tag(&conn, params.tag_id).map_err(|e| e.to_string())
 }
+
+// ---------------------------------------------------------------------------
+// Queue scope / folder-id persistence
+// ---------------------------------------------------------------------------
+
+const TAGGING_QUEUE_SCOPE_FILE: &str = "settings/tagging_queue_scope.txt";
+const TAGGING_QUEUE_FOLDER_IDS_FILE: &str = "settings/tagging_queue_folder_ids.txt";
+
+#[derive(Deserialize)]
+pub struct SetTaggingQueueScopeParams {
+    pub scope: String,
+}
+
+#[derive(Deserialize)]
+pub struct SetTaggingQueueFolderIdsParams {
+    pub folder_ids: Vec<i64>,
+}
+
+#[tauri::command]
+pub async fn get_tagging_queue_scope(app: AppHandle) -> Result<String, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(TAGGING_QUEUE_SCOPE_FILE);
+    let value = std::fs::read_to_string(path).unwrap_or_default();
+    Ok(if value.trim() == "selected" { "selected".to_string() } else { "all".to_string() })
+}
+
+#[tauri::command]
+pub async fn set_tagging_queue_scope(
+    app: AppHandle,
+    params: SetTaggingQueueScopeParams,
+) -> Result<String, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(TAGGING_QUEUE_SCOPE_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let value = if params.scope == "selected" { "selected" } else { "all" };
+    std::fs::write(path, value).map_err(|e| e.to_string())?;
+    Ok(value.to_string())
+}
+
+#[tauri::command]
+pub async fn get_tagging_queue_folder_ids(app: AppHandle) -> Result<Vec<i64>, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(TAGGING_QUEUE_FOLDER_IDS_FILE);
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Ok(vec![]);
+    };
+    let ids = content
+        .split(',')
+        .filter_map(|s| s.trim().parse::<i64>().ok())
+        .collect();
+    Ok(ids)
+}
+
+#[tauri::command]
+pub async fn set_tagging_queue_folder_ids(
+    app: AppHandle,
+    params: SetTaggingQueueFolderIdsParams,
+) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(TAGGING_QUEUE_FOLDER_IDS_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content: Vec<String> = params.folder_ids.iter().map(|id| id.to_string()).collect();
+    std::fs::write(path, content.join(",")).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// App data folder
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn open_app_data_folder(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(app_dir.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Database maintenance
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct DatabaseInfo {
+    pub size_mb: f64,
+    pub reclaimable_mb: f64,
+}
+
+#[derive(Serialize)]
+pub struct VacuumResult {
+    pub before_mb: f64,
+    pub after_mb: f64,
+    pub freed_mb: f64,
+}
+
+#[tauri::command]
+pub async fn get_database_info(app: AppHandle, db: State<'_, DbState>) -> Result<DatabaseInfo, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db_path = app_dir.join("gallery.db");
+    let size_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    let freelist_count: i64 = conn.query_row("PRAGMA freelist_count", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+
+    Ok(DatabaseInfo {
+        size_mb: size_bytes as f64 / 1_048_576.0,
+        reclaimable_mb: (freelist_count * page_size) as f64 / 1_048_576.0,
+    })
+}
+
+#[tauri::command]
+pub async fn vacuum_database(app: AppHandle, db: State<'_, DbState>) -> Result<VacuumResult, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db_path = app_dir.join("gallery.db");
+    let before_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA wal_checkpoint(FULL); VACUUM;").map_err(|e| e.to_string())?;
+    drop(conn);
+
+    let after_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+    Ok(VacuumResult {
+        before_mb: before_bytes as f64 / 1_048_576.0,
+        after_mb: after_bytes as f64 / 1_048_576.0,
+        freed_mb: before_bytes.saturating_sub(after_bytes) as f64 / 1_048_576.0,
+    })
+}
+
+#[derive(serde::Serialize)]
+pub struct OrphanedThumbnailsInfo {
+    pub count: u64,
+    pub size_mb: f64,
+}
+
+#[derive(serde::Serialize)]
+pub struct CleanupOrphanedThumbnailsResult {
+    pub deleted_count: u64,
+    pub freed_mb: f64,
+}
+
+fn collect_db_thumbnail_filenames(conn: &rusqlite::Connection) -> Result<std::collections::HashSet<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT thumbnail_path FROM images WHERE thumbnail_path IS NOT NULL")
+        .map_err(|e| e.to_string())?;
+    let set = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .filter_map(|p| {
+            std::path::Path::new(&p)
+                .file_name()
+                .and_then(|f| f.to_str())
+                .map(|s| s.to_owned())
+        })
+        .collect();
+    Ok(set)
+}
+
+#[tauri::command]
+pub async fn get_orphaned_thumbnails_info(
+    app: AppHandle,
+    db: State<'_, DbState>,
+) -> Result<OrphanedThumbnailsInfo, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let thumb_dir = app_dir.join("thumbnails");
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let db_filenames = collect_db_thumbnail_filenames(&conn)?;
+    drop(conn);
+
+    let mut count = 0u64;
+    let mut size_bytes = 0u64;
+
+    if thumb_dir.exists() {
+        for entry in std::fs::read_dir(&thumb_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let fname = entry.file_name();
+            if !db_filenames.contains(fname.to_string_lossy().as_ref()) {
+                size_bytes += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                count += 1;
+            }
+        }
+    }
+
+    Ok(OrphanedThumbnailsInfo {
+        count,
+        size_mb: size_bytes as f64 / 1_048_576.0,
+    })
+}
+
+#[tauri::command]
+pub async fn cleanup_orphaned_thumbnails(
+    app: AppHandle,
+    db: State<'_, DbState>,
+) -> Result<CleanupOrphanedThumbnailsResult, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let thumb_dir = app_dir.join("thumbnails");
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let db_filenames = collect_db_thumbnail_filenames(&conn)?;
+    drop(conn);
+
+    let mut deleted_count = 0u64;
+    let mut freed_bytes = 0u64;
+
+    if thumb_dir.exists() {
+        for entry in std::fs::read_dir(&thumb_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let fname = entry.file_name();
+            if !db_filenames.contains(fname.to_string_lossy().as_ref()) {
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                if std::fs::remove_file(entry.path()).is_ok() {
+                    deleted_count += 1;
+                    freed_bytes += size;
+                }
+            }
+        }
+    }
+
+    Ok(CleanupOrphanedThumbnailsResult {
+        deleted_count,
+        freed_mb: freed_bytes as f64 / 1_048_576.0,
+    })
+}
