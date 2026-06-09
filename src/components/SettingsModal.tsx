@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DatabaseInfo, TaggerAcceleration, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
+import { CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, TaggerAcceleration, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
 
 type SettingsSection = "workspace" | "general";
 
@@ -120,6 +120,9 @@ export function SettingsModal() {
   const [dbInfo, setDbInfo] = useState<DatabaseInfo | null>(null);
   const [vacuuming, setVacuuming] = useState(false);
   const [vacuumResult, setVacuumResult] = useState<VacuumResult | null>(null);
+  const [thumbnailInfo, setThumbnailInfo] = useState<OrphanedThumbnailsInfo | null>(null);
+  const [cleaningThumbnails, setCleaningThumbnails] = useState(false);
+  const [thumbnailCleanupResult, setThumbnailCleanupResult] = useState<CleanupOrphanedThumbnailsResult | null>(null);
 
   const thresholdErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const batchSizeErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -161,6 +164,8 @@ export function SettingsModal() {
   const openAppDataFolder = useGalleryStore((state) => state.openAppDataFolder);
   const getDatabaseInfo = useGalleryStore((state) => state.getDatabaseInfo);
   const vacuumDatabase = useGalleryStore((state) => state.vacuumDatabase);
+  const getOrphanedThumbnailsInfo = useGalleryStore((state) => state.getOrphanedThumbnailsInfo);
+  const cleanupOrphanedThumbnails = useGalleryStore((state) => state.cleanupOrphanedThumbnails);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -181,8 +186,10 @@ export function SettingsModal() {
   useEffect(() => {
     if (!settingsOpen || activeSection !== "general") return;
     setVacuumResult(null);
+    setThumbnailCleanupResult(null);
     void getDatabaseInfo().then(setDbInfo).catch(() => {});
-  }, [settingsOpen, activeSection, getDatabaseInfo]);
+    void getOrphanedThumbnailsInfo().then(setThumbnailInfo).catch(() => {});
+  }, [settingsOpen, activeSection, getDatabaseInfo, getOrphanedThumbnailsInfo]);
 
   // Clean up error timers on unmount
   useEffect(() => {
@@ -645,6 +652,61 @@ export function SettingsModal() {
                           disabled={vacuuming || (dbInfo !== null && dbInfo.reclaimable_mb < 0.5 && vacuumResult === null)}
                         >
                           {vacuuming ? "Compacting..." : "Compact now"}
+                        </button>
+                      </div>
+                    </div>
+                  </SettingsCard>
+
+                  <SettingsCard
+                    title="Thumbnail cache"
+                    description="Thumbnails left behind when folders or images are removed. Safe to delete — they will be regenerated if the original files are re-indexed."
+                  >
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Orphaned files</p>
+                          <p className="mt-2 text-2xl font-semibold text-white">
+                            {thumbnailCleanupResult
+                              ? thumbnailCleanupResult.deleted_count.toLocaleString()
+                              : thumbnailInfo
+                                ? thumbnailInfo.count.toLocaleString()
+                                : "—"}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">Reclaimable</p>
+                          <p className={`mt-2 text-2xl font-semibold ${thumbnailCleanupResult ? "text-emerald-300" : "text-white"}`}>
+                            {thumbnailCleanupResult
+                              ? `−${thumbnailCleanupResult.freed_mb.toFixed(1)} MB freed`
+                              : thumbnailInfo
+                                ? `${thumbnailInfo.size_mb.toFixed(1)} MB`
+                                : "—"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-4 rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                        <p className="text-sm text-gray-400">
+                          {thumbnailCleanupResult
+                            ? `Removed ${thumbnailCleanupResult.deleted_count.toLocaleString()} orphaned thumbnail${thumbnailCleanupResult.deleted_count === 1 ? "" : "s"}.`
+                            : thumbnailInfo && thumbnailInfo.count === 0
+                              ? "No orphaned thumbnails found."
+                              : "Remove thumbnails no longer associated with any indexed image."}
+                        </p>
+                        <button
+                          className="shrink-0 rounded-lg bg-white/[0.07] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/[0.11] disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() => {
+                            setCleaningThumbnails(true);
+                            cleanupOrphanedThumbnails()
+                              .then((result) => {
+                                setThumbnailCleanupResult(result);
+                                setThumbnailInfo(null);
+                              })
+                              .catch(() => {})
+                              .finally(() => setCleaningThumbnails(false));
+                          }}
+                          disabled={cleaningThumbnails || thumbnailCleanupResult !== null || (thumbnailInfo !== null && thumbnailInfo.count === 0)}
+                        >
+                          {cleaningThumbnails ? "Cleaning..." : "Clean up"}
                         </button>
                       </div>
                     </div>

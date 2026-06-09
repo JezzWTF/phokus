@@ -1747,3 +1747,100 @@ pub async fn vacuum_database(app: AppHandle, db: State<'_, DbState>) -> Result<V
         freed_mb: before_bytes.saturating_sub(after_bytes) as f64 / 1_048_576.0,
     })
 }
+
+#[derive(serde::Serialize)]
+pub struct OrphanedThumbnailsInfo {
+    pub count: u64,
+    pub size_mb: f64,
+}
+
+#[derive(serde::Serialize)]
+pub struct CleanupOrphanedThumbnailsResult {
+    pub deleted_count: u64,
+    pub freed_mb: f64,
+}
+
+fn collect_db_thumbnail_filenames(conn: &rusqlite::Connection) -> Result<std::collections::HashSet<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT thumbnail_path FROM images WHERE thumbnail_path IS NOT NULL")
+        .map_err(|e| e.to_string())?;
+    let set = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .filter_map(|p| {
+            std::path::Path::new(&p)
+                .file_name()
+                .and_then(|f| f.to_str())
+                .map(|s| s.to_owned())
+        })
+        .collect();
+    Ok(set)
+}
+
+#[tauri::command]
+pub async fn get_orphaned_thumbnails_info(
+    app: AppHandle,
+    db: State<'_, DbState>,
+) -> Result<OrphanedThumbnailsInfo, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let thumb_dir = app_dir.join("thumbnails");
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let db_filenames = collect_db_thumbnail_filenames(&conn)?;
+    drop(conn);
+
+    let mut count = 0u64;
+    let mut size_bytes = 0u64;
+
+    if thumb_dir.exists() {
+        for entry in std::fs::read_dir(&thumb_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let fname = entry.file_name();
+            if !db_filenames.contains(fname.to_string_lossy().as_ref()) {
+                size_bytes += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                count += 1;
+            }
+        }
+    }
+
+    Ok(OrphanedThumbnailsInfo {
+        count,
+        size_mb: size_bytes as f64 / 1_048_576.0,
+    })
+}
+
+#[tauri::command]
+pub async fn cleanup_orphaned_thumbnails(
+    app: AppHandle,
+    db: State<'_, DbState>,
+) -> Result<CleanupOrphanedThumbnailsResult, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let thumb_dir = app_dir.join("thumbnails");
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let db_filenames = collect_db_thumbnail_filenames(&conn)?;
+    drop(conn);
+
+    let mut deleted_count = 0u64;
+    let mut freed_bytes = 0u64;
+
+    if thumb_dir.exists() {
+        for entry in std::fs::read_dir(&thumb_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let fname = entry.file_name();
+            if !db_filenames.contains(fname.to_string_lossy().as_ref()) {
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                if std::fs::remove_file(entry.path()).is_ok() {
+                    deleted_count += 1;
+                    freed_bytes += size;
+                }
+            }
+        }
+    }
+
+    Ok(CleanupOrphanedThumbnailsResult {
+        deleted_count,
+        freed_mb: freed_bytes as f64 / 1_048_576.0,
+    })
+}

@@ -82,6 +82,16 @@ export interface VacuumResult {
   freed_mb: number;
 }
 
+export interface OrphanedThumbnailsInfo {
+  count: number;
+  size_mb: number;
+}
+
+export interface CleanupOrphanedThumbnailsResult {
+  deleted_count: number;
+  freed_mb: number;
+}
+
 export interface TaggerModelStatus {
   model_id: string;
   model_name: string;
@@ -353,6 +363,8 @@ interface GalleryState {
   openAppDataFolder: () => Promise<void>;
   getDatabaseInfo: () => Promise<DatabaseInfo>;
   vacuumDatabase: () => Promise<VacuumResult>;
+  getOrphanedThumbnailsInfo: () => Promise<OrphanedThumbnailsInfo>;
+  cleanupOrphanedThumbnails: () => Promise<CleanupOrphanedThumbnailsResult>;
   retryFailedEmbeddings: (folderId: number) => Promise<void>;
   updateImageDetails: (imageId: number, updates: { favorite?: boolean; rating?: number }) => Promise<void>;
   setCacheDir: (dir: string) => void;
@@ -1366,6 +1378,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   getDatabaseInfo: () => invoke<DatabaseInfo>("get_database_info"),
 
   vacuumDatabase: () => invoke<VacuumResult>("vacuum_database"),
+
+  getOrphanedThumbnailsInfo: () => invoke<OrphanedThumbnailsInfo>("get_orphaned_thumbnails_info"),
+
+  cleanupOrphanedThumbnails: () => invoke<CleanupOrphanedThumbnailsResult>("cleanup_orphaned_thumbnails"),
 
   loadTaggerModelStatus: async () => {
     try {

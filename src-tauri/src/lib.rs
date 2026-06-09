@@ -146,6 +146,8 @@ pub fn run() {
             commands::open_app_data_folder,
             commands::get_database_info,
             commands::vacuum_database,
+            commands::get_orphaned_thumbnails_info,
+            commands::cleanup_orphaned_thumbnails,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
