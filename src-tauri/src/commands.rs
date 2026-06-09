@@ -264,9 +264,14 @@ pub async fn remove_folder(
         .into_iter()
         .find(|f| f.id == folder_id)
         .map(|f| PathBuf::from(f.path));
+    // Collect thumbnail paths before the cascade delete removes the rows.
+    let thumb_paths = db::get_thumbnail_paths_for_folder(&conn, folder_id).unwrap_or_default();
     db::delete_folder(&conn, folder_id).map_err(|e| e.to_string())?;
     if let Some(path) = folder_path {
         watcher.remove_folder(&path);
+    }
+    for thumb in &thumb_paths {
+        let _ = std::fs::remove_file(thumb);
     }
     Ok(())
 }
@@ -1192,6 +1197,9 @@ pub async fn delete_images_from_disk(
     for r in records.into_iter().filter(|r| id_set.contains(&r.id)) {
         if std::fs::remove_file(&r.path).is_ok() {
             succeeded_ids.push(r.id);
+            if let Some(thumb) = &r.thumbnail_path {
+                let _ = std::fs::remove_file(thumb);
+            }
         }
     }
     if !succeeded_ids.is_empty() {

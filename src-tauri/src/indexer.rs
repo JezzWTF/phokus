@@ -1347,7 +1347,7 @@ impl WatcherHandle {
 /// - `recv()` when no events are pending — zero CPU
 /// - `recv_timeout(earliest_deadline)` when events are pending — wakes exactly
 ///   when the soonest debounce window expires, no busy-polling
-pub fn start_watcher(app: AppHandle, pool: DbPool) -> WatcherHandle {
+pub fn start_watcher(app: AppHandle, pool: DbPool, thumb_dir: PathBuf) -> WatcherHandle {
     let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
 
     let raw_watcher = notify::recommended_watcher(move |result| {
@@ -1392,17 +1392,19 @@ pub fn start_watcher(app: AppHandle, pool: DbPool) -> WatcherHandle {
     std::thread::spawn(move || {
         // path → deadline: the earliest instant at which this path should be processed.
         let mut pending: HashMap<PathBuf, Instant> = HashMap::new();
+        // old_path → new_path for rename events that carry both sides atomically.
+        let mut pending_renames: Vec<(PathBuf, PathBuf)> = Vec::new();
 
         loop {
             // Adaptive blocking: block forever when idle, wake at the earliest
             // deadline when events are queued.
-            let received = if pending.is_empty() {
+            let received = if pending.is_empty() && pending_renames.is_empty() {
                 match rx.recv() {
                     Ok(e) => Some(e),
                     Err(_) => break, // sender dropped — app is shutting down
                 }
             } else {
-                let earliest = pending.values().copied().min().unwrap(); // safe: non-empty
+                let earliest = pending.values().copied().min().unwrap_or(Instant::now());
                 let timeout = earliest.saturating_duration_since(Instant::now());
                 match rx.recv_timeout(timeout) {
                     Ok(e) => Some(e),
@@ -1415,15 +1417,38 @@ pub fn start_watcher(app: AppHandle, pool: DbPool) -> WatcherHandle {
 
             // Absorb incoming event — coalesces rapid writes into one deadline.
             if let Some(Ok(event)) = received {
-                use notify::EventKind;
-                // Skip pure access events (reads); they never change file content.
+                use notify::{EventKind, event::{ModifyKind, RenameMode}};
                 if !matches!(event.kind, EventKind::Access(_)) {
-                    for path in event.paths {
-                        if is_supported_media(&path) {
-                            pending.insert(path, now + WATCHER_DEBOUNCE);
+                    // Intercept atomic rename events (old + new path in one event).
+                    // Handle these separately to preserve embeddings and thumbnails.
+                    if matches!(
+                        event.kind,
+                        EventKind::Modify(ModifyKind::Name(RenameMode::Both))
+                    ) && event.paths.len() == 2
+                    {
+                        let old = event.paths[0].clone();
+                        let new = event.paths[1].clone();
+                        if is_supported_media(&old) || is_supported_media(&new) {
+                            // Remove either side from regular pending so it isn't
+                            // processed as an independent delete/create.
+                            pending.remove(&old);
+                            pending.remove(&new);
+                            pending_renames.push((old, new));
+                        }
+                    } else {
+                        for path in event.paths {
+                            if is_supported_media(&path) {
+                                pending.insert(path, now + WATCHER_DEBOUNCE);
+                            }
                         }
                     }
                 }
+            }
+
+            // Process renames immediately — they are atomic filesystem operations
+            // and do not benefit from debouncing.
+            for (old_path, new_path) in pending_renames.drain(..) {
+                process_watcher_rename(&app, &pool, &folder_map_thread, &thumb_dir, &old_path, &new_path);
             }
 
             // Process all paths whose debounce window has expired.
@@ -1496,11 +1521,14 @@ fn process_watcher_path(
             Err(e) => eprintln!("Watcher: commit error for {:?}: {}", path, e),
         }
     } else {
-        // File removed from disk — clean up DB row.
+        // File removed from disk — clean up DB row and thumbnail.
         let path_str = path.to_string_lossy();
-        match db::get_image_id_by_path(&conn, &path_str) {
-            Ok(Some(image_id)) => {
+        match db::get_image_id_and_thumbnail_by_path(&conn, &path_str) {
+            Ok(Some((image_id, thumb_path))) => {
                 if db::delete_images_by_ids(&conn, &[image_id]).is_ok() {
+                    if let Some(thumb) = thumb_path {
+                        let _ = std::fs::remove_file(thumb);
+                    }
                     db::update_folder_count(&conn, folder_id).ok();
                     let _ = app.emit("watcher-deleted", vec![image_id]);
                     let _ = app.emit("folder-counts-changed", ());
@@ -1509,5 +1537,78 @@ fn process_watcher_path(
             Ok(None) => {} // never indexed or already removed
             Err(e) => eprintln!("Watcher: lookup error for {:?}: {}", path, e),
         }
+    }
+}
+
+/// Handles a filesystem rename/move event where both the old and new paths are
+/// known. Updates the DB row in-place (preserving the embedding) and renames
+/// the thumbnail file to match the new path hash.
+fn process_watcher_rename(
+    app: &AppHandle,
+    pool: &DbPool,
+    folder_map: &Arc<Mutex<HashMap<PathBuf, i64>>>,
+    thumb_dir: &Path,
+    old_path: &Path,
+    new_path: &Path,
+) {
+    // Resolve folder_id from the old path first, fall back to new path.
+    let folder_id = {
+        let map = folder_map.lock().unwrap();
+        map.iter()
+            .find(|(fp, _)| old_path.starts_with(fp.as_path()) || new_path.starts_with(fp.as_path()))
+            .map(|(_, &id)| id)
+    };
+    let Some(folder_id) = folder_id else { return };
+
+    let conn = match pool.get() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Watcher rename: DB pool error: {}", e);
+            return;
+        }
+    };
+
+    let old_path_str = old_path.to_string_lossy();
+    let new_path_str = new_path.to_string_lossy();
+
+    let (image_id, old_thumb) = match db::get_image_id_and_thumbnail_by_path(&conn, &old_path_str) {
+        Ok(Some(record)) => record,
+        Ok(None) => {
+            // Not yet indexed under the old path — treat as a brand-new file.
+            drop(conn);
+            process_watcher_path(app, pool, folder_map, new_path);
+            return;
+        }
+        Err(e) => {
+            eprintln!("Watcher rename: DB lookup error: {}", e);
+            return;
+        }
+    };
+
+    // Compute new thumbnail path and attempt to rename the file on disk.
+    let new_thumb_path = crate::thumbnail::thumb_path(thumb_dir, &new_path_str);
+    let new_thumb_str = new_thumb_path.to_string_lossy().into_owned();
+    let thumb_ok = old_thumb
+        .as_deref()
+        .map(|old| std::fs::rename(old, &new_thumb_path).is_ok())
+        .unwrap_or(false);
+    // If rename failed (e.g. old thumb never existed), clear thumbnail_path so
+    // the thumbnail worker regenerates it.
+    let effective_thumb: Option<&str> = if thumb_ok { Some(&new_thumb_str) } else { None };
+
+    let new_filename = new_path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("");
+
+    if let Err(e) = db::update_image_path(&conn, image_id, &new_path_str, new_filename, effective_thumb) {
+        eprintln!("Watcher rename: DB update error: {}", e);
+        return;
+    }
+
+    // Emit the updated record so the frontend refreshes without a full reload.
+    match db::get_image_by_id(&conn, image_id) {
+        Ok(record) => emit_images(app, &IndexedImagesBatch { folder_id, images: vec![record] }),
+        Err(e) => eprintln!("Watcher rename: post-update fetch error: {}", e),
     }
 }
