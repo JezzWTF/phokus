@@ -162,6 +162,8 @@ export function SettingsModal() {
   const clearTaggingJobs = useGalleryStore((state) => state.clearTaggingJobs);
   const clearTaggingJobsForFolders = useGalleryStore((state) => state.clearTaggingJobsForFolders);
   const openAppDataFolder = useGalleryStore((state) => state.openAppDataFolder);
+  const notificationsPaused = useGalleryStore((state) => state.notificationsPaused);
+  const setNotificationsPaused = useGalleryStore((state) => state.setNotificationsPaused);
   const getDatabaseInfo = useGalleryStore((state) => state.getDatabaseInfo);
   const vacuumDatabase = useGalleryStore((state) => state.vacuumDatabase);
   const getOrphanedThumbnailsInfo = useGalleryStore((state) => state.getOrphanedThumbnailsInfo);
@@ -597,6 +599,26 @@ export function SettingsModal() {
                         disabled={openingDataFolder}
                       >
                         {openingDataFolder ? "Opening..." : "Open data folder"}
+                      </button>
+                    </div>
+                  </SettingsCard>
+
+                  <SettingsCard
+                    title="Notifications"
+                    description="Notifications are batched per folder — a single alert fires once activity settles. Mute individual folders from their right-click menu."
+                  >
+                    <div className="flex items-center justify-between gap-4 rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                      <div>
+                        <p className="text-sm font-medium text-white">Pause all notifications</p>
+                        <p className="mt-0.5 text-xs text-gray-500">Suppress all indexing notifications until re-enabled.</p>
+                      </div>
+                      <button
+                        role="switch"
+                        aria-checked={notificationsPaused}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${notificationsPaused ? "bg-sky-500" : "bg-white/15"}`}
+                        onClick={() => setNotificationsPaused(!notificationsPaused)}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${notificationsPaused ? "translate-x-4" : "translate-x-0"}`} />
                       </button>
                     </div>
                   </SettingsCard>

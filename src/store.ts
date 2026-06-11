@@ -4,6 +4,11 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { notifyTaskComplete } from "./notifications";
 
+// Per-folder debounce timers for batching notifications.
+// Keyed as `${folderId}:embedding` or `${folderId}:tagging`.
+const notificationTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const NOTIFICATION_DEBOUNCE_MS = 6000;
+
 export interface Folder {
   id: number;
   path: string;
@@ -288,6 +293,8 @@ interface GalleryState {
   settingsOpen: boolean;
   taggingQueueScope: TaggingQueueScope;
   taggingQueueFolderIds: number[];
+  mutedFolderIds: number[];
+  notificationsPaused: boolean;
 
   taggerModelStatus: TaggerModelStatus | null;
   taggerModelPreparing: boolean;
@@ -360,6 +367,10 @@ interface GalleryState {
   loadTaggingQueueFolderIds: () => Promise<void>;
   toggleTaggingQueueFolder: (folderId: number) => void;
   setTaggingQueueFolderIds: (folderIds: number[]) => void;
+  loadMutedFolderIds: () => Promise<void>;
+  toggleMutedFolder: (folderId: number) => void;
+  loadNotificationsPaused: () => Promise<void>;
+  setNotificationsPaused: (paused: boolean) => void;
   openAppDataFolder: () => Promise<void>;
   getDatabaseInfo: () => Promise<DatabaseInfo>;
   vacuumDatabase: () => Promise<VacuumResult>;
@@ -635,6 +646,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   settingsOpen: false,
   taggingQueueScope: "all",
   taggingQueueFolderIds: [],
+  mutedFolderIds: [],
+  notificationsPaused: false,
 
   taggerModelStatus: null,
   taggerModelPreparing: false,
@@ -1371,6 +1384,39 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     void invoke("set_tagging_queue_folder_ids", { folder_ids: taggingQueueFolderIds }).catch(() => {});
   },
 
+  loadMutedFolderIds: async () => {
+    try {
+      const folderIds = await invoke<number[]>("get_muted_folder_ids");
+      set({ mutedFolderIds: folderIds });
+    } catch {
+      // fall back to in-memory default
+    }
+  },
+
+  toggleMutedFolder: (folderId) => {
+    set((state) => {
+      const next = state.mutedFolderIds.includes(folderId)
+        ? state.mutedFolderIds.filter((id) => id !== folderId)
+        : [...state.mutedFolderIds, folderId];
+      void invoke("set_muted_folder_ids", { folder_ids: next }).catch(() => {});
+      return { mutedFolderIds: next };
+    });
+  },
+
+  loadNotificationsPaused: async () => {
+    try {
+      const paused = await invoke<boolean>("get_notifications_paused");
+      set({ notificationsPaused: paused });
+    } catch {
+      // fall back to in-memory default
+    }
+  },
+
+  setNotificationsPaused: (paused) => {
+    set({ notificationsPaused: paused });
+    void invoke("set_notifications_paused", { paused }).catch(() => {});
+  },
+
   openAppDataFolder: async () => {
     await invoke("open_app_data_folder");
   },
@@ -1659,11 +1705,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           progress.total > 0 &&
           progress.indexed >= progress.total
         ) {
-          const folderName = get().folders.find((folder) => folder.id === progress.folder_id)?.name;
-          void notifyTaskComplete(
-            "Folder scan complete",
-            folderName ? `${folderName} has finished scanning.` : "A folder has finished scanning.",
-          );
+          const { notificationsPaused, mutedFolderIds } = get();
+          if (!notificationsPaused && !mutedFolderIds.includes(progress.folder_id)) {
+            const folderName = get().folders.find((folder) => folder.id === progress.folder_id)?.name;
+            void notifyTaskComplete(
+              "Folder scan complete",
+              folderName ? `${folderName} has finished scanning.` : "A folder has finished scanning.",
+            );
+          }
         }
         void get().loadFolders();
         void get().loadBackgroundJobProgress();
@@ -1688,32 +1737,52 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         const previous = previousProgress[progress.folder_id];
         if (!previous) continue;
 
+        const { notificationsPaused, mutedFolderIds } = get();
+        const suppressed = notificationsPaused || mutedFolderIds.includes(progress.folder_id);
         const folderName =
           get().folders.find((folder) => folder.id === progress.folder_id)?.name ?? "Folder";
 
-        if (previous.embedding_pending > 0 && progress.embedding_pending === 0) {
-          const failureDetail =
-            progress.embedding_failed > 0
-              ? ` ${progress.embedding_failed.toLocaleString()} failed.`
-              : "";
-          void notifyTaskComplete(
-            "Embeddings complete",
-            `${folderName} finished generating embeddings.${failureDetail}`,
-          );
+        // Embeddings — debounced so rapid file additions don't fire per-file.
+        const embeddingKey = `${progress.folder_id}:embedding`;
+        if (!suppressed) {
+          if (previous.embedding_pending > 0 && progress.embedding_pending === 0) {
+            clearTimeout(notificationTimers.get(embeddingKey));
+            const failureDetail =
+              progress.embedding_failed > 0
+                ? ` ${progress.embedding_failed.toLocaleString()} failed.`
+                : "";
+            const body = `${folderName} finished generating embeddings.${failureDetail}`;
+            notificationTimers.set(embeddingKey, setTimeout(() => {
+              notificationTimers.delete(embeddingKey);
+              void notifyTaskComplete("Embeddings complete", body);
+            }, NOTIFICATION_DEBOUNCE_MS));
+          } else if (previous.embedding_pending === 0 && progress.embedding_pending > 0) {
+            // More jobs queued — cancel the pending notification.
+            clearTimeout(notificationTimers.get(embeddingKey));
+            notificationTimers.delete(embeddingKey);
+          }
         }
 
-        if (previous.tagging_pending > 0 && progress.tagging_pending === 0) {
-          const failureDetail =
-            progress.tagging_failed > 0
-              ? ` ${progress.tagging_failed.toLocaleString()} failed.`
-              : "";
-          void notifyTaskComplete(
-            "AI tagging complete",
-            `${folderName} finished generating tags.${failureDetail}`,
-          );
-          // New tags are now in the DB — invalidate the Explore tag cache so
-          // reopening Explore reflects the updated tag distribution.
-          set({ exploreTagsFolderId: undefined });
+        // Tagging — same debounce pattern.
+        const taggingKey = `${progress.folder_id}:tagging`;
+        if (!suppressed) {
+          if (previous.tagging_pending > 0 && progress.tagging_pending === 0) {
+            clearTimeout(notificationTimers.get(taggingKey));
+            const failureDetail =
+              progress.tagging_failed > 0
+                ? ` ${progress.tagging_failed.toLocaleString()} failed.`
+                : "";
+            const body = `${folderName} finished generating tags.${failureDetail}`;
+            notificationTimers.set(taggingKey, setTimeout(() => {
+              notificationTimers.delete(taggingKey);
+              void notifyTaskComplete("AI tagging complete", body);
+              // New tags landed — invalidate Explore tag cache.
+              set({ exploreTagsFolderId: undefined });
+            }, NOTIFICATION_DEBOUNCE_MS));
+          } else if (previous.tagging_pending === 0 && progress.tagging_pending > 0) {
+            clearTimeout(notificationTimers.get(taggingKey));
+            notificationTimers.delete(taggingKey);
+          }
         }
       }
 

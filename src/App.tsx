@@ -18,11 +18,15 @@ export default function App() {
   const loadImages = useGalleryStore((state) => state.loadImages);
   const loadCaptionModelStatus = useGalleryStore((state) => state.loadCaptionModelStatus);
   const loadDuplicateScanCache = useGalleryStore((state) => state.loadDuplicateScanCache);
+  const loadMutedFolderIds = useGalleryStore((state) => state.loadMutedFolderIds);
+  const loadNotificationsPaused = useGalleryStore((state) => state.loadNotificationsPaused);
   const subscribeToProgress = useGalleryStore((state) => state.subscribeToProgress);
   const activeView = useGalleryStore((state) => state.activeView);
 
   useEffect(() => {
     void initializeNotifications();
+    void loadMutedFolderIds();
+    void loadNotificationsPaused();
     loadFolders().then(() => {
       void loadBackgroundJobProgress();
       void loadCaptionModelStatus();

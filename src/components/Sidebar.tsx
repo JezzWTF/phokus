@@ -11,18 +11,22 @@ interface ContextMenuState {
 function FolderContextMenu({
   menu,
   folder,
+  isMuted,
   onClose,
   onRename,
   onReindex,
   onLocate,
+  onToggleMute,
   onRemove,
 }: {
   menu: ContextMenuState;
   folder: Folder;
+  isMuted: boolean;
   onClose: () => void;
   onRename: () => void;
   onReindex: () => void;
   onLocate: () => void;
+  onToggleMute: () => void;
   onRemove: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -61,6 +65,7 @@ function FolderContextMenu({
     >
       {item("Reindex", onReindex)}
       {item("Rename", onRename)}
+      {item(isMuted ? "Unmute notifications" : "Mute notifications", onToggleMute)}
       {folder.scan_error && item("Locate Folder", onLocate)}
       <div className="my-1 border-t border-white/[0.06]" />
       {item("Remove from app", onRemove, true)}
@@ -77,7 +82,9 @@ function FolderItem({
   selected: boolean;
   progress: IndexProgress | undefined;
 }) {
-  const { selectFolder, removeFolder, reindexFolder, renameFolder, updateFolderPath } = useGalleryStore();
+  const { selectFolder, removeFolder, reindexFolder, renameFolder, updateFolderPath, toggleMutedFolder } = useGalleryStore();
+  const mutedFolderIds = useGalleryStore((state) => state.mutedFolderIds);
+  const isMuted = mutedFolderIds.includes(folder.id);
   const isIndexing = progress && !progress.done;
   const isMissing = !!folder.scan_error && !isIndexing;
 
@@ -250,10 +257,12 @@ function FolderItem({
         <FolderContextMenu
           menu={contextMenu}
           folder={folder}
+          isMuted={isMuted}
           onClose={() => setContextMenu(null)}
           onRename={() => setRenaming(true)}
           onReindex={() => void reindexFolder(folder.id)}
           onLocate={() => void handleLocateFolder()}
+          onToggleMute={() => toggleMutedFolder(folder.id)}
           onRemove={() => setConfirmingRemoval(true)}
         />
       )}

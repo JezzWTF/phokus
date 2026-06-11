@@ -148,6 +148,10 @@ pub fn run() {
             commands::vacuum_database,
             commands::get_orphaned_thumbnails_info,
             commands::cleanup_orphaned_thumbnails,
+            commands::get_muted_folder_ids,
+            commands::set_muted_folder_ids,
+            commands::get_notifications_paused,
+            commands::set_notifications_paused,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

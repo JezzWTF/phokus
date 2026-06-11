@@ -1852,3 +1852,68 @@ pub async fn cleanup_orphaned_thumbnails(
         freed_mb: freed_bytes as f64 / 1_048_576.0,
     })
 }
+
+const MUTED_FOLDER_IDS_FILE: &str = "settings/muted_folder_ids.txt";
+const NOTIFICATIONS_PAUSED_FILE: &str = "settings/notifications_paused.txt";
+
+#[tauri::command]
+pub async fn get_muted_folder_ids(app: AppHandle) -> Result<Vec<i64>, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(MUTED_FOLDER_IDS_FILE);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(content
+        .trim()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<i64>().ok())
+        .collect())
+}
+
+#[derive(serde::Deserialize)]
+pub struct SetMutedFolderIdsParams {
+    pub folder_ids: Vec<i64>,
+}
+
+#[tauri::command]
+pub async fn set_muted_folder_ids(
+    app: AppHandle,
+    params: SetMutedFolderIdsParams,
+) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let settings_dir = app_dir.join("settings");
+    std::fs::create_dir_all(&settings_dir).map_err(|e| e.to_string())?;
+    let content = params
+        .folder_ids
+        .iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    std::fs::write(settings_dir.join("muted_folder_ids.txt"), content)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_notifications_paused(app: AppHandle) -> Result<bool, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(NOTIFICATIONS_PAUSED_FILE);
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(content.trim() == "true")
+}
+
+#[tauri::command]
+pub async fn set_notifications_paused(app: AppHandle, paused: bool) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let settings_dir = app_dir.join("settings");
+    std::fs::create_dir_all(&settings_dir).map_err(|e| e.to_string())?;
+    std::fs::write(
+        settings_dir.join("notifications_paused.txt"),
+        if paused { "true" } else { "false" },
+    )
+    .map_err(|e| e.to_string())
+}
