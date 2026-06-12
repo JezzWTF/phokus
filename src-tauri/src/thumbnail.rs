@@ -62,13 +62,26 @@ pub fn generate_image_thumbnail(image_path: &Path, cache_dir: &Path) -> Result<G
 }
 
 /// Decodes an image for thumbnailing, with EXIF orientation already applied.
+fn decode_for_thumbnail(image_path: &Path) -> Result<image::DynamicImage> {
+    decode_image_scaled(image_path, THUMB_SIZE, false)
+}
+
+/// Decodes an image at reduced resolution, with EXIF orientation applied.
 ///
 /// JPEGs take a fast path that decodes at reduced resolution (DCT scaling),
 /// which skips most of the IDCT/upsampling work for large photos. Anything
-/// that path can't handle falls back to the `image` crate.
-fn decode_for_thumbnail(image_path: &Path) -> Result<image::DynamicImage> {
+/// that path can't handle falls back to the `image` crate at full size.
+///
+/// `cover` selects which side must stay at or above `target`: `false` keeps
+/// the longest side (for aspect-fit consumers), `true` keeps the shortest
+/// side (for fill-crop consumers like the CLIP preprocessor).
+pub fn decode_image_scaled(
+    image_path: &Path,
+    target: u32,
+    cover: bool,
+) -> Result<image::DynamicImage> {
     if is_jpeg(image_path) {
-        if let Some(img) = decode_jpeg_scaled(image_path) {
+        if let Some(img) = decode_jpeg_scaled(image_path, target, cover) {
             return Ok(img);
         }
     }
@@ -87,16 +100,21 @@ fn is_jpeg(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg"))
 }
 
-/// Decodes a JPEG at the smallest DCT scale that still covers `THUMB_SIZE`.
+/// Decodes a JPEG at the smallest DCT scale that still covers `target`.
 /// Returns `None` on any failure (corrupt file, CMYK without conversion
 /// support, etc.) so the caller can fall back to the generic decoder.
 /// mozjpeg reports errors by panicking, hence the `catch_unwind`.
-fn decode_jpeg_scaled(image_path: &Path) -> Option<image::DynamicImage> {
+fn decode_jpeg_scaled(image_path: &Path, target: u32, cover: bool) -> Option<image::DynamicImage> {
     let path = image_path.to_path_buf();
     let decoded = std::panic::catch_unwind(move || -> std::io::Result<(Vec<u8>, u32, u32)> {
         let mut decompress = mozjpeg::Decompress::new_path(&path)?;
         let (width, height) = decompress.size();
-        decompress.scale(scale_numerator(width.max(height)));
+        let reference = if cover {
+            width.min(height)
+        } else {
+            width.max(height)
+        };
+        decompress.scale(scale_numerator(reference, target));
         let mut started = decompress.rgb()?;
         let (out_width, out_height) = (started.width() as u32, started.height() as u32);
         let pixels = started.read_scanlines::<u8>()?;
@@ -115,11 +133,11 @@ fn decode_jpeg_scaled(image_path: &Path) -> Option<image::DynamicImage> {
     Some(img)
 }
 
-/// Smallest numerator (of /8) that keeps the longest side at or above
-/// `THUMB_SIZE`, so the subsequent resize never upscales.
-fn scale_numerator(max_dimension: usize) -> u8 {
+/// Smallest numerator (of /8) that keeps `reference` at or above `target`,
+/// so the subsequent resize never upscales.
+fn scale_numerator(reference: usize, target: u32) -> u8 {
     for numerator in 1..=8u8 {
-        if max_dimension * numerator as usize / 8 >= THUMB_SIZE as usize {
+        if reference * numerator as usize / 8 >= target as usize {
             return numerator;
         }
     }
@@ -248,10 +266,12 @@ mod tests {
 
     #[test]
     fn scale_numerator_picks_smallest_sufficient() {
-        assert_eq!(scale_numerator(6000), 1);
-        assert_eq!(scale_numerator(640), 4);
-        assert_eq!(scale_numerator(320), 8);
-        assert_eq!(scale_numerator(100), 8);
+        assert_eq!(scale_numerator(6000, THUMB_SIZE), 1);
+        assert_eq!(scale_numerator(640, THUMB_SIZE), 4);
+        assert_eq!(scale_numerator(320, THUMB_SIZE), 8);
+        assert_eq!(scale_numerator(100, THUMB_SIZE), 8);
+        // Cover mode reference: shortest side must reach 224 for CLIP.
+        assert_eq!(scale_numerator(1200, 224), 2);
     }
 
     #[test]
@@ -264,8 +284,14 @@ mod tests {
         img.save(&src_path).unwrap();
 
         // 1600 max dim -> numerator 2 -> 400x300 decode output
-        let decoded = decode_jpeg_scaled(&src_path).expect("fast path should handle plain JPEG");
+        let decoded = decode_jpeg_scaled(&src_path, THUMB_SIZE, false)
+            .expect("fast path should handle plain JPEG");
         assert_eq!((decoded.width(), decoded.height()), (400, 300));
+
+        // Cover mode: shortest side (1200) must stay >= 224 -> numerator 2
+        let covered = decode_jpeg_scaled(&src_path, 224, true)
+            .expect("fast path should handle plain JPEG");
+        assert_eq!((covered.width(), covered.height()), (400, 300));
 
         let cache = dir.join("cache");
         let _ = std::fs::remove_file(thumb_path(&cache, &src_path.to_string_lossy()));

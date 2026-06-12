@@ -191,9 +191,11 @@ fn resolve_device() -> Result<Device> {
 }
 
 fn load_image(path: &Path, image_size: usize) -> Result<Tensor> {
-    let image = image::ImageReader::open(path)?
-        .with_guessed_format()?
-        .decode()?;
+    // Scaled decode: CLIP only needs image_size² pixels, so decoding a large
+    // JPEG at full resolution is wasted work. Cover mode keeps the shortest
+    // side at or above image_size for the fill-crop below. Also applies EXIF
+    // orientation, so rotated photos embed the way they are displayed.
+    let image = crate::thumbnail::decode_image_scaled(path, image_size as u32, true)?;
     let image = image.resize_to_fill(
         image_size as u32,
         image_size as u32,
@@ -208,10 +210,11 @@ fn load_image(path: &Path, image_size: usize) -> Result<Tensor> {
 }
 
 fn load_images(paths: &[PathBuf], image_size: usize) -> Result<Tensor> {
-    let mut images = Vec::with_capacity(paths.len());
-    for path in paths {
-        images.push(load_image(path, image_size)?);
-    }
+    use rayon::prelude::*;
+    let images = paths
+        .par_iter()
+        .map(|path| load_image(path, image_size))
+        .collect::<Result<Vec<_>>>()?;
     Ok(Tensor::stack(&images, 0)?)
 }
 

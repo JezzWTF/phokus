@@ -231,10 +231,16 @@ pub fn start_embedding_worker(app: AppHandle, pool: DbPool) {
         let mut embedder: Option<ClipImageEmbedder> = None;
         println!("Embedding worker started.");
         loop {
-            if let Err(error) = process_embedding_batch(&app, &pool, &mut embedder) {
-                eprintln!("Embedding worker error: {}", error);
+            // Only back off when the queue is empty (or errored); while jobs
+            // are pending, claim the next batch immediately.
+            match process_embedding_batch(&app, &pool, &mut embedder) {
+                Ok(true) => {}
+                Ok(false) => std::thread::sleep(std::time::Duration::from_millis(500)),
+                Err(error) => {
+                    eprintln!("Embedding worker error: {}", error);
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
             }
-            std::thread::sleep(std::time::Duration::from_millis(500));
         }
     });
 }
@@ -270,13 +276,17 @@ pub fn start_tagging_worker(app: AppHandle, pool: DbPool, app_data_dir: PathBuf)
                 println!("Tagging worker: acceleration setting changed — resetting session.");
                 tagger_instance = None;
             }
-            if let Err(error) =
-                process_tagging_batch(&app, &pool, &app_data_dir, &mut tagger_instance)
-            {
-                eprintln!("Tagging worker error: {}", error);
-                tagger_instance = None;
+            // Only back off when the queue is empty (or errored); while jobs
+            // are pending, claim the next batch immediately.
+            match process_tagging_batch(&app, &pool, &app_data_dir, &mut tagger_instance) {
+                Ok(true) => {}
+                Ok(false) => std::thread::sleep(std::time::Duration::from_millis(750)),
+                Err(error) => {
+                    eprintln!("Tagging worker error: {}", error);
+                    tagger_instance = None;
+                    std::thread::sleep(std::time::Duration::from_millis(750));
+                }
             }
-            std::thread::sleep(std::time::Duration::from_millis(750));
         }
     });
 }
@@ -759,11 +769,13 @@ fn process_metadata_batch(app: &AppHandle, pool: &DbPool, media_tools: &MediaToo
     Ok(())
 }
 
+/// Returns `Ok(true)` if a batch was claimed and processed, `Ok(false)` if
+/// the queue was empty.
 fn process_embedding_batch(
     app: &AppHandle,
     pool: &DbPool,
     embedder: &mut Option<ClipImageEmbedder>,
-) -> Result<()> {
+) -> Result<bool> {
     let batch_started_at = Instant::now();
     let claim_started_at = Instant::now();
     let paused_folders = paused_folder_ids("embedding");
@@ -774,7 +786,7 @@ fn process_embedding_batch(
     let claim_elapsed = claim_started_at.elapsed();
 
     if jobs.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
 
     if embedder.is_none() {
@@ -902,7 +914,7 @@ fn process_embedding_batch(
         EMBEDDING_BATCH_SIZE, claim_elapsed, infer_elapsed, write_elapsed, batch_elapsed
     );
 
-    Ok(())
+    Ok(true)
 }
 
 fn process_caption_batch(
@@ -1007,14 +1019,16 @@ fn process_caption_batch(
     Ok(())
 }
 
+/// Returns `Ok(true)` if a batch was claimed and processed, `Ok(false)` if
+/// the queue was empty or the model is not ready.
 fn process_tagging_batch(
     app: &AppHandle,
     pool: &DbPool,
     app_data_dir: &Path,
     tagger_instance: &mut Option<WdTagger>,
-) -> Result<()> {
+) -> Result<bool> {
     if !tagger::tagger_model_status(app_data_dir).ready {
-        return Ok(());
+        return Ok(false);
     }
 
     let paused_folders = paused_folder_ids("tagging");
@@ -1025,7 +1039,7 @@ fn process_tagging_batch(
     })?;
 
     if jobs.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
 
     if tagger_instance.is_none() {
@@ -1133,7 +1147,7 @@ fn process_tagging_batch(
         emit_folder_job_progress(app, pool, &folder_ids.into_iter().collect::<Vec<_>>(), true);
     }
 
-    Ok(())
+    Ok(true)
 }
 
 fn active_indexing_folders() -> HashSet<i64> {
