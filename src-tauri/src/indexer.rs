@@ -142,14 +142,18 @@ fn higher_priority_work_pending(pool: &DbPool, own_tier: WorkerTier) -> Result<b
     let conn = pool.get()?;
     let active_folders = active_indexing_folders();
 
+    // Video jobs are unclaimable until FFmpeg is provisioned; they must not
+    // count as pending higher-priority work or they'd stall lower tiers.
+    let ffmpeg_ready = crate::media::ffmpeg_ready();
+
     if own_tier > WorkerTier::Thumbnail {
         let mut excluded = paused_folder_ids("thumbnail");
         excluded.extend(active_folders.iter().copied());
-        if db::has_claimable_thumbnail_jobs(&conn, &excluded)? {
+        if db::has_claimable_thumbnail_jobs(&conn, &excluded, ffmpeg_ready)? {
             return Ok(true);
         }
     }
-    if own_tier > WorkerTier::Metadata {
+    if own_tier > WorkerTier::Metadata && ffmpeg_ready {
         let mut excluded = paused_folder_ids("metadata");
         excluded.extend(active_folders.iter().copied());
         if db::has_claimable_metadata_jobs(&conn, &excluded)? {
@@ -641,6 +645,7 @@ fn process_thumbnail_batch(
                 &mut conn,
                 &active_folders,
                 &paused_folders,
+                crate::media::ffmpeg_ready(),
                 worker_fetch_size,
                 worker_batch_size,
             )
@@ -748,6 +753,11 @@ fn process_metadata_batch(
     pool: &DbPool,
     media_tools: &MediaTools,
 ) -> Result<bool> {
+    // Metadata jobs are video-only and need ffprobe; leave them pending until
+    // FFmpeg is provisioned — the worker poll loop drains them once ready.
+    if !crate::media::ffmpeg_ready() {
+        return Ok(false);
+    }
     if higher_priority_work_pending(pool, WorkerTier::Metadata)? {
         return Ok(false);
     }

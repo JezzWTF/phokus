@@ -11,6 +11,7 @@ import { Timeline } from "./components/Timeline";
 import { TitleBar } from "./components/TitleBar";
 import { SettingsModal } from "./components/SettingsModal";
 import { UpdateToast } from "./components/UpdateToast";
+import { OnboardingOverlay } from "./components/onboarding/OnboardingOverlay";
 import { initializeNotifications } from "./notifications";
 
 export default function App() {
@@ -24,6 +25,8 @@ export default function App() {
   const subscribeToProgress = useGalleryStore((state) => state.subscribeToProgress);
   const loadAppVersion = useGalleryStore((state) => state.loadAppVersion);
   const checkForUpdates = useGalleryStore((state) => state.checkForUpdates);
+  const loadFfmpegStatus = useGalleryStore((state) => state.loadFfmpegStatus);
+  const loadOnboardingCompleted = useGalleryStore((state) => state.loadOnboardingCompleted);
   const activeView = useGalleryStore((state) => state.activeView);
 
   useEffect(() => {
@@ -31,6 +34,8 @@ export default function App() {
     void loadMutedFolderIds();
     void loadNotificationsPaused();
     void loadAppVersion();
+    void loadFfmpegStatus();
+    void loadOnboardingCompleted();
     // Quiet launch check — dev builds have no signed artifacts to update to.
     if (import.meta.env.PROD) {
       void checkForUpdates({ quiet: true });
@@ -88,6 +93,7 @@ export default function App() {
       <Lightbox />
       <SettingsModal />
       <UpdateToast />
+      <OnboardingOverlay />
     </div>
   );
 }

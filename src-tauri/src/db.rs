@@ -1132,6 +1132,7 @@ pub fn get_all_folder_job_progress(conn: &Connection) -> Result<Vec<FolderJobPro
 fn get_pending_thumbnail_jobs_excluding(
     conn: &Connection,
     excluded_folder_ids: &std::collections::HashSet<i64>,
+    include_videos: bool,
     limit: usize,
 ) -> Result<Vec<ThumbnailJob>> {
     let sql = format!(
@@ -1140,8 +1141,10 @@ fn get_pending_thumbnail_jobs_excluding(
          JOIN images i ON i.id = j.image_id
          WHERE j.status = 'pending'
            {}
+           {}
          ORDER BY j.updated_at, j.image_id
          LIMIT ?1",
+        media_kind_clause(include_videos),
         folder_exclusion_clause("i", excluded_folder_ids)
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -1154,6 +1157,17 @@ fn get_pending_thumbnail_jobs_excluding(
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Video jobs need FFmpeg; while it isn't provisioned they must be invisible
+/// to both claiming and the tier-priority checks, or pending video jobs would
+/// stall every lower tier indefinitely.
+fn media_kind_clause(include_videos: bool) -> &'static str {
+    if include_videos {
+        ""
+    } else {
+        "AND i.media_kind = 'image'"
+    }
 }
 
 /// True if any claimable (pending, non-excluded) jobs exist in `job_table`.
@@ -1184,8 +1198,14 @@ fn has_claimable_jobs(
 pub fn has_claimable_thumbnail_jobs(
     conn: &Connection,
     excluded_folder_ids: &std::collections::HashSet<i64>,
+    include_videos: bool,
 ) -> Result<bool> {
-    has_claimable_jobs(conn, "thumbnail_jobs", "", excluded_folder_ids)
+    has_claimable_jobs(
+        conn,
+        "thumbnail_jobs",
+        media_kind_clause(include_videos),
+        excluded_folder_ids,
+    )
 }
 
 pub fn has_claimable_metadata_jobs(
@@ -1211,6 +1231,7 @@ pub fn claim_thumbnail_jobs(
     conn: &mut Connection,
     active_folder_ids: &std::collections::HashSet<i64>,
     paused_folder_ids: &std::collections::HashSet<i64>,
+    include_videos: bool,
     fetch_limit: usize,
     claim_limit: usize,
 ) -> Result<Vec<ThumbnailJob>> {
@@ -1219,7 +1240,12 @@ pub fn claim_thumbnail_jobs(
         .union(paused_folder_ids)
         .copied()
         .collect::<std::collections::HashSet<_>>();
-    let candidates = get_pending_thumbnail_jobs_excluding(&tx, &excluded_folder_ids, fetch_limit)?;
+    let candidates = get_pending_thumbnail_jobs_excluding(
+        &tx,
+        &excluded_folder_ids,
+        include_videos,
+        fetch_limit,
+    )?;
     let mut claimed = Vec::with_capacity(claim_limit);
 
     for job in candidates {

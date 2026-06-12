@@ -264,6 +264,15 @@ export type SortOrder =
 
 export type UpdateStatus = "idle" | "checking" | "upToDate" | "available" | "downloading" | "installing" | "error";
 
+export type FfmpegStatus = "unknown" | "starting" | "downloading" | "unpacking" | "installed" | "error";
+
+interface FfmpegProgressEvent {
+  phase: string;
+  downloaded_bytes: number | null;
+  total_bytes: number | null;
+  error: string | null;
+}
+
 // The Update handle from the plugin carries the download method; it's not
 // serializable state, so it lives outside the store.
 let pendingUpdate: Update | null = null;
@@ -325,6 +334,13 @@ interface GalleryState {
   updateProgress: number | null; // 0..1 download progress, null while size unknown
   updateError: string | null;
   updateDismissed: boolean;
+
+  ffmpegStatus: FfmpegStatus;
+  ffmpegProgress: { downloaded_bytes: number; total_bytes: number } | null;
+  ffmpegError: string | null;
+  onboardingCompleted: boolean | null; // null = not loaded yet
+  onboardingOpen: boolean;
+  onboardingStep: number;
 
   taggerModelStatus: TaggerModelStatus | null;
   taggerModelPreparing: boolean;
@@ -407,6 +423,12 @@ interface GalleryState {
   checkForUpdates: (options?: { quiet?: boolean }) => Promise<void>;
   installUpdate: () => Promise<void>;
   dismissUpdate: () => void;
+  loadFfmpegStatus: () => Promise<void>;
+  retryFfmpegDownload: () => Promise<void>;
+  loadOnboardingCompleted: () => Promise<void>;
+  completeOnboarding: () => void;
+  openOnboarding: () => void;
+  setOnboardingStep: (step: number) => void;
   openAppDataFolder: () => Promise<void>;
   getDatabaseInfo: () => Promise<DatabaseInfo>;
   vacuumDatabase: () => Promise<VacuumResult>;
@@ -691,6 +713,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   updateProgress: null,
   updateError: null,
   updateDismissed: false,
+
+  ffmpegStatus: "unknown",
+  ffmpegProgress: null,
+  ffmpegError: null,
+  onboardingCompleted: null,
+  onboardingOpen: false,
+  onboardingStep: 0,
 
   taggerModelStatus: null,
   taggerModelPreparing: false,
@@ -1562,6 +1591,60 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   dismissUpdate: () => set({ updateDismissed: true }),
 
+  loadFfmpegStatus: async () => {
+    try {
+      const status = await invoke<{ installed: boolean; downloading: boolean; failed: boolean }>(
+        "get_ffmpeg_status",
+      );
+      if (status.installed) {
+        set({ ffmpegStatus: "installed" });
+      } else if (status.failed) {
+        // The download failed before our event listener attached — surface
+        // the error state so the retry button is reachable.
+        set({ ffmpegStatus: "error", ffmpegError: "The download could not be completed. Check your connection and retry." });
+      } else {
+        // Not installed and possibly not downloading yet — the provision
+        // thread starts with the app, so treat the gap as "starting" and let
+        // the first ffmpeg-progress event settle the real state.
+        set({ ffmpegStatus: "starting" });
+      }
+    } catch {
+      // leave "unknown"; events will correct it
+    }
+  },
+
+  retryFfmpegDownload: async () => {
+    set({ ffmpegStatus: "starting", ffmpegError: null, ffmpegProgress: null });
+    try {
+      await invoke("retry_ffmpeg_download");
+    } catch (error) {
+      set({ ffmpegStatus: "error", ffmpegError: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
+  loadOnboardingCompleted: async () => {
+    try {
+      const completed = await invoke<boolean>("get_onboarding_completed");
+      set(
+        completed
+          ? { onboardingCompleted: true }
+          : { onboardingCompleted: false, onboardingOpen: true, onboardingStep: 0 },
+      );
+    } catch {
+      // If the flag can't be read, don't trap the user in onboarding.
+      set({ onboardingCompleted: true });
+    }
+  },
+
+  completeOnboarding: () => {
+    set({ onboardingOpen: false, onboardingCompleted: true });
+    void invoke("set_onboarding_completed", { completed: true }).catch(() => {});
+  },
+
+  openOnboarding: () => set({ onboardingOpen: true, onboardingStep: 0 }),
+
+  setOnboardingStep: (step) => set({ onboardingStep: step }),
+
   openAppDataFolder: async () => {
     await invoke("open_app_data_folder");
   },
@@ -2070,6 +2153,33 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       void get().loadFolders();
     });
 
+    const unlistenFfmpegProgress = await listen<FfmpegProgressEvent>("ffmpeg-progress", (event) => {
+      const payload = event.payload;
+      switch (payload.phase) {
+        case "starting":
+          set({ ffmpegStatus: "starting", ffmpegError: null });
+          break;
+        case "downloading":
+          set({
+            ffmpegStatus: "downloading",
+            ffmpegProgress:
+              payload.downloaded_bytes !== null && payload.total_bytes !== null
+                ? { downloaded_bytes: payload.downloaded_bytes, total_bytes: payload.total_bytes }
+                : null,
+          });
+          break;
+        case "unpacking":
+          set({ ffmpegStatus: "unpacking" });
+          break;
+        case "done":
+          set({ ffmpegStatus: "installed", ffmpegProgress: null, ffmpegError: null });
+          break;
+        case "error":
+          set({ ffmpegStatus: "error", ffmpegError: payload.error ?? "Download failed" });
+          break;
+      }
+    });
+
     return () => {
       unlistenProgress();
       unlistenMediaJobs();
@@ -2079,6 +2189,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       unlistenThumbnails();
       unlistenWatcherDeleted();
       unlistenFolderCounts();
+      unlistenFfmpegProgress();
     };
   },
 }));

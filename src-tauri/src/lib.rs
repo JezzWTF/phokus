@@ -52,7 +52,10 @@ pub fn run() {
 
             std::fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
 
-            media::MediaTools::ensure_installed().expect("Failed to provision FFmpeg sidecar");
+            // FFmpeg provisioning happens in the background so the window
+            // appears immediately; workers gate video jobs on readiness and
+            // the onboarding/Settings UI shows progress and retry.
+            media::spawn_ffmpeg_provision(app.handle().clone());
 
             let db_path = app_dir.join("gallery.db");
             let pool = db::create_pool(&db_path).expect("Failed to create database pool");
@@ -186,6 +189,10 @@ pub fn run() {
             commands::cleanup_orphaned_thumbnails,
             commands::get_muted_folder_ids,
             commands::set_muted_folder_ids,
+            commands::get_ffmpeg_status,
+            commands::retry_ffmpeg_download,
+            commands::get_onboarding_completed,
+            commands::set_onboarding_completed,
             commands::get_notifications_paused,
             commands::set_notifications_paused,
         ])

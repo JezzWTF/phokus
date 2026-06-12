@@ -2101,3 +2101,50 @@ pub async fn set_notifications_paused(app: AppHandle, paused: bool) -> Result<()
     )
     .map_err(|e| e.to_string())
 }
+
+#[derive(Serialize)]
+pub struct FfmpegStatus {
+    pub installed: bool,
+    pub downloading: bool,
+    pub failed: bool,
+}
+
+#[tauri::command]
+pub async fn get_ffmpeg_status() -> Result<FfmpegStatus, String> {
+    Ok(FfmpegStatus {
+        installed: crate::media::ffmpeg_ready(),
+        downloading: crate::media::ffmpeg_downloading(),
+        failed: crate::media::ffmpeg_failed(),
+    })
+}
+
+#[tauri::command]
+pub async fn retry_ffmpeg_download(app: AppHandle) -> Result<(), String> {
+    crate::media::spawn_ffmpeg_provision(app);
+    Ok(())
+}
+
+const ONBOARDING_COMPLETED_FILE: &str = "settings/onboarding_completed.txt";
+
+#[tauri::command]
+pub async fn get_onboarding_completed(app: AppHandle) -> Result<bool, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(ONBOARDING_COMPLETED_FILE);
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(content.trim() == "true")
+}
+
+#[tauri::command]
+pub async fn set_onboarding_completed(app: AppHandle, completed: bool) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let settings_dir = app_dir.join("settings");
+    std::fs::create_dir_all(&settings_dir).map_err(|e| e.to_string())?;
+    std::fs::write(
+        settings_dir.join("onboarding_completed.txt"),
+        if completed { "true" } else { "false" },
+    )
+    .map_err(|e| e.to_string())
+}

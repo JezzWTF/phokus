@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, TaggerAcceleration, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
+import { FfmpegStatusRow } from "./onboarding/StepWelcome";
 
 type SettingsSection = "workspace" | "general";
 
@@ -184,6 +185,7 @@ export function SettingsModal() {
   const updateError = useGalleryStore((state) => state.updateError);
   const checkForUpdates = useGalleryStore((state) => state.checkForUpdates);
   const installUpdate = useGalleryStore((state) => state.installUpdate);
+  const openOnboarding = useGalleryStore((state) => state.openOnboarding);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -622,6 +624,24 @@ export function SettingsModal() {
                         {updateStatus === "checking" ? "Checking..." : "Check for updates"}
                       </button>
                     )}
+                  </SettingsItem>
+                </SettingsGroup>
+
+                <SettingsGroup title="Setup">
+                  <FfmpegStatusRow />
+                  <SettingsItem
+                    label="Welcome tour"
+                    description="Replay the guided first-run tour — library setup, the background pipeline, search modes, and AI features."
+                  >
+                    <button
+                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                      onClick={() => {
+                        setSettingsOpen(false);
+                        openOnboarding();
+                      }}
+                    >
+                      Show welcome tour
+                    </button>
                   </SettingsItem>
                 </SettingsGroup>
 
