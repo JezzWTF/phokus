@@ -1152,6 +1152,57 @@ fn get_pending_thumbnail_jobs_excluding(
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// True if any claimable (pending, non-excluded) jobs exist in `job_table`.
+/// Used by lower-priority workers to defer to higher-priority queues.
+/// `extra_predicate` narrows the image join (e.g. videos only for metadata).
+fn has_claimable_jobs(
+    conn: &Connection,
+    job_table: &str,
+    extra_predicate: &str,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+) -> Result<bool> {
+    let sql = format!(
+        "SELECT EXISTS(
+             SELECT 1
+             FROM {} j
+             JOIN images i ON i.id = j.image_id
+             WHERE j.status = 'pending'
+               {}
+               {}
+         )",
+        job_table,
+        extra_predicate,
+        folder_exclusion_clause("i", excluded_folder_ids)
+    );
+    Ok(conn.query_row(&sql, [], |row| row.get::<_, i64>(0))? != 0)
+}
+
+pub fn has_claimable_thumbnail_jobs(
+    conn: &Connection,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+) -> Result<bool> {
+    has_claimable_jobs(conn, "thumbnail_jobs", "", excluded_folder_ids)
+}
+
+pub fn has_claimable_metadata_jobs(
+    conn: &Connection,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+) -> Result<bool> {
+    has_claimable_jobs(
+        conn,
+        "metadata_jobs",
+        "AND i.media_kind = 'video'",
+        excluded_folder_ids,
+    )
+}
+
+pub fn has_claimable_embedding_jobs(
+    conn: &Connection,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+) -> Result<bool> {
+    has_claimable_jobs(conn, "embedding_jobs", "", excluded_folder_ids)
+}
+
 pub fn claim_thumbnail_jobs(
     conn: &mut Connection,
     active_folder_ids: &std::collections::HashSet<i64>,

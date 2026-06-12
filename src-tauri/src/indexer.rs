@@ -121,6 +121,50 @@ static FOLDER_STORAGE_PROFILES: OnceLock<Mutex<HashMap<i64, RuntimeAdaptiveProfi
 static DB_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 const EMBEDDING_BATCH_SIZE: usize = 8;
 
+/// Background workers form a strict priority pipeline: a worker only claims
+/// jobs when no higher-priority claimable work exists, so stages drain one
+/// at a time (thumbnails → metadata → embeddings → tagging) instead of all
+/// workers contending for CPU, disk, and the DB writer at once.
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+enum WorkerTier {
+    Thumbnail = 0,
+    Metadata = 1,
+    Embedding = 2,
+    Tagging = 3,
+}
+
+/// True if any tier above `own_tier` still has claimable work. Each check
+/// uses the same exclusion set the corresponding claim would (that worker's
+/// paused folders plus actively-indexing folders), so paused or mid-scan
+/// work never gates lower tiers.
+fn higher_priority_work_pending(pool: &DbPool, own_tier: WorkerTier) -> Result<bool> {
+    let conn = pool.get()?;
+    let active_folders = active_indexing_folders();
+
+    if own_tier > WorkerTier::Thumbnail {
+        let mut excluded = paused_folder_ids("thumbnail");
+        excluded.extend(active_folders.iter().copied());
+        if db::has_claimable_thumbnail_jobs(&conn, &excluded)? {
+            return Ok(true);
+        }
+    }
+    if own_tier > WorkerTier::Metadata {
+        let mut excluded = paused_folder_ids("metadata");
+        excluded.extend(active_folders.iter().copied());
+        if db::has_claimable_metadata_jobs(&conn, &excluded)? {
+            return Ok(true);
+        }
+    }
+    if own_tier > WorkerTier::Embedding {
+        let mut excluded = paused_folder_ids("embedding");
+        excluded.extend(active_folders.iter().copied());
+        if db::has_claimable_embedding_jobs(&conn, &excluded)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[derive(Clone, Serialize)]
 pub struct IndexProgress {
     pub folder_id: i64,
@@ -702,6 +746,10 @@ fn process_metadata_batch(
     pool: &DbPool,
     media_tools: &MediaTools,
 ) -> Result<bool> {
+    if higher_priority_work_pending(pool, WorkerTier::Metadata)? {
+        return Ok(false);
+    }
+
     let jobs = {
         with_db_write_lock(|| {
             let mut conn = pool.get()?;
@@ -772,6 +820,10 @@ fn process_embedding_batch(
     pool: &DbPool,
     embedder: &mut Option<ClipImageEmbedder>,
 ) -> Result<bool> {
+    if higher_priority_work_pending(pool, WorkerTier::Embedding)? {
+        return Ok(false);
+    }
+
     let batch_started_at = Instant::now();
     let claim_started_at = Instant::now();
     // Exclude folders that are actively indexing (matching the thumbnail and
@@ -1029,6 +1081,10 @@ fn process_tagging_batch(
     tagger_instance: &mut Option<WdTagger>,
 ) -> Result<bool> {
     if !tagger::tagger_model_status(app_data_dir).ready {
+        return Ok(false);
+    }
+
+    if higher_priority_work_pending(pool, WorkerTier::Tagging)? {
         return Ok(false);
     }
 
