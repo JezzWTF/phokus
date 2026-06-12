@@ -8,6 +8,7 @@ export function StepAiFeatures() {
   const taggerModelStatus = useGalleryStore((s) => s.taggerModelStatus);
   const taggerModelPreparing = useGalleryStore((s) => s.taggerModelPreparing);
   const taggerModelProgress = useGalleryStore((s) => s.taggerModelProgress);
+  const taggerModelError = useGalleryStore((s) => s.taggerModelError);
   const prepareTaggerModel = useGalleryStore((s) => s.prepareTaggerModel);
   const loadTaggerModelStatus = useGalleryStore((s) => s.loadTaggerModelStatus);
 
@@ -71,6 +72,11 @@ export function StepAiFeatures() {
                 <p className="mt-1.5 truncate text-[11px] text-gray-600">{taggerModelProgress.current_file}</p>
               ) : null}
             </div>
+          ) : null}
+          {!taggerModelPreparing && taggerModelError ? (
+            <p className="mt-2 text-xs leading-relaxed text-amber-300/90">
+              Download failed: {taggerModelError}
+            </p>
           ) : null}
         </div>
       </div>

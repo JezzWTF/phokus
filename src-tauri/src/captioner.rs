@@ -11,7 +11,7 @@ use std::borrow::Cow;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::Mutex;
 use std::time::Instant;
 use tokenizers::Tokenizer;
 
@@ -62,7 +62,10 @@ const REQUIRED_FILES: &[&str] = &[
     "onnx/embed_tokens_fp16.onnx",
 ];
 
-static ORT_RUNTIME_INIT: OnceLock<std::result::Result<(), String>> = OnceLock::new();
+// Mutex<bool> rather than OnceLock<Result>: a failed attempt (DLL not yet
+// downloaded) must NOT be cached, or a later successful download could never
+// recover within the same app session.
+static ORT_RUNTIME_INIT: Mutex<bool> = Mutex::new(false);
 
 /// Set to `true` by `set_caption_acceleration` so the caption worker loop
 /// knows to drop its cached `FlorenceCaptioner` and reload with the new EP.
@@ -648,23 +651,36 @@ fn probe_vision_session(
 }
 
 pub fn ensure_onnx_runtime(local_dir: &Path) -> Result<()> {
+    let mut initialized = ORT_RUNTIME_INIT
+        .lock()
+        .map_err(|_| anyhow::anyhow!("ONNX runtime init lock poisoned"))?;
+    if *initialized {
+        return Ok(());
+    }
     let dll_path = local_dir.join(ONNX_RUNTIME_DLL_FILE);
-    ORT_RUNTIME_INIT
-        .get_or_init(|| {
-            if !dll_path.exists() {
-                return Err(format!(
-                    "ONNX Runtime DLL is missing: {}",
-                    dll_path.display()
-                ));
-            }
-            ort::environment::init_from(&dll_path)
-                .map_err(|error| error.to_string())?
-                .with_name("phokus-florence")
-                .commit();
-            Ok(())
-        })
-        .clone()
-        .map_err(anyhow::Error::msg)
+    if !dll_path.exists() {
+        anyhow::bail!("ONNX Runtime DLL is missing: {}", dll_path.display());
+    }
+    ort::environment::init_from(&dll_path)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?
+        .with_name("phokus-florence")
+        .commit();
+    *initialized = true;
+    Ok(())
+}
+
+/// Download any ONNX Runtime DLLs that are missing from `local_dir`. Unlike
+/// `ensure_onnx_runtime` (init only), this actually provisions the files —
+/// callers that can run on a clean install must call this first.
+pub fn provision_onnx_runtime(local_dir: &Path) -> Result<()> {
+    for (destination_file, source_url, archive_path) in ONNX_RUNTIME_FILES {
+        let destination = local_dir.join(destination_file);
+        if destination.exists() {
+            continue;
+        }
+        download_nuget_file(source_url, archive_path, &destination)?;
+    }
+    Ok(())
 }
 
 fn download_onnx_runtime_files(local_dir: &Path) -> Result<()> {
