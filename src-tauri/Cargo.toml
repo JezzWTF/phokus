@@ -53,6 +53,7 @@ csv = "1"
 kamadak-exif = "0.5"
 notify = "6"
 tauri-plugin-notification = "2"
+mozjpeg = "0.10.13"
 
 # ── Dev-mode performance ────────────────────────────────────────────────────
 # opt-level=1 on the main crate keeps incremental compile short.
@@ -80,6 +81,10 @@ opt-level = 3
 [profile.dev.package.image]
 opt-level = 3
 [profile.dev.package.fast_image_resize]
+opt-level = 3
+[profile.dev.package.mozjpeg]
+opt-level = 3
+[profile.dev.package.mozjpeg-sys]
 opt-level = 3
 
 # Parallel work scheduler

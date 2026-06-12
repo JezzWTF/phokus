@@ -182,6 +182,22 @@ pub struct DuplicateGroup {
     pub images: Vec<ImageRecord>,
 }
 
+#[derive(Clone, Serialize)]
+pub struct DuplicateScanProgress {
+    pub phase: String,
+    pub processed: usize,
+    pub total: usize,
+    pub skipped: usize,
+}
+
+#[derive(Serialize)]
+pub struct DuplicateScanResult {
+    pub groups: Vec<DuplicateGroup>,
+    pub scanned_files: usize,
+    pub candidate_files: usize,
+    pub skipped_files: usize,
+}
+
 #[derive(Serialize)]
 pub struct DuplicateScanCache {
     pub groups: Vec<DuplicateGroup>,
@@ -264,9 +280,14 @@ pub async fn remove_folder(
         .into_iter()
         .find(|f| f.id == folder_id)
         .map(|f| PathBuf::from(f.path));
+    // Collect thumbnail paths before the cascade delete removes the rows.
+    let thumb_paths = db::get_thumbnail_paths_for_folder(&conn, folder_id).unwrap_or_default();
     db::delete_folder(&conn, folder_id).map_err(|e| e.to_string())?;
     if let Some(path) = folder_path {
         watcher.remove_folder(&path);
+    }
+    for thumb in &thumb_paths {
+        let _ = std::fs::remove_file(thumb);
     }
     Ok(())
 }
@@ -957,14 +978,19 @@ pub async fn find_duplicates(
     app: AppHandle,
     db: State<'_, DbState>,
     folder_id: Option<i64>,
-) -> Result<Vec<DuplicateGroup>, String> {
+) -> Result<DuplicateScanResult, String> {
     let records = {
         let conn = db.get().map_err(|e| e.to_string())?;
         db::get_all_image_paths(&conn, folder_id).map_err(|e| e.to_string())?
     };
 
     let total = records.len();
-    let _ = app.emit("duplicate_scan_progress", (0usize, total));
+    let _ = app.emit("duplicate_scan_progress", DuplicateScanProgress {
+        phase: "checking".to_string(),
+        processed: 0,
+        total,
+        skipped: 0,
+    });
 
     // Three-phase detection.
     //
@@ -981,7 +1007,8 @@ pub async fn find_duplicates(
     //   For sample-hash groups that contain files > 64 KB, compute a full-file
     //   hash to confirm the match before presenting them as deletable duplicates.
     let app_hash = app.clone();
-    let pairs: Vec<(u64, u64, i64, String)> = tokio::task::spawn_blocking(move || {
+    let (pairs, skipped_before_confirm, candidate_total):
+        (Vec<(u64, u64, i64, String)>, usize, usize) = tokio::task::spawn_blocking(move || {
         use memmap2::Mmap;
         use rayon::prelude::*;
         use std::collections::HashMap;
@@ -1007,14 +1034,31 @@ pub async fn find_duplicates(
         }
 
         // ── Phase 1: stat ─────────────────────────────────────────────────
+        let stat_counter = AtomicUsize::new(0);
+        let stat_skipped = AtomicUsize::new(0);
         let sized: Vec<(i64, String, u64)> = records
             .par_iter()
             .filter_map(|r| {
-                let size = std::fs::metadata(&r.path).ok()?.len();
-                if size == 0 { return None; }
-                Some((r.id, r.path.clone(), size))
+                let result = match std::fs::metadata(&r.path) {
+                    Ok(metadata) => Some((r.id, r.path.clone(), metadata.len())),
+                    Err(_) => {
+                        stat_skipped.fetch_add(1, Ordering::Relaxed);
+                        None
+                    }
+                };
+                let done = stat_counter.fetch_add(1, Ordering::Relaxed) + 1;
+                if done % 100 == 0 || done == total {
+                    let _ = app_hash.emit("duplicate_scan_progress", DuplicateScanProgress {
+                        phase: "checking".to_string(),
+                        processed: done,
+                        total,
+                        skipped: stat_skipped.load(Ordering::Relaxed),
+                    });
+                }
+                result
             })
             .collect();
+        let stat_skipped = stat_skipped.load(Ordering::Relaxed);
 
         let mut by_size: HashMap<u64, Vec<usize>> = HashMap::new();
         for (i, (_, _, size)) in sized.iter().enumerate() {
@@ -1027,29 +1071,53 @@ pub async fn find_duplicates(
             .collect();
 
         if candidates.is_empty() {
-            return vec![];
+            return (vec![], stat_skipped, 0);
         }
 
         // ── Phase 2: sample hash ──────────────────────────────────────────
         let c_total = candidates.len();
-        let _ = app_hash.emit("duplicate_scan_progress", (0usize, c_total));
+        let _ = app_hash.emit("duplicate_scan_progress", DuplicateScanProgress {
+            phase: "hashing".to_string(),
+            processed: 0,
+            total: c_total,
+            skipped: stat_skipped,
+        });
         let counter = AtomicUsize::new(0);
+        let hash_skipped = AtomicUsize::new(0);
 
-        candidates
+        let pairs = candidates
             .par_iter()
             .filter_map(|&idx| {
                 let (id, path, size) = &sized[idx];
-                let file = std::fs::File::open(path).ok()?;
-                // SAFETY: read-only; no external truncation expected during scan.
-                let mmap = unsafe { Mmap::map(&file).ok()? };
-                let hash = sample(&mmap);
+                let result = if *size == 0 {
+                    Some((xxh3_64(&[]), *size, *id, path.clone()))
+                } else {
+                    std::fs::File::open(path)
+                        .ok()
+                        // SAFETY: read-only; no external truncation expected during scan.
+                        .and_then(|file| unsafe { Mmap::map(&file).ok() })
+                        .map(|mmap| (sample(&mmap), *size, *id, path.clone()))
+                };
+                if result.is_none() {
+                    hash_skipped.fetch_add(1, Ordering::Relaxed);
+                }
                 let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
                 if done % 100 == 0 || done == c_total {
-                    let _ = app_hash.emit("duplicate_scan_progress", (done, c_total));
+                    let _ = app_hash.emit("duplicate_scan_progress", DuplicateScanProgress {
+                        phase: "hashing".to_string(),
+                        processed: done,
+                        total: c_total,
+                        skipped: stat_skipped + hash_skipped.load(Ordering::Relaxed),
+                    });
                 }
-                Some((hash, *size, *id, path.clone()))
+                result
             })
-            .collect()
+            .collect();
+        (
+            pairs,
+            stat_skipped + hash_skipped.load(Ordering::Relaxed),
+            c_total,
+        )
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -1066,13 +1134,30 @@ pub async fn find_duplicates(
     // hash becomes its own DuplicateGroup so disjoint sets (A,A vs B,B that
     // happened to share size and sample hash) are never merged.
     const COVERED: u64 = (16 * 1024 * 4) as u64;
-    let confirmed: Vec<(u64, u64, Vec<i64>)> =
+    let confirming_total: usize = size_hash_map
+        .iter()
+        .filter(|((_, file_size), entries)| *file_size > COVERED && entries.len() > 1)
+        .map(|(_, entries)| entries.len())
+        .sum();
+    if confirming_total > 0 {
+        let _ = app.emit("duplicate_scan_progress", DuplicateScanProgress {
+            phase: "confirming".to_string(),
+            processed: 0,
+            total: confirming_total,
+            skipped: skipped_before_confirm,
+        });
+    }
+    let app_confirm = app.clone();
+    let (confirmed, skipped_files): (Vec<(u64, u64, Vec<i64>)>, usize) =
         tokio::task::spawn_blocking(move || {
             use memmap2::Mmap;
             use rayon::prelude::*;
+            use std::sync::atomic::{AtomicUsize, Ordering};
             use xxhash_rust::xxh3::xxh3_64;
 
-            size_hash_map
+            let counter = AtomicUsize::new(0);
+            let confirm_skipped = AtomicUsize::new(0);
+            let confirmed = size_hash_map
                 .into_iter()
                 .filter(|(_, entries)| entries.len() > 1)
                 .flat_map(|((sample_hash, file_size), entries)| {
@@ -1089,6 +1174,19 @@ pub async fn find_duplicates(
                                 .ok()
                                 .and_then(|f| unsafe { Mmap::map(&f).ok() })
                                 .map(|mmap| xxh3_64(&mmap));
+                            if hash.is_none() {
+                                confirm_skipped.fetch_add(1, Ordering::Relaxed);
+                            }
+                            let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                            if done % 100 == 0 || done == confirming_total {
+                                let _ = app_confirm.emit("duplicate_scan_progress", DuplicateScanProgress {
+                                    phase: "confirming".to_string(),
+                                    processed: done,
+                                    total: confirming_total,
+                                    skipped: skipped_before_confirm
+                                        + confirm_skipped.load(Ordering::Relaxed),
+                                });
+                            }
                             (*id, hash)
                         })
                         .collect();
@@ -1106,7 +1204,11 @@ pub async fn find_duplicates(
                         .map(|(full_hash, ids)| (full_hash, file_size, ids))
                         .collect()
                 })
-                .collect()
+                .collect();
+            (
+                confirmed,
+                skipped_before_confirm + confirm_skipped.load(Ordering::Relaxed),
+            )
         })
         .await
         .map_err(|e| e.to_string())?;
@@ -1137,7 +1239,12 @@ pub async fn find_duplicates(
         let _ = db::set_duplicate_scan_cache(&conn, &folder_scope, &json);
     }
 
-    Ok(groups)
+    Ok(DuplicateScanResult {
+        groups,
+        scanned_files: total,
+        candidate_files: candidate_total,
+        skipped_files,
+    })
 }
 
 #[tauri::command]
@@ -1192,6 +1299,9 @@ pub async fn delete_images_from_disk(
     for r in records.into_iter().filter(|r| id_set.contains(&r.id)) {
         if std::fs::remove_file(&r.path).is_ok() {
             succeeded_ids.push(r.id);
+            if let Some(thumb) = &r.thumbnail_path {
+                let _ = std::fs::remove_file(thumb);
+            }
         }
     }
     if !succeeded_ids.is_empty() {
@@ -1843,4 +1953,69 @@ pub async fn cleanup_orphaned_thumbnails(
         deleted_count,
         freed_mb: freed_bytes as f64 / 1_048_576.0,
     })
+}
+
+const MUTED_FOLDER_IDS_FILE: &str = "settings/muted_folder_ids.txt";
+const NOTIFICATIONS_PAUSED_FILE: &str = "settings/notifications_paused.txt";
+
+#[tauri::command]
+pub async fn get_muted_folder_ids(app: AppHandle) -> Result<Vec<i64>, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(MUTED_FOLDER_IDS_FILE);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(content
+        .trim()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<i64>().ok())
+        .collect())
+}
+
+#[derive(serde::Deserialize)]
+pub struct SetMutedFolderIdsParams {
+    pub folder_ids: Vec<i64>,
+}
+
+#[tauri::command]
+pub async fn set_muted_folder_ids(
+    app: AppHandle,
+    params: SetMutedFolderIdsParams,
+) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let settings_dir = app_dir.join("settings");
+    std::fs::create_dir_all(&settings_dir).map_err(|e| e.to_string())?;
+    let content = params
+        .folder_ids
+        .iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    std::fs::write(settings_dir.join("muted_folder_ids.txt"), content)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_notifications_paused(app: AppHandle) -> Result<bool, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(NOTIFICATIONS_PAUSED_FILE);
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(content.trim() == "true")
+}
+
+#[tauri::command]
+pub async fn set_notifications_paused(app: AppHandle, paused: bool) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let settings_dir = app_dir.join("settings");
+    std::fs::create_dir_all(&settings_dir).map_err(|e| e.to_string())?;
+    std::fs::write(
+        settings_dir.join("notifications_paused.txt"),
+        if paused { "true" } else { "false" },
+    )
+    .map_err(|e| e.to_string())
 }

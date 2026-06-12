@@ -117,6 +117,7 @@ export function DuplicateFinder() {
   const duplicateScanning = useGalleryStore((state) => state.duplicateScanning);
   const duplicateScanProgress = useGalleryStore((state) => state.duplicateScanProgress);
   const duplicateScanError = useGalleryStore((state) => state.duplicateScanError);
+  const duplicateScanWarning = useGalleryStore((state) => state.duplicateScanWarning);
   const duplicateSelectedIds = useGalleryStore((state) => state.duplicateSelectedIds);
   const duplicateLastScanned = useGalleryStore((state) => state.duplicateLastScanned);
   const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
@@ -152,8 +153,15 @@ export function DuplicateFinder() {
 
   const progressPercent =
     duplicateScanProgress && duplicateScanProgress.total > 0
-      ? Math.round((duplicateScanProgress.scanned / duplicateScanProgress.total) * 100)
+      ? Math.round((duplicateScanProgress.processed / duplicateScanProgress.total) * 100)
       : 0;
+  const progressLabel = duplicateScanProgress
+    ? duplicateScanProgress.phase === "checking"
+      ? "Checking file sizes"
+      : duplicateScanProgress.phase === "hashing"
+        ? "Hashing duplicate candidates"
+        : "Confirming exact matches"
+    : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#07080f]">
@@ -165,7 +173,7 @@ export function DuplicateFinder() {
             <p className="mt-0.5 text-[11px] text-white/30">
               {duplicateScanning
                 ? duplicateScanProgress
-                  ? `Scanning… ${duplicateScanProgress.scanned.toLocaleString()} / ${duplicateScanProgress.total.toLocaleString()}`
+                  ? `${progressLabel}… ${duplicateScanProgress.processed.toLocaleString()} / ${duplicateScanProgress.total.toLocaleString()}${duplicateScanProgress.skipped > 0 ? ` · ${duplicateScanProgress.skipped.toLocaleString()} skipped` : ""}`
                   : "Starting scan…"
                 : hasResults
                   ? `${duplicateGroups.length} group${duplicateGroups.length === 1 ? "" : "s"} · ${formatBytes(totalWasted)} reclaimable`
@@ -232,6 +240,9 @@ export function DuplicateFinder() {
         {duplicateScanError ? (
           <p className="mt-2 text-[11px] text-red-400/80">{duplicateScanError}</p>
         ) : null}
+        {duplicateScanWarning ? (
+          <p className="mt-2 text-[11px] text-amber-300/70">{duplicateScanWarning}</p>
+        ) : null}
         {deleteResult ? (
           <p className="mt-2 text-[11px] text-white/40">{deleteResult}</p>
         ) : null}
@@ -241,7 +252,7 @@ export function DuplicateFinder() {
       {duplicateScanning && !hasResults ? (
         <div className="flex flex-1 items-center justify-center gap-3 text-white/25">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/15 border-t-white/50" />
-          <span className="text-sm">Hashing files…</span>
+          <span className="text-sm">{progressLabel ? `${progressLabel}…` : "Preparing scan…"}</span>
         </div>
       ) : !hasScanned ? (
         <div className="flex flex-1 items-center justify-center px-8">

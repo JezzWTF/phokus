@@ -74,7 +74,7 @@ pub fn run() {
             // indexer::start_caption_worker(app.handle().clone(), pool.clone(), app_dir.clone());
             indexer::start_tagging_worker(app.handle().clone(), pool.clone(), app_dir.clone());
 
-            let watcher_handle = indexer::start_watcher(app.handle().clone(), pool.clone());
+            let watcher_handle = indexer::start_watcher(app.handle().clone(), pool.clone(), thumb_dir.clone());
 
             app.manage(pool);
             app.manage(media_tools);
@@ -148,6 +148,10 @@ pub fn run() {
             commands::vacuum_database,
             commands::get_orphaned_thumbnails_info,
             commands::cleanup_orphaned_thumbnails,
+            commands::get_muted_folder_ids,
+            commands::set_muted_folder_ids,
+            commands::get_notifications_paused,
+            commands::set_notifications_paused,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

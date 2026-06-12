@@ -1152,6 +1152,57 @@ fn get_pending_thumbnail_jobs_excluding(
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// True if any claimable (pending, non-excluded) jobs exist in `job_table`.
+/// Used by lower-priority workers to defer to higher-priority queues.
+/// `extra_predicate` narrows the image join (e.g. videos only for metadata).
+fn has_claimable_jobs(
+    conn: &Connection,
+    job_table: &str,
+    extra_predicate: &str,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+) -> Result<bool> {
+    let sql = format!(
+        "SELECT EXISTS(
+             SELECT 1
+             FROM {} j
+             JOIN images i ON i.id = j.image_id
+             WHERE j.status = 'pending'
+               {}
+               {}
+         )",
+        job_table,
+        extra_predicate,
+        folder_exclusion_clause("i", excluded_folder_ids)
+    );
+    Ok(conn.query_row(&sql, [], |row| row.get::<_, i64>(0))? != 0)
+}
+
+pub fn has_claimable_thumbnail_jobs(
+    conn: &Connection,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+) -> Result<bool> {
+    has_claimable_jobs(conn, "thumbnail_jobs", "", excluded_folder_ids)
+}
+
+pub fn has_claimable_metadata_jobs(
+    conn: &Connection,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+) -> Result<bool> {
+    has_claimable_jobs(
+        conn,
+        "metadata_jobs",
+        "AND i.media_kind = 'video'",
+        excluded_folder_ids,
+    )
+}
+
+pub fn has_claimable_embedding_jobs(
+    conn: &Connection,
+    excluded_folder_ids: &std::collections::HashSet<i64>,
+) -> Result<bool> {
+    has_claimable_jobs(conn, "embedding_jobs", "", excluded_folder_ids)
+}
+
 pub fn claim_thumbnail_jobs(
     conn: &mut Connection,
     active_folder_ids: &std::collections::HashSet<i64>,
@@ -1676,6 +1727,7 @@ pub fn search_tags_autocomplete(
 pub struct ImagePathRecord {
     pub id: i64,
     pub path: String,
+    pub thumbnail_path: Option<String>,
 }
 
 pub fn get_all_image_paths(
@@ -1683,17 +1735,67 @@ pub fn get_all_image_paths(
     folder_id: Option<i64>,
 ) -> Result<Vec<ImagePathRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, path FROM images WHERE (?1 IS NULL OR folder_id = ?1) ORDER BY id",
+        "SELECT id, path, thumbnail_path FROM images WHERE (?1 IS NULL OR folder_id = ?1) ORDER BY id",
     )?;
     let rows = stmt
         .query_map(params![folder_id], |row| {
             Ok(ImagePathRecord {
                 id: row.get(0)?,
                 path: row.get(1)?,
+                thumbnail_path: row.get(2)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
+}
+
+/// Returns (image_id, thumbnail_path) for the given path. Used by the watcher
+/// delete branch so it can clean up the thumbnail file in the same step.
+pub fn get_image_id_and_thumbnail_by_path(
+    conn: &Connection,
+    path: &str,
+) -> Result<Option<(i64, Option<String>)>> {
+    let result = conn.query_row(
+        "SELECT id, thumbnail_path FROM images WHERE path = ?1",
+        params![path],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+    );
+    match result {
+        Ok(v) => Ok(Some(v)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Returns all non-null thumbnail_path values for images in a folder.
+/// Called before folder deletion so callers can remove the files from disk.
+pub fn get_thumbnail_paths_for_folder(
+    conn: &Connection,
+    folder_id: i64,
+) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT thumbnail_path FROM images WHERE folder_id = ?1 AND thumbnail_path IS NOT NULL",
+    )?;
+    let rows = stmt
+        .query_map([folder_id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Updates a moved/renamed image's path and thumbnail_path in-place.
+/// Pass `new_thumbnail_path = None` to clear it (triggers regeneration).
+pub fn update_image_path(
+    conn: &Connection,
+    image_id: i64,
+    new_path: &str,
+    new_filename: &str,
+    new_thumbnail_path: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE images SET path = ?2, filename = ?3, thumbnail_path = ?4 WHERE id = ?1",
+        params![image_id, new_path, new_filename, new_thumbnail_path],
+    )?;
+    Ok(())
 }
 
 pub fn get_explore_tags(

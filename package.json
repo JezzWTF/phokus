@@ -6,6 +6,7 @@
   "scripts": {
     "build:app": "tauri build",
     "build:vite": "tsc && vite build",
+    "clean:app": "cd src-tauri && cargo clean",
     "dev:app": "tauri dev",
     "dev:vite": "vite",
     "preview": "vite preview",

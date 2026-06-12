@@ -4,6 +4,11 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { notifyTaskComplete } from "./notifications";
 
+// Per-folder debounce timers for batching notifications.
+// Keyed as `${folderId}:embedding` or `${folderId}:tagging`.
+const notificationTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const NOTIFICATION_DEBOUNCE_MS = 6000;
+
 export interface Folder {
   id: number;
   path: string;
@@ -165,6 +170,20 @@ export interface DuplicateGroup {
   images: ImageRecord[];
 }
 
+export interface DuplicateScanProgress {
+  phase: "checking" | "hashing" | "confirming";
+  processed: number;
+  total: number;
+  skipped: number;
+}
+
+interface DuplicateScanResult {
+  groups: DuplicateGroup[];
+  scanned_files: number;
+  candidate_files: number;
+  skipped_files: number;
+}
+
 export interface SimilarImagesPage {
   images: ImageRecord[];
   offset: number;
@@ -288,6 +307,8 @@ interface GalleryState {
   settingsOpen: boolean;
   taggingQueueScope: TaggingQueueScope;
   taggingQueueFolderIds: number[];
+  mutedFolderIds: number[];
+  notificationsPaused: boolean;
 
   taggerModelStatus: TaggerModelStatus | null;
   taggerModelPreparing: boolean;
@@ -301,8 +322,9 @@ interface GalleryState {
 
   duplicateGroups: DuplicateGroup[];
   duplicateScanning: boolean;
-  duplicateScanProgress: { scanned: number; total: number } | null;
+  duplicateScanProgress: DuplicateScanProgress | null;
   duplicateScanError: string | null;
+  duplicateScanWarning: string | null;
   duplicateSelectedIds: Set<number>;
   duplicateLastScanned: number | null; // Unix timestamp (seconds)
   duplicateScanFolderId: number | null | undefined; // undefined = never scanned
@@ -360,6 +382,10 @@ interface GalleryState {
   loadTaggingQueueFolderIds: () => Promise<void>;
   toggleTaggingQueueFolder: (folderId: number) => void;
   setTaggingQueueFolderIds: (folderIds: number[]) => void;
+  loadMutedFolderIds: () => Promise<void>;
+  toggleMutedFolder: (folderId: number) => void;
+  loadNotificationsPaused: () => Promise<void>;
+  setNotificationsPaused: (paused: boolean) => void;
   openAppDataFolder: () => Promise<void>;
   getDatabaseInfo: () => Promise<DatabaseInfo>;
   vacuumDatabase: () => Promise<VacuumResult>;
@@ -635,6 +661,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   settingsOpen: false,
   taggingQueueScope: "all",
   taggingQueueFolderIds: [],
+  mutedFolderIds: [],
+  notificationsPaused: false,
 
   taggerModelStatus: null,
   taggerModelPreparing: false,
@@ -650,6 +678,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   duplicateScanning: false,
   duplicateScanProgress: null,
   duplicateScanError: null,
+  duplicateScanWarning: null,
   duplicateSelectedIds: new Set(),
   duplicateLastScanned: null,
   duplicateScanFolderId: undefined,
@@ -941,7 +970,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     if (activeView === "duplicates") {
       const { selectedFolderId, duplicateScanFolderId } = get();
       if (duplicateScanFolderId !== selectedFolderId) {
-        set({ activeView, duplicateGroups: [], duplicateLastScanned: null, duplicateScanFolderId: undefined });
+        set({
+          activeView,
+          duplicateGroups: [],
+          duplicateLastScanned: null,
+          duplicateScanFolderId: undefined,
+          duplicateScanWarning: null,
+        });
         void get().loadDuplicateScanCache(selectedFolderId);
         return;
       }
@@ -1371,6 +1406,39 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     void invoke("set_tagging_queue_folder_ids", { folder_ids: taggingQueueFolderIds }).catch(() => {});
   },
 
+  loadMutedFolderIds: async () => {
+    try {
+      const folderIds = await invoke<number[]>("get_muted_folder_ids");
+      set({ mutedFolderIds: folderIds });
+    } catch {
+      // fall back to in-memory default
+    }
+  },
+
+  toggleMutedFolder: (folderId) => {
+    set((state) => {
+      const next = state.mutedFolderIds.includes(folderId)
+        ? state.mutedFolderIds.filter((id) => id !== folderId)
+        : [...state.mutedFolderIds, folderId];
+      void invoke("set_muted_folder_ids", { folder_ids: next }).catch(() => {});
+      return { mutedFolderIds: next };
+    });
+  },
+
+  loadNotificationsPaused: async () => {
+    try {
+      const paused = await invoke<boolean>("get_notifications_paused");
+      set({ notificationsPaused: paused });
+    } catch {
+      // fall back to in-memory default
+    }
+  },
+
+  setNotificationsPaused: (paused) => {
+    set({ notificationsPaused: paused });
+    void invoke("set_notifications_paused", { paused }).catch(() => {});
+  },
+
   openAppDataFolder: async () => {
     await invoke("open_app_data_folder");
   },
@@ -1537,23 +1605,42 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     interface CacheResult { groups: DuplicateGroup[]; scanned_at: number }
     const cached = await invoke<CacheResult | null>("load_duplicate_scan_cache", { folderId: folderId ?? null });
     if (cached) {
-      set({ duplicateGroups: cached.groups, duplicateLastScanned: cached.scanned_at, duplicateScanFolderId: folderId });
+      set({
+        duplicateGroups: cached.groups,
+        duplicateLastScanned: cached.scanned_at,
+        duplicateScanFolderId: folderId,
+        duplicateScanWarning: null,
+      });
     }
   },
 
   scanDuplicates: async (folderId = null) => {
     const { listen } = await import("@tauri-apps/api/event");
-    set({ duplicateScanning: true, duplicateGroups: [], duplicateScanProgress: null, duplicateScanError: null, duplicateSelectedIds: new Set() });
-    const unlisten = await listen<[number, number]>("duplicate_scan_progress", (event) => {
-      const [scanned, total] = event.payload;
-      set({ duplicateScanProgress: { scanned, total } });
+    set({
+      duplicateScanning: true,
+      duplicateGroups: [],
+      duplicateScanProgress: null,
+      duplicateScanError: null,
+      duplicateScanWarning: null,
+      duplicateSelectedIds: new Set(),
+    });
+    const unlisten = await listen<DuplicateScanProgress>("duplicate_scan_progress", (event) => {
+      set({ duplicateScanProgress: event.payload });
     });
     try {
-      const groups = await invoke<DuplicateGroup[]>("find_duplicates", { folderId: folderId ?? null });
-      set({ duplicateGroups: groups, duplicateLastScanned: Math.floor(Date.now() / 1000), duplicateScanFolderId: folderId });
+      const result = await invoke<DuplicateScanResult>("find_duplicates", { folderId: folderId ?? null });
+      const warning = result.skipped_files > 0
+        ? `${result.skipped_files.toLocaleString()} file${result.skipped_files === 1 ? "" : "s"} could not be read and were skipped.`
+        : null;
+      set({
+        duplicateGroups: result.groups,
+        duplicateLastScanned: Math.floor(Date.now() / 1000),
+        duplicateScanFolderId: folderId,
+        duplicateScanWarning: warning,
+      });
       void notifyTaskComplete(
         "Duplicate scan complete",
-        groups.length === 1 ? "Found 1 duplicate group." : `Found ${groups.length.toLocaleString()} duplicate groups.`,
+        `${result.groups.length === 1 ? "Found 1 duplicate group." : `Found ${result.groups.length.toLocaleString()} duplicate groups.`}${warning ? ` ${warning}` : ""}`,
       );
     } catch (e) {
       set({ duplicateScanError: String(e) });
@@ -1659,11 +1746,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           progress.total > 0 &&
           progress.indexed >= progress.total
         ) {
-          const folderName = get().folders.find((folder) => folder.id === progress.folder_id)?.name;
-          void notifyTaskComplete(
-            "Folder scan complete",
-            folderName ? `${folderName} has finished scanning.` : "A folder has finished scanning.",
-          );
+          const { notificationsPaused, mutedFolderIds } = get();
+          if (!notificationsPaused && !mutedFolderIds.includes(progress.folder_id)) {
+            const folderName = get().folders.find((folder) => folder.id === progress.folder_id)?.name;
+            void notifyTaskComplete(
+              "Folder scan complete",
+              folderName ? `${folderName} has finished scanning.` : "A folder has finished scanning.",
+            );
+          }
         }
         void get().loadFolders();
         void get().loadBackgroundJobProgress();
@@ -1688,32 +1778,52 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         const previous = previousProgress[progress.folder_id];
         if (!previous) continue;
 
+        const { notificationsPaused, mutedFolderIds } = get();
+        const suppressed = notificationsPaused || mutedFolderIds.includes(progress.folder_id);
         const folderName =
           get().folders.find((folder) => folder.id === progress.folder_id)?.name ?? "Folder";
 
-        if (previous.embedding_pending > 0 && progress.embedding_pending === 0) {
-          const failureDetail =
-            progress.embedding_failed > 0
-              ? ` ${progress.embedding_failed.toLocaleString()} failed.`
-              : "";
-          void notifyTaskComplete(
-            "Embeddings complete",
-            `${folderName} finished generating embeddings.${failureDetail}`,
-          );
+        // Embeddings — debounced so rapid file additions don't fire per-file.
+        const embeddingKey = `${progress.folder_id}:embedding`;
+        if (!suppressed) {
+          if (previous.embedding_pending > 0 && progress.embedding_pending === 0) {
+            clearTimeout(notificationTimers.get(embeddingKey));
+            const failureDetail =
+              progress.embedding_failed > 0
+                ? ` ${progress.embedding_failed.toLocaleString()} failed.`
+                : "";
+            const body = `${folderName} finished generating embeddings.${failureDetail}`;
+            notificationTimers.set(embeddingKey, setTimeout(() => {
+              notificationTimers.delete(embeddingKey);
+              void notifyTaskComplete("Embeddings complete", body);
+            }, NOTIFICATION_DEBOUNCE_MS));
+          } else if (previous.embedding_pending === 0 && progress.embedding_pending > 0) {
+            // More jobs queued — cancel the pending notification.
+            clearTimeout(notificationTimers.get(embeddingKey));
+            notificationTimers.delete(embeddingKey);
+          }
         }
 
-        if (previous.tagging_pending > 0 && progress.tagging_pending === 0) {
-          const failureDetail =
-            progress.tagging_failed > 0
-              ? ` ${progress.tagging_failed.toLocaleString()} failed.`
-              : "";
-          void notifyTaskComplete(
-            "AI tagging complete",
-            `${folderName} finished generating tags.${failureDetail}`,
-          );
-          // New tags are now in the DB — invalidate the Explore tag cache so
-          // reopening Explore reflects the updated tag distribution.
-          set({ exploreTagsFolderId: undefined });
+        // Tagging — same debounce pattern.
+        const taggingKey = `${progress.folder_id}:tagging`;
+        if (!suppressed) {
+          if (previous.tagging_pending > 0 && progress.tagging_pending === 0) {
+            clearTimeout(notificationTimers.get(taggingKey));
+            const failureDetail =
+              progress.tagging_failed > 0
+                ? ` ${progress.tagging_failed.toLocaleString()} failed.`
+                : "";
+            const body = `${folderName} finished generating tags.${failureDetail}`;
+            notificationTimers.set(taggingKey, setTimeout(() => {
+              notificationTimers.delete(taggingKey);
+              void notifyTaskComplete("AI tagging complete", body);
+              // New tags landed — invalidate Explore tag cache.
+              set({ exploreTagsFolderId: undefined });
+            }, NOTIFICATION_DEBOUNCE_MS));
+          } else if (previous.tagging_pending === 0 && progress.tagging_pending > 0) {
+            clearTimeout(notificationTimers.get(taggingKey));
+            notificationTimers.delete(taggingKey);
+          }
         }
       }
 
