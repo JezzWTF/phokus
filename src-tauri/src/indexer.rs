@@ -778,10 +778,15 @@ fn process_embedding_batch(
 ) -> Result<bool> {
     let batch_started_at = Instant::now();
     let claim_started_at = Instant::now();
-    let paused_folders = paused_folder_ids("embedding");
+    // Exclude folders that are actively indexing (matching the thumbnail and
+    // metadata workers): embedding mid-scan competes with the scanner for
+    // CPU, disk, and the DB writer, and video jobs would fail-fast anyway
+    // because their thumbnails are deferred until indexing completes.
+    let mut excluded_folders = paused_folder_ids("embedding");
+    excluded_folders.extend(active_indexing_folders());
     let jobs = with_db_write_lock(|| {
         let mut conn = pool.get()?;
-        db::claim_embedding_jobs(&mut conn, &paused_folders, EMBEDDING_BATCH_SIZE)
+        db::claim_embedding_jobs(&mut conn, &excluded_folders, EMBEDDING_BATCH_SIZE)
     })?;
     let claim_elapsed = claim_started_at.elapsed();
 
@@ -1031,11 +1036,14 @@ fn process_tagging_batch(
         return Ok(false);
     }
 
-    let paused_folders = paused_folder_ids("tagging");
+    // Exclude actively-indexing folders for the same reason as the other
+    // workers: don't compete with a running scan.
+    let mut excluded_folders = paused_folder_ids("tagging");
+    excluded_folders.extend(active_indexing_folders());
     let batch_size = crate::tagger::tagger_batch_size(app_data_dir);
     let jobs = with_db_write_lock(|| {
         let mut conn = pool.get()?;
-        db::claim_tagging_jobs(&mut conn, &paused_folders, batch_size)
+        db::claim_tagging_jobs(&mut conn, &excluded_folders, batch_size)
     })?;
 
     if jobs.is_empty() {
