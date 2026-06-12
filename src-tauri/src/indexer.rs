@@ -219,10 +219,16 @@ pub fn start_thumbnail_worker(
 
 pub fn start_metadata_worker(app: AppHandle, pool: DbPool, media_tools: MediaTools) {
     std::thread::spawn(move || loop {
-        if let Err(error) = process_metadata_batch(&app, &pool, &media_tools) {
-            eprintln!("Metadata worker error: {}", error);
+        // Only back off when the queue is empty (or errored); while jobs are
+        // pending, claim the next batch immediately.
+        match process_metadata_batch(&app, &pool, &media_tools) {
+            Ok(true) => {}
+            Ok(false) => std::thread::sleep(std::time::Duration::from_millis(250)),
+            Err(error) => {
+                eprintln!("Metadata worker error: {}", error);
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
         }
-        std::thread::sleep(std::time::Duration::from_millis(250));
     });
 }
 
@@ -689,7 +695,13 @@ fn persist_thumbnail_results(
     Ok(())
 }
 
-fn process_metadata_batch(app: &AppHandle, pool: &DbPool, media_tools: &MediaTools) -> Result<()> {
+/// Returns `Ok(true)` if a batch was claimed and processed, `Ok(false)` if
+/// the queue was empty.
+fn process_metadata_batch(
+    app: &AppHandle,
+    pool: &DbPool,
+    media_tools: &MediaTools,
+) -> Result<bool> {
     let jobs = {
         with_db_write_lock(|| {
             let mut conn = pool.get()?;
@@ -708,65 +720,49 @@ fn process_metadata_batch(app: &AppHandle, pool: &DbPool, media_tools: &MediaToo
     };
 
     if jobs.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
 
-    let results = jobs
-        .into_iter()
-        .map(|job| {
-            (
-                job.image_id,
-                probe_video_metadata(media_tools, Path::new(&job.path)),
-            )
-        })
-        .collect::<Vec<_>>();
+    // Probes run sequentially (each ffprobe blocks on its process); results
+    // are committed per item so progress keeps moving through slow stretches.
+    for job in jobs {
+        let metadata_result = probe_video_metadata(media_tools, Path::new(&job.path));
 
-    let updated_images = {
-        with_db_write_lock(|| {
+        let updated_image = with_db_write_lock(|| {
             let mut conn = pool.get()?;
             let tx = conn.transaction()?;
-            let mut updated_images = Vec::new();
-
-            for (image_id, metadata_result) in results {
-                let metadata = match metadata_result {
-                    Ok(metadata) => metadata,
-                    Err(error) => {
-                        db::mark_metadata_failed(&tx, image_id, &error.to_string())?;
-                        continue;
-                    }
-                };
-
-                updated_images.push(db::mark_metadata_ready(
+            let updated = match metadata_result {
+                Ok(metadata) => Some(db::mark_metadata_ready(
                     &tx,
-                    image_id,
+                    job.image_id,
                     metadata.duration_ms,
                     metadata.width,
                     metadata.height,
                     metadata.video_codec.as_deref(),
                     metadata.audio_codec.as_deref(),
-                )?);
-            }
-
+                )?),
+                Err(error) => {
+                    db::mark_metadata_failed(&tx, job.image_id, &error.to_string())?;
+                    None
+                }
+            };
             tx.commit()?;
-            Ok(updated_images)
-        })?
-    };
+            Ok(updated)
+        })?;
 
-    if !updated_images.is_empty() {
-        let folder_ids = updated_images
-            .iter()
-            .map(|image| image.folder_id)
-            .collect::<HashSet<_>>();
-        emit_media_updates(
-            app,
-            &MediaUpdateBatch {
-                images: updated_images,
-            },
-        );
-        emit_folder_job_progress(app, pool, &folder_ids.into_iter().collect::<Vec<_>>(), true);
+        if let Some(image) = updated_image {
+            let folder_id = image.folder_id;
+            emit_media_updates(
+                app,
+                &MediaUpdateBatch {
+                    images: vec![image],
+                },
+            );
+            emit_folder_job_progress(app, pool, &[folder_id], false);
+        }
     }
 
-    Ok(())
+    Ok(true)
 }
 
 /// Returns `Ok(true)` if a batch was claimed and processed, `Ok(false)` if
