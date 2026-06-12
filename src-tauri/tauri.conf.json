@@ -22,11 +22,12 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:; object-src 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420; font-src 'self' data:; object-src 'none'",
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "**"
+          "$APPDATA/thumbnails/**"
         ]
       }
     }

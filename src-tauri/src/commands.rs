@@ -227,6 +227,14 @@ pub async fn add_folder(
         return Err("Path is not a valid directory".into());
     }
 
+    // Let the webview load media from this folder via the asset protocol.
+    if let Err(error) = app
+        .asset_protocol_scope()
+        .allow_directory(&folder_path, true)
+    {
+        log::error!("Failed to allow asset scope for {}: {}", path, error);
+    }
+
     let name = folder_path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -397,6 +405,15 @@ pub async fn update_folder_path(
     if !new_path_buf.is_dir() {
         return Err(format!("Path is not a valid directory: {}", new_path));
     }
+
+    // Let the webview load media from the relocated folder via the asset protocol.
+    if let Err(error) = app
+        .asset_protocol_scope()
+        .allow_directory(&new_path_buf, true)
+    {
+        log::error!("Failed to allow asset scope for {}: {}", new_path, error);
+    }
+
     let new_name = new_path_buf
         .file_name()
         .map(|n| n.to_string_lossy().to_string())

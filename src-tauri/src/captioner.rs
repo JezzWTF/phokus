@@ -470,7 +470,7 @@ impl FlorenceCaptioner {
             acceleration,
             false,
         )?;
-        println!(
+        log::info!(
             "Florence sessions loaded in {:?} with {:?} acceleration (total init {:?})",
             sessions_started_at.elapsed(),
             acceleration,
@@ -490,9 +490,9 @@ impl FlorenceCaptioner {
 
     pub fn generate(&mut self, image_path: &Path) -> Result<String> {
         let started_at = Instant::now();
-        println!("Florence caption started: {}", image_path.display());
+        log::info!("Florence caption started: {}", image_path.display());
         let image_features = run_vision_encoder(&mut self.vision_session, image_path)?;
-        println!("Florence vision encoder done in {:?}", started_at.elapsed());
+        log::info!("Florence vision encoder done in {:?}", started_at.elapsed());
         let prompt_ids = self
             .tokenizer
             .encode(self.caption_detail.prompt(), false)
@@ -502,7 +502,7 @@ impl FlorenceCaptioner {
             .map(|id| i64::from(*id))
             .collect::<Vec<_>>();
         let prompt_embeds = run_token_embedder(&mut self.embed_session, &prompt_ids)?;
-        println!(
+        log::info!(
             "Florence token embeddings done in {:?}",
             started_at.elapsed()
         );
@@ -513,7 +513,7 @@ impl FlorenceCaptioner {
             &encoder_embeds,
             &encoder_attention_mask,
         )?;
-        println!("Florence encoder done in {:?}", started_at.elapsed());
+        log::info!("Florence encoder done in {:?}", started_at.elapsed());
 
         let generated_ids = run_decoder(
             &mut self.decoder_prefill_session,
@@ -523,7 +523,7 @@ impl FlorenceCaptioner {
             &encoder_attention_mask,
             self.caption_detail.max_new_tokens(),
         )?;
-        println!("Florence decoder done in {:?}", started_at.elapsed());
+        log::info!("Florence decoder done in {:?}", started_at.elapsed());
 
         let generated_u32 = generated_ids
             .into_iter()
@@ -784,7 +784,7 @@ fn run_decoder(
             "inputs_embeds" => prefill_inputs_embeds_tensor
         })
         .map_err(|error| anyhow::anyhow!("{error}"))?;
-    println!(
+    log::info!(
         "Florence decoder prefill done in {:?}",
         prefill_started_at.elapsed()
     );
@@ -848,7 +848,7 @@ fn run_decoder(
         decoder_kv = collect_present_key_values(&outputs, DECODER_LAYERS)?;
     }
 
-    println!("Florence decoder produced {} token(s)", generated.len());
+    log::info!("Florence decoder produced {} token(s)", generated.len());
     Ok(generated)
 }
 
@@ -886,7 +886,7 @@ fn create_session(
         CaptionAcceleration::Auto | CaptionAcceleration::Directml => {
             // `allow_directml` is false for the 4 text/decoder sessions —
             // they intentionally run on CPU regardless of the setting.
-            println!(
+            log::info!(
                 "Florence: using CPU for {} (DirectML disabled for this session type)",
                 path.display()
             );

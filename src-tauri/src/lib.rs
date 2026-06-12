@@ -16,6 +16,28 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be the first plugin: a second launch hands its args to the
+        // running instance and exits before anything else initializes.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("phokus".into()),
+                    }),
+                ])
+                .level(log::LevelFilter::Info)
+                .max_file_size(5 * 1024 * 1024)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
@@ -43,12 +65,12 @@ pub fn run() {
                 let backfilled =
                     db::backfill_embedding_jobs(&conn).expect("Failed to backfill embedding jobs");
                 if backfilled > 0 {
-                    println!("Backfilled {} embedding jobs.", backfilled);
+                    log::info!("Backfilled {} embedding jobs.", backfilled);
                 }
                 let (orphaned_vectors, missing_vectors) = db::repair_embedding_consistency(&conn)
                     .expect("Failed to repair embedding consistency");
                 if orphaned_vectors > 0 || missing_vectors > 0 {
-                    println!(
+                    log::info!(
                         "Repaired embedding consistency: removed {} orphaned vectors, requeued {} missing vectors.",
                         orphaned_vectors, missing_vectors
                     );
@@ -57,6 +79,19 @@ pub fn run() {
 
             let thumb_dir = app_dir.join("thumbnails");
             std::fs::create_dir_all(&thumb_dir).expect("Failed to create thumbnail dir");
+
+            // The asset protocol scope is no longer a blanket "**": thumbnails
+            // are allowed statically in tauri.conf.json, and each indexed
+            // folder is allowed here (and in add_folder/update_folder_path).
+            {
+                let scope = app.asset_protocol_scope();
+                let conn = pool.get().expect("Failed to get connection for asset scope");
+                for folder in db::get_folders(&conn).unwrap_or_default() {
+                    if let Err(error) = scope.allow_directory(&folder.path, true) {
+                        log::error!("Failed to allow asset scope for {}: {}", folder.path, error);
+                    }
+                }
+            }
 
             let thumbnail_worker_count = std::thread::available_parallelism()
                 .map(|parallelism| StorageProfile::Balanced.thumbnail_workers(parallelism.get()))

@@ -57,6 +57,10 @@ tauri-plugin-notification = "2"
 mozjpeg = "0.10.13"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-log = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+log = "0.4"
 
 # ── Dev-mode performance ────────────────────────────────────────────────────
 # opt-level=1 on the main crate keeps incremental compile short.

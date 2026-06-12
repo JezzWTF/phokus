@@ -20,7 +20,7 @@ fn with_text_embedder<T>(f: impl FnOnce(&ClipImageEmbedder) -> Result<T>) -> Res
         .lock()
         .map_err(|_| anyhow::anyhow!("Text embedder lock poisoned"))?;
     if guard.is_none() {
-        println!("Initializing CLIP text embedder...");
+        log::info!("Initializing CLIP text embedder...");
         *guard = Some(ClipImageEmbedder::new()?);
     }
     f(guard.as_ref().unwrap())
@@ -35,13 +35,13 @@ pub struct ClipImageEmbedder {
 
 impl ClipImageEmbedder {
     pub fn new() -> Result<Self> {
-        println!("Initializing CLIP image embedder...");
+        log::info!("Initializing CLIP image embedder...");
         let api = Api::new()?;
         let repo = api.repo(Repo::new(
             "laion/CLIP-ViT-B-32-laion2B-s34B-b79K".to_string(),
             RepoType::Model,
         ));
-        println!("Resolving CLIP model weights from Hugging Face cache...");
+        log::info!("Resolving CLIP model weights from Hugging Face cache...");
         let model_path = repo.get("model.safetensors")?;
         let tokenizer_repo = api.repo(Repo::new(
             "openai/clip-vit-base-patch32".to_string(),
@@ -60,7 +60,7 @@ impl ClipImageEmbedder {
         };
         let model = ClipModel::new(vb, &config)?;
         let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(anyhow::Error::msg)?;
-        println!("CLIP image embedder ready.");
+        log::info!("CLIP image embedder ready.");
 
         Ok(Self {
             model,
@@ -177,14 +177,14 @@ impl ClipImageEmbedder {
 fn resolve_device() -> Result<Device> {
     match Device::cuda_if_available(0) {
         Ok(device) if device.is_cuda() => {
-            println!("CLIP embedder: using CUDA GPU (device 0).");
+            log::info!("CLIP embedder: using CUDA GPU (device 0).");
             return Ok(device);
         }
         Ok(_) => {
-            println!("CLIP embedder: no compatible CUDA GPU found — using CPU.");
+            log::info!("CLIP embedder: no compatible CUDA GPU found — using CPU.");
         }
         Err(e) => {
-            println!("CLIP embedder: CUDA init failed ({e}) — using CPU.");
+            log::info!("CLIP embedder: CUDA init failed ({e}) — using CPU.");
         }
     }
     Ok(Device::Cpu)

@@ -443,7 +443,7 @@ impl WdTagger {
 
         let labels = load_labels(&labels_path)?;
 
-        println!(
+        log::info!(
             "WD tagger loaded in {:?} ({} labels, input {}x{}, {:?} acceleration)",
             started_at.elapsed(),
             labels.len(),
@@ -519,7 +519,7 @@ impl WdTagger {
         tags.sort_by(|a, b| b.confidence.total_cmp(&a.confidence));
         tags.truncate(max_tags);
 
-        println!(
+        log::info!(
             "WD tagger: {} tags (threshold={}, rating={}) in {:?} for {}",
             tags.len(),
             self.threshold,
@@ -559,13 +559,13 @@ fn create_tagger_session(path: &Path, acceleration: TaggerAcceleration) -> Resul
 
     let mut builder = match acceleration {
         TaggerAcceleration::Cpu => {
-            println!("WD tagger: using CPU execution provider");
+            log::info!("WD tagger: using CPU execution provider");
             builder
         }
         TaggerAcceleration::Auto => builder
             .with_execution_providers([ep::DirectML::default().build().fail_silently()])
             .unwrap_or_else(|error| {
-                println!("WD tagger: DirectML unavailable, falling back to CPU");
+                log::info!("WD tagger: DirectML unavailable, falling back to CPU");
                 error.recover()
             }),
         TaggerAcceleration::Directml => builder

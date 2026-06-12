@@ -43,22 +43,23 @@ impl MediaTools {
         }
         auto_download_with_progress(|event| match event {
             FfmpegDownloadProgressEvent::Starting => {
-                println!("Downloading bundled FFmpeg...");
+                log::info!("Downloading bundled FFmpeg...");
             }
             FfmpegDownloadProgressEvent::Downloading {
                 total_bytes,
                 downloaded_bytes,
             } => {
-                println!(
+                log::info!(
                     "Downloading bundled FFmpeg: {}/{} bytes",
-                    downloaded_bytes, total_bytes
+                    downloaded_bytes,
+                    total_bytes
                 );
             }
             FfmpegDownloadProgressEvent::UnpackingArchive => {
-                println!("Unpacking bundled FFmpeg...");
+                log::info!("Unpacking bundled FFmpeg...");
             }
             FfmpegDownloadProgressEvent::Done => {
-                println!("Bundled FFmpeg ready.");
+                log::info!("Bundled FFmpeg ready.");
             }
         })
     }
