@@ -204,10 +204,16 @@ pub fn start_thumbnail_worker(
     cache_dir: PathBuf,
 ) {
     std::thread::spawn(move || loop {
-        if let Err(error) = process_thumbnail_batch(&app, &pool, &media_tools, &cache_dir) {
-            eprintln!("Thumbnail worker error: {}", error);
+        // Only back off when the queue is empty (or errored); while jobs are
+        // pending, claim the next batch immediately.
+        match process_thumbnail_batch(&app, &pool, &media_tools, &cache_dir) {
+            Ok(true) => {}
+            Ok(false) => std::thread::sleep(std::time::Duration::from_millis(250)),
+            Err(error) => {
+                eprintln!("Thumbnail worker error: {}", error);
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
         }
-        std::thread::sleep(std::time::Duration::from_millis(250));
     });
 }
 
@@ -554,12 +560,14 @@ fn commit_batch(pool: &DbPool, records: &[ImageRecord]) -> Result<Vec<ImageRecor
     Ok(committed)
 }
 
+/// Returns `Ok(true)` if a batch was claimed and processed, `Ok(false)` if
+/// the queue was empty.
 fn process_thumbnail_batch(
     app: &AppHandle,
     pool: &DbPool,
     media_tools: &MediaTools,
     cache_dir: &Path,
-) -> Result<()> {
+) -> Result<bool> {
     let jobs = {
         with_db_write_lock(|| {
             let mut conn = pool.get()?;
@@ -578,7 +586,7 @@ fn process_thumbnail_batch(
     };
 
     if jobs.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
 
     println!("Thumbnail batch claimed: {} items", jobs.len());
@@ -586,33 +594,39 @@ fn process_thumbnail_batch(
     let (image_jobs, video_jobs): (Vec<_>, Vec<_>) =
         jobs.into_iter().partition(|job| job.media_kind == "image");
 
-    let mut results = image_jobs
-        .par_iter()
-        .map(|job| {
-            (
-                job.image_id,
-                if job.media_kind == "image" {
-                    thumbnail::generate_image_thumbnail(Path::new(&job.path), cache_dir).map(Some)
-                } else {
-                    thumbnail::generate_video_thumbnail(
-                        media_tools,
-                        Path::new(&job.path),
-                        cache_dir,
-                    )
-                    .map(Some)
-                },
-            )
-        })
-        .collect::<Vec<_>>();
-
-    for job in video_jobs {
-        results.push((
-            job.image_id,
-            thumbnail::generate_video_thumbnail(media_tools, Path::new(&job.path), cache_dir)
-                .map(Some),
-        ));
+    // Images: parallel decode, committed as one batch.
+    if !image_jobs.is_empty() {
+        let results = image_jobs
+            .par_iter()
+            .map(|job| {
+                (
+                    job.image_id,
+                    thumbnail::generate_image_thumbnail(Path::new(&job.path), cache_dir).map(Some),
+                )
+            })
+            .collect::<Vec<_>>();
+        persist_thumbnail_results(app, pool, results)?;
     }
 
+    // Videos: sequential, off the rayon pool — each ffmpeg call blocks its
+    // thread, and a video-heavy batch on the shared pool would starve image
+    // decoding across all workers. Committed per item so progress keeps
+    // moving through slow stretches.
+    for job in &video_jobs {
+        let result =
+            thumbnail::generate_video_thumbnail(media_tools, Path::new(&job.path), cache_dir)
+                .map(Some);
+        persist_thumbnail_results(app, pool, vec![(job.image_id, result)])?;
+    }
+
+    Ok(true)
+}
+
+fn persist_thumbnail_results(
+    app: &AppHandle,
+    pool: &DbPool,
+    results: Vec<(i64, anyhow::Result<Option<thumbnail::GeneratedThumbnail>>)>,
+) -> Result<()> {
     let updated_images = {
         with_db_write_lock(|| {
             let mut conn = pool.get()?;
