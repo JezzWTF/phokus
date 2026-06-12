@@ -2,6 +2,7 @@ import { useEffect, useCallback, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useGalleryStore, ImageTag, AiRating } from "../store";
+import { VideoPlayer } from "./VideoPlayer";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -223,8 +224,9 @@ export function Lightbox() {
         }
       }
       if (regionSelectMode) return; // block nav keys during selection
-      if (event.key === "ArrowLeft") goPrev();
-      if (event.key === "ArrowRight") goNext();
+      // Shift+arrows are reserved for video seeking (handled by VideoPlayer)
+      if (event.key === "ArrowLeft" && !event.shiftKey) goPrev();
+      if (event.key === "ArrowRight" && !event.shiftKey) goNext();
       if (event.key === "+" || event.key === "=") setZoom((value) => Math.min(3, value + 0.25));
       if (event.key === "-") setZoom((value) => Math.max(0.75, value - 0.25));
     };
@@ -365,19 +367,18 @@ export function Lightbox() {
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={selectedImage.id}
-                    className="flex items-center justify-center"
+                    className={
+                      selectedImage.media_kind === "video"
+                        ? "absolute inset-0"
+                        : "flex items-center justify-center"
+                    }
                     initial={{ opacity: 0.3, scale: 0.985 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0.3, scale: 0.985 }}
                     transition={{ duration: 0.12 }}
                   >
                     {selectedImage.media_kind === "video" ? (
-                      <video
-                        src={convertFileSrc(selectedImage.path)}
-                        controls
-                        className="max-h-full max-w-full rounded-2xl shadow-2xl"
-                        style={{ maxHeight: "calc(100vh - 10rem)" }}
-                      />
+                      <VideoPlayer src={convertFileSrc(selectedImage.path)} />
                     ) : (
                       <>
                         <img

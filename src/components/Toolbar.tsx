@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { tileSizeForZoom, useGalleryStore, SortOrder, MediaFilter, SearchCommand, parseSearchValue, searchModeLabel, ExploreTagEntry } from "../store";
+import { FolderScopeDropdown } from "./FolderScopeDropdown";
 
 const BASE_SORT_OPTIONS: { value: SortOrder; label: string }[] = [
   { value: "date_desc", label: "Newest first" },
@@ -162,6 +163,7 @@ export function Toolbar() {
   const mediaJobProgress = useGalleryStore((state) => state.mediaJobProgress);
   const zoomPreset = useGalleryStore((state) => state.zoomPreset);
   const setZoomPreset = useGalleryStore((state) => state.setZoomPreset);
+  const activeView = useGalleryStore((state) => state.activeView);
 
   const hasAnyFailedEmbeddings = Object.values(mediaJobProgress).some((p) => p.embedding_failed > 0);
 
@@ -268,6 +270,8 @@ export function Toolbar() {
             </span>
           )}
         </div>
+
+        {activeView === "timeline" ? <FolderScopeDropdown /> : null}
 
         <div className="flex-1" />
 
