@@ -20,11 +20,11 @@ export function StepAiFeatures() {
   return (
     <div>
       <p className="text-sm leading-relaxed text-gray-300">
-        Two optional AI features run entirely on this machine — nothing is sent anywhere. Both are
-        one-time downloads you can also start later from Settings.
+        Phokus's AI runs entirely on this machine — nothing is sent anywhere. Semantic search sets
+        itself up automatically; AI tagging is optional and only downloads if you want it.
       </p>
 
-      <h4 className="mt-6 text-[12px] font-semibold uppercase tracking-[0.08em] text-gray-400">AI tagging</h4>
+      <h4 className="mt-6 text-[12px] font-semibold uppercase tracking-[0.08em] text-gray-400">AI tagging — optional</h4>
       <div className="mt-1 divide-y divide-white/[0.05]">
         <div className="py-4">
           <div className="flex items-start justify-between gap-6">
@@ -75,14 +75,15 @@ export function StepAiFeatures() {
         </div>
       </div>
 
-      <h4 className="mt-6 text-[12px] font-semibold uppercase tracking-[0.08em] text-gray-400">Semantic search & similarity</h4>
+      <h4 className="mt-6 text-[12px] font-semibold uppercase tracking-[0.08em] text-gray-400">Semantic search & similarity — built in</h4>
       <div className="mt-1 divide-y divide-white/[0.05]">
         <div className="py-4">
           <p className="text-sm text-white">Search by meaning, find look-alikes</p>
           <p className="mt-1 text-xs leading-relaxed text-gray-500">
-            Powers <code className="rounded bg-white/[0.07] px-1 py-0.5 text-[11px] text-gray-200">/s</code> search and
-            "find similar". The CLIP model (~330 MB) downloads automatically the first time embeddings are
-            generated — no action needed; you'll see it in the background-tasks bar.
+            Powers <code className="rounded bg-white/[0.07] px-1 py-0.5 text-[11px] text-gray-200">/s</code> search,
+            "find similar", and the Explore view, so it's part of the standard pipeline: the CLIP model
+            (~330 MB) downloads automatically the first time embeddings run. Nothing to do — you'll see it
+            in the background-tasks bar.
           </p>
         </div>
       </div>
