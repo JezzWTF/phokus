@@ -170,6 +170,20 @@ export interface DuplicateGroup {
   images: ImageRecord[];
 }
 
+export interface DuplicateScanProgress {
+  phase: "checking" | "hashing" | "confirming";
+  processed: number;
+  total: number;
+  skipped: number;
+}
+
+interface DuplicateScanResult {
+  groups: DuplicateGroup[];
+  scanned_files: number;
+  candidate_files: number;
+  skipped_files: number;
+}
+
 export interface SimilarImagesPage {
   images: ImageRecord[];
   offset: number;
@@ -308,8 +322,9 @@ interface GalleryState {
 
   duplicateGroups: DuplicateGroup[];
   duplicateScanning: boolean;
-  duplicateScanProgress: { scanned: number; total: number } | null;
+  duplicateScanProgress: DuplicateScanProgress | null;
   duplicateScanError: string | null;
+  duplicateScanWarning: string | null;
   duplicateSelectedIds: Set<number>;
   duplicateLastScanned: number | null; // Unix timestamp (seconds)
   duplicateScanFolderId: number | null | undefined; // undefined = never scanned
@@ -663,6 +678,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   duplicateScanning: false,
   duplicateScanProgress: null,
   duplicateScanError: null,
+  duplicateScanWarning: null,
   duplicateSelectedIds: new Set(),
   duplicateLastScanned: null,
   duplicateScanFolderId: undefined,
@@ -954,7 +970,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     if (activeView === "duplicates") {
       const { selectedFolderId, duplicateScanFolderId } = get();
       if (duplicateScanFolderId !== selectedFolderId) {
-        set({ activeView, duplicateGroups: [], duplicateLastScanned: null, duplicateScanFolderId: undefined });
+        set({
+          activeView,
+          duplicateGroups: [],
+          duplicateLastScanned: null,
+          duplicateScanFolderId: undefined,
+          duplicateScanWarning: null,
+        });
         void get().loadDuplicateScanCache(selectedFolderId);
         return;
       }
@@ -1583,23 +1605,42 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     interface CacheResult { groups: DuplicateGroup[]; scanned_at: number }
     const cached = await invoke<CacheResult | null>("load_duplicate_scan_cache", { folderId: folderId ?? null });
     if (cached) {
-      set({ duplicateGroups: cached.groups, duplicateLastScanned: cached.scanned_at, duplicateScanFolderId: folderId });
+      set({
+        duplicateGroups: cached.groups,
+        duplicateLastScanned: cached.scanned_at,
+        duplicateScanFolderId: folderId,
+        duplicateScanWarning: null,
+      });
     }
   },
 
   scanDuplicates: async (folderId = null) => {
     const { listen } = await import("@tauri-apps/api/event");
-    set({ duplicateScanning: true, duplicateGroups: [], duplicateScanProgress: null, duplicateScanError: null, duplicateSelectedIds: new Set() });
-    const unlisten = await listen<[number, number]>("duplicate_scan_progress", (event) => {
-      const [scanned, total] = event.payload;
-      set({ duplicateScanProgress: { scanned, total } });
+    set({
+      duplicateScanning: true,
+      duplicateGroups: [],
+      duplicateScanProgress: null,
+      duplicateScanError: null,
+      duplicateScanWarning: null,
+      duplicateSelectedIds: new Set(),
+    });
+    const unlisten = await listen<DuplicateScanProgress>("duplicate_scan_progress", (event) => {
+      set({ duplicateScanProgress: event.payload });
     });
     try {
-      const groups = await invoke<DuplicateGroup[]>("find_duplicates", { folderId: folderId ?? null });
-      set({ duplicateGroups: groups, duplicateLastScanned: Math.floor(Date.now() / 1000), duplicateScanFolderId: folderId });
+      const result = await invoke<DuplicateScanResult>("find_duplicates", { folderId: folderId ?? null });
+      const warning = result.skipped_files > 0
+        ? `${result.skipped_files.toLocaleString()} file${result.skipped_files === 1 ? "" : "s"} could not be read and were skipped.`
+        : null;
+      set({
+        duplicateGroups: result.groups,
+        duplicateLastScanned: Math.floor(Date.now() / 1000),
+        duplicateScanFolderId: folderId,
+        duplicateScanWarning: warning,
+      });
       void notifyTaskComplete(
         "Duplicate scan complete",
-        groups.length === 1 ? "Found 1 duplicate group." : `Found ${groups.length.toLocaleString()} duplicate groups.`,
+        `${result.groups.length === 1 ? "Found 1 duplicate group." : `Found ${result.groups.length.toLocaleString()} duplicate groups.`}${warning ? ` ${warning}` : ""}`,
       );
     } catch (e) {
       set({ duplicateScanError: String(e) });

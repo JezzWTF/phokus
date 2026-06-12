@@ -80,7 +80,7 @@ Database: SQLite with WAL mode, stored in the Tauri app data directory as `galle
 | `media-updated` | `ThumbnailBatch` |
 | `caption-model-progress` | `CaptionModelProgress` |
 | `tagger-model-progress` | `TaggerModelProgress` |
-| `duplicate_scan_progress` | `[scanned, total]` |
+| `duplicate_scan_progress` | `{ phase, processed, total, skipped }` |
 
 ### Key types
 

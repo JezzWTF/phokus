@@ -278,12 +278,16 @@ export function BackgroundTasks() {
     id: -1,
     name: "Duplicate Scan",
     stages: [{
-      label: "Hashing",
+      label: duplicateScanProgress?.phase === "checking"
+        ? "Checking"
+        : duplicateScanProgress?.phase === "confirming"
+          ? "Confirming"
+          : "Hashing",
       detail: duplicateScanProgress
-        ? `${duplicateScanProgress.scanned.toLocaleString()} / ${duplicateScanProgress.total.toLocaleString()}`
+        ? `${duplicateScanProgress.processed.toLocaleString()} / ${duplicateScanProgress.total.toLocaleString()}${duplicateScanProgress.skipped > 0 ? ` · ${duplicateScanProgress.skipped.toLocaleString()} skipped` : ""}`
         : "Starting…",
       progress: duplicateScanProgress && duplicateScanProgress.total > 0
-        ? (duplicateScanProgress.scanned / duplicateScanProgress.total) * 100
+        ? (duplicateScanProgress.processed / duplicateScanProgress.total) * 100
         : null,
       failed: false,
     }],
@@ -310,7 +314,8 @@ export function BackgroundTasks() {
   const embeddingStage = primary.stages.find((s) => s.label === "Embeddings");
   const taggingStage = primary.stages.find((s) => s.label === "Tags");
   const scanningStage = primary.stages.find((s) => s.label === "Scanning");
-  const barProgress = embeddingStage?.progress ?? taggingStage?.progress ?? scanningStage?.progress ?? null;
+  const duplicateStage = primary.id === -1 ? primary.stages[0] : null;
+  const barProgress = embeddingStage?.progress ?? taggingStage?.progress ?? scanningStage?.progress ?? duplicateStage?.progress ?? null;
 
   return (
     <div className="shrink-0 border-b border-white/[0.06]">
@@ -434,7 +439,8 @@ export function BackgroundTasks() {
             const taskEmbeddingStage = task.stages.find((s) => s.label === "Embeddings");
             const taskTaggingStage = task.stages.find((s) => s.label === "Tags");
             const taskScanningStage = task.stages.find((s) => s.label === "Scanning");
-            const taskBarProgress = taskEmbeddingStage?.progress ?? taskTaggingStage?.progress ?? taskScanningStage?.progress ?? null;
+            const taskDuplicateStage = task.id === -1 ? task.stages[0] : null;
+            const taskBarProgress = taskEmbeddingStage?.progress ?? taskTaggingStage?.progress ?? taskScanningStage?.progress ?? taskDuplicateStage?.progress ?? null;
             const taskHasFailed = (task.hasFailedEmbeddings || task.hasFailedTagging || task.hasFailedCaptions) && task.pendingMediaWork === 0;
 
             return (
