@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Phokus",
-  "version": "0.1.0",
+  "version": null,
   "identifier": "wtf.jezz.phokus",
   "build": {
     "beforeDevCommand": "pnpm dev:vite",
@@ -33,7 +33,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "publisher": "JezzWTF",
+    "license": "MIT",
+    "copyright": "Copyright © 2026 JezzWTF",
+    "shortDescription": "Local-first desktop media library",
+    "longDescription": "A local-first desktop media library for browsing, filtering, and curating image and video folders, with AI tagging, semantic search, and duplicate detection — all processed on-device.",
+    "homepage": "https://git.jezz.wtf/jezzwtf/phokus",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

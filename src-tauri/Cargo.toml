@@ -1,8 +1,9 @@
 [package]
 name = "phokus"
 version = "0.1.0"
-description = "A performant image gallery application"
+description = "Local-first desktop media library"
 authors = ["JezzWTF"]
+license = "MIT"
 edition = "2021"
 
 [lib]
