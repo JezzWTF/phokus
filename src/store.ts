@@ -337,6 +337,7 @@ interface GalleryState {
   renameFolder: (folderId: number, newName: string) => Promise<void>;
   updateFolderPath: (folderId: number, newPath: string) => Promise<void>;
   selectFolder: (folderId: number | null) => void;
+  setViewFolderScope: (folderId: number | null) => void;
   loadImages: (reset?: boolean) => Promise<void>;
   loadMoreImages: () => Promise<void>;
   setSearch: (search: string) => void;
@@ -752,6 +753,34 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   selectFolder: (folderId) => {
     set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, activeView: "gallery", failedEmbeddingsOnly: false, imageLoadError: null });
+    void get().loadImages(true);
+  },
+
+  // Change folder scope from inside a feature view (Timeline/Explore/Duplicates)
+  // without leaving it — unlike selectFolder, activeView is preserved.
+  setViewFolderScope: (folderId) => {
+    const { activeView, selectedFolderId } = get();
+    if (folderId === selectedFolderId) return;
+
+    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
+
+    if (activeView === "duplicates") {
+      const { duplicateScanFolderId } = get();
+      if (duplicateScanFolderId !== folderId) {
+        set({
+          duplicateGroups: [],
+          duplicateLastScanned: null,
+          duplicateScanFolderId: undefined,
+          duplicateScanWarning: null,
+        });
+        void get().loadDuplicateScanCache(folderId);
+      }
+      return;
+    }
+
+    // Explore reloads itself via TagCloud's useEffect on selectedFolderId.
+    if (activeView === "explore") return;
+
     void get().loadImages(true);
   },
 

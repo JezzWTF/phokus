@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ExploreTagEntry, TagCloudEntry, useGalleryStore } from "../store";
+import { FolderScopeDropdown } from "./FolderScopeDropdown";
 
 const ACCENTS = [
   "#60a5fa",
@@ -317,23 +318,26 @@ export function TagCloud() {
                     : "No tags — run the AI tagger or add tags manually"}
             </p>
           </div>
-          <div className="flex shrink-0 rounded-lg border border-white/8 bg-white/[0.03] p-0.5">
-            <button
-              className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
-                exploreMode === "visual" ? "bg-white/10 text-white" : "text-gray-500 hover:text-gray-300"
-              }`}
-              onClick={() => setExploreMode("visual")}
-            >
-              Clusters
-            </button>
-            <button
-              className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
-                exploreMode === "tags" ? "bg-white/10 text-white" : "text-gray-500 hover:text-gray-300"
-              }`}
-              onClick={() => setExploreMode("tags")}
-            >
-              Tag Cloud
-            </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <FolderScopeDropdown />
+            <div className="flex rounded-lg border border-white/8 bg-white/[0.03] p-0.5">
+              <button
+                className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                  exploreMode === "visual" ? "bg-white/10 text-white" : "text-gray-500 hover:text-gray-300"
+                }`}
+                onClick={() => setExploreMode("visual")}
+              >
+                Clusters
+              </button>
+              <button
+                className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                  exploreMode === "tags" ? "bg-white/10 text-white" : "text-gray-500 hover:text-gray-300"
+                }`}
+                onClick={() => setExploreMode("tags")}
+              >
+                Tag Cloud
+              </button>
+            </div>
           </div>
         </div>
       </div>

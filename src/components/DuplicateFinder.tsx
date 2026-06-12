@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { DuplicateGroup, useGalleryStore } from "../store";
+import { FolderScopeDropdown } from "./FolderScopeDropdown";
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
@@ -188,6 +189,7 @@ export function DuplicateFinder() {
             )}
           </div>
           <div className="flex items-center gap-2">
+            <FolderScopeDropdown />
             {/* Batch select — only shown when there are groups and nothing is selected yet */}
             {hasResults && selectedCount === 0 && !deleting && (
               <button
