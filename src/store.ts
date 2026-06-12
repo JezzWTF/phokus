@@ -2,6 +2,9 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
+import { getVersion } from "@tauri-apps/api/app";
+import { check, Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { notifyTaskComplete } from "./notifications";
 
 // Per-folder debounce timers for batching notifications.
@@ -259,6 +262,12 @@ export type SortOrder =
   | "taken_desc"
   | "taken_asc";
 
+export type UpdateStatus = "idle" | "checking" | "upToDate" | "available" | "downloading" | "installing" | "error";
+
+// The Update handle from the plugin carries the download method; it's not
+// serializable state, so it lives outside the store.
+let pendingUpdate: Update | null = null;
+
 interface GalleryState {
   folders: Folder[];
   selectedFolderId: number | null;
@@ -309,6 +318,13 @@ interface GalleryState {
   taggingQueueFolderIds: number[];
   mutedFolderIds: number[];
   notificationsPaused: boolean;
+
+  appVersion: string | null;
+  updateStatus: UpdateStatus;
+  updateVersion: string | null;
+  updateProgress: number | null; // 0..1 download progress, null while size unknown
+  updateError: string | null;
+  updateDismissed: boolean;
 
   taggerModelStatus: TaggerModelStatus | null;
   taggerModelPreparing: boolean;
@@ -387,6 +403,10 @@ interface GalleryState {
   toggleMutedFolder: (folderId: number) => void;
   loadNotificationsPaused: () => Promise<void>;
   setNotificationsPaused: (paused: boolean) => void;
+  loadAppVersion: () => Promise<void>;
+  checkForUpdates: (options?: { quiet?: boolean }) => Promise<void>;
+  installUpdate: () => Promise<void>;
+  dismissUpdate: () => void;
   openAppDataFolder: () => Promise<void>;
   getDatabaseInfo: () => Promise<DatabaseInfo>;
   vacuumDatabase: () => Promise<VacuumResult>;
@@ -664,6 +684,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   taggingQueueFolderIds: [],
   mutedFolderIds: [],
   notificationsPaused: false,
+
+  appVersion: null,
+  updateStatus: "idle",
+  updateVersion: null,
+  updateProgress: null,
+  updateError: null,
+  updateDismissed: false,
 
   taggerModelStatus: null,
   taggerModelPreparing: false,
@@ -1467,6 +1494,73 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     set({ notificationsPaused: paused });
     void invoke("set_notifications_paused", { paused }).catch(() => {});
   },
+
+  loadAppVersion: async () => {
+    try {
+      set({ appVersion: await getVersion() });
+    } catch {
+      // leave null; the UI falls back to a dash
+    }
+  },
+
+  checkForUpdates: async (options) => {
+    const quiet = options?.quiet ?? false;
+    const { updateStatus } = get();
+    if (updateStatus === "checking" || updateStatus === "downloading" || updateStatus === "installing") return;
+
+    set({ updateStatus: "checking", updateError: null });
+    try {
+      const update = await check();
+      if (update) {
+        pendingUpdate = update;
+        set({ updateStatus: "available", updateVersion: update.version, updateDismissed: false });
+      } else {
+        pendingUpdate = null;
+        set({ updateStatus: "upToDate", updateVersion: null });
+      }
+    } catch (error) {
+      pendingUpdate = null;
+      if (quiet) {
+        // Launch-time check: stay silent on network/endpoint failures.
+        set({ updateStatus: "idle" });
+      } else {
+        set({ updateStatus: "error", updateError: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  },
+
+  installUpdate: async () => {
+    const update = pendingUpdate;
+    if (!update || get().updateStatus !== "available") return;
+
+    set({ updateStatus: "downloading", updateProgress: null, updateError: null });
+    try {
+      let contentLength: number | null = null;
+      let downloaded = 0;
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case "Started":
+            contentLength = event.data.contentLength ?? null;
+            set({ updateProgress: contentLength ? 0 : null });
+            break;
+          case "Progress":
+            downloaded += event.data.chunkLength;
+            if (contentLength) {
+              set({ updateProgress: Math.min(downloaded / contentLength, 1) });
+            }
+            break;
+          case "Finished":
+            set({ updateStatus: "installing", updateProgress: 1 });
+            break;
+        }
+      });
+      await relaunch();
+    } catch (error) {
+      set({ updateStatus: "error", updateError: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
+  dismissUpdate: () => set({ updateDismissed: true }),
 
   openAppDataFolder: async () => {
     await invoke("open_app_data_folder");

@@ -55,6 +55,8 @@ kamadak-exif = "0.5"
 notify = "6"
 tauri-plugin-notification = "2"
 mozjpeg = "0.10.13"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 # ── Dev-mode performance ────────────────────────────────────────────────────
 # opt-level=1 on the main crate keeps incremental compile short.

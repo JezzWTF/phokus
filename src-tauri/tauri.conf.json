@@ -31,9 +31,18 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYyMDVBQzkyOENENjYzOTUKUldTVlk5YU1rcXdGWW9JRklYdHpOVXA1MDNMVEpyell6cVlma0VGS3pYaUVBLzJydy9nNUtJdlUK",
+      "endpoints": [
+        "https://github.com/JezzWTF/phokus/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "publisher": "JezzWTF",
     "license": "MIT",
     "copyright": "Copyright © 2026 JezzWTF",

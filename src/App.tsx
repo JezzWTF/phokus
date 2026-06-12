@@ -10,6 +10,7 @@ import { DuplicateFinder } from "./components/DuplicateFinder";
 import { Timeline } from "./components/Timeline";
 import { TitleBar } from "./components/TitleBar";
 import { SettingsModal } from "./components/SettingsModal";
+import { UpdateToast } from "./components/UpdateToast";
 import { initializeNotifications } from "./notifications";
 
 export default function App() {
@@ -21,12 +22,19 @@ export default function App() {
   const loadMutedFolderIds = useGalleryStore((state) => state.loadMutedFolderIds);
   const loadNotificationsPaused = useGalleryStore((state) => state.loadNotificationsPaused);
   const subscribeToProgress = useGalleryStore((state) => state.subscribeToProgress);
+  const loadAppVersion = useGalleryStore((state) => state.loadAppVersion);
+  const checkForUpdates = useGalleryStore((state) => state.checkForUpdates);
   const activeView = useGalleryStore((state) => state.activeView);
 
   useEffect(() => {
     void initializeNotifications();
     void loadMutedFolderIds();
     void loadNotificationsPaused();
+    void loadAppVersion();
+    // Quiet launch check — dev builds have no signed artifacts to update to.
+    if (import.meta.env.PROD) {
+      void checkForUpdates({ quiet: true });
+    }
     loadFolders().then(() => {
       void loadBackgroundJobProgress();
       void loadCaptionModelStatus();
@@ -79,6 +87,7 @@ export default function App() {
 
       <Lightbox />
       <SettingsModal />
+      <UpdateToast />
     </div>
   );
 }

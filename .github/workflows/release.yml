@@ -52,3 +52,6 @@ jobs:
           prerelease: false
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
+          # Cargo args after `--`: ship the CPU/DirectML build — default
+          # features enable candle-cuda, which runners (and most users) lack.
+          args: '-- --no-default-features'

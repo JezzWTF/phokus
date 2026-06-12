@@ -47,7 +47,8 @@ jobs:
         working-directory: src-tauri
         run: cargo fmt --check
 
-      # Default features only — candle-cuda must never be enabled in CI.
+      # --no-default-features: default enables candle-cuda for the main dev
+      # machine; CI runners have no CUDA toolkit and must build CPU-only.
       - name: Clippy
         working-directory: src-tauri
-        run: cargo clippy --all-targets --locked
+        run: cargo clippy --all-targets --locked --no-default-features
