@@ -232,7 +232,7 @@ pub async fn add_folder(
         .asset_protocol_scope()
         .allow_directory(&folder_path, true)
     {
-        log::error!("Failed to allow asset scope for {}: {}", path, error);
+        log::error!("Failed to allow asset scope for {path}: {error}");
     }
 
     let name = folder_path
@@ -403,7 +403,7 @@ pub async fn update_folder_path(
 ) -> Result<(), String> {
     let new_path_buf = PathBuf::from(&new_path);
     if !new_path_buf.is_dir() {
-        return Err(format!("Path is not a valid directory: {}", new_path));
+        return Err(format!("Path is not a valid directory: {new_path}"));
     }
 
     // Let the webview load media from the relocated folder via the asset protocol.
@@ -411,7 +411,7 @@ pub async fn update_folder_path(
         .asset_protocol_scope()
         .allow_directory(&new_path_buf, true)
     {
-        log::error!("Failed to allow asset scope for {}: {}", new_path, error);
+        log::error!("Failed to allow asset scope for {new_path}: {error}");
     }
 
     let new_name = new_path_buf
@@ -593,7 +593,7 @@ pub async fn semantic_search_images(
     let has_filters = params.folder_id.is_some()
         || params.media_kind.is_some()
         || params.favorites_only.unwrap_or(false)
-        || params.rating_min.map_or(false, |r| r > 0);
+        || params.rating_min.is_some_and(|r| r > 0);
 
     if !has_filters {
         // No post-query filtering — a single fetch of exactly `limit` results is optimal.
@@ -894,7 +894,7 @@ pub async fn get_tag_cloud(
         hasher.digest()
     };
     let folder_scope = match folder_id {
-        Some(id) => format!("folder_{}", id),
+        Some(id) => format!("folder_{id}"),
         None => "all".to_string(),
     };
 
@@ -1038,132 +1038,131 @@ pub async fn find_duplicates(
     //   For sample-hash groups that contain files > 64 KB, compute a full-file
     //   hash to confirm the match before presenting them as deletable duplicates.
     let app_hash = app.clone();
-    let (pairs, skipped_before_confirm, candidate_total): (
-        Vec<(u64, u64, i64, String)>,
-        usize,
-        usize,
-    ) = tokio::task::spawn_blocking(move || {
-        use memmap2::Mmap;
-        use rayon::prelude::*;
-        use std::collections::HashMap;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use xxhash_rust::xxh3::{xxh3_64, Xxh3};
+    // (size, sample/full hash, image_id, path) for each confirmed candidate.
+    type HashedCandidate = (u64, u64, i64, String);
+    let (pairs, skipped_before_confirm, candidate_total): (Vec<HashedCandidate>, usize, usize) =
+        tokio::task::spawn_blocking(move || {
+            use memmap2::Mmap;
+            use rayon::prelude::*;
+            use std::collections::HashMap;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            use xxhash_rust::xxh3::{xxh3_64, Xxh3};
 
-        const WINDOW: usize = 16 * 1024; // 16 KB per sample window
-        const N: usize = 4; // windows at 0%, 33%, 66%, 100%
-        const COVERED: usize = WINDOW * N; // 64 KB total; also full-coverage threshold
+            const WINDOW: usize = 16 * 1024; // 16 KB per sample window
+            const N: usize = 4; // windows at 0%, 33%, 66%, 100%
+            const COVERED: usize = WINDOW * N; // 64 KB total; also full-coverage threshold
 
-        // Hash four evenly-spaced 16 KB windows. For files ≤ 64 KB this is
-        // equivalent to hashing the entire file.
-        fn sample(mmap: &[u8]) -> u64 {
-            if mmap.len() <= COVERED {
-                return xxh3_64(mmap);
+            // Hash four evenly-spaced 16 KB windows. For files ≤ 64 KB this is
+            // equivalent to hashing the entire file.
+            fn sample(mmap: &[u8]) -> u64 {
+                if mmap.len() <= COVERED {
+                    return xxh3_64(mmap);
+                }
+                let mut h = Xxh3::new();
+                for i in 0..N {
+                    let pos = (mmap.len() - WINDOW) * i / (N - 1);
+                    h.update(&mmap[pos..pos + WINDOW]);
+                }
+                h.digest()
             }
-            let mut h = Xxh3::new();
-            for i in 0..N {
-                let pos = (mmap.len() - WINDOW) * i / (N - 1);
-                h.update(&mmap[pos..pos + WINDOW]);
-            }
-            h.digest()
-        }
 
-        // ── Phase 1: stat ─────────────────────────────────────────────────
-        let stat_counter = AtomicUsize::new(0);
-        let stat_skipped = AtomicUsize::new(0);
-        let sized: Vec<(i64, String, u64)> = records
-            .par_iter()
-            .filter_map(|r| {
-                let result = match std::fs::metadata(&r.path) {
-                    Ok(metadata) => Some((r.id, r.path.clone(), metadata.len())),
-                    Err(_) => {
-                        stat_skipped.fetch_add(1, Ordering::Relaxed);
-                        None
+            // ── Phase 1: stat ─────────────────────────────────────────────────
+            let stat_counter = AtomicUsize::new(0);
+            let stat_skipped = AtomicUsize::new(0);
+            let sized: Vec<(i64, String, u64)> = records
+                .par_iter()
+                .filter_map(|r| {
+                    let result = match std::fs::metadata(&r.path) {
+                        Ok(metadata) => Some((r.id, r.path.clone(), metadata.len())),
+                        Err(_) => {
+                            stat_skipped.fetch_add(1, Ordering::Relaxed);
+                            None
+                        }
+                    };
+                    let done = stat_counter.fetch_add(1, Ordering::Relaxed) + 1;
+                    if done % 100 == 0 || done == total {
+                        let _ = app_hash.emit(
+                            "duplicate_scan_progress",
+                            DuplicateScanProgress {
+                                phase: "checking".to_string(),
+                                processed: done,
+                                total,
+                                skipped: stat_skipped.load(Ordering::Relaxed),
+                            },
+                        );
                     }
-                };
-                let done = stat_counter.fetch_add(1, Ordering::Relaxed) + 1;
-                if done % 100 == 0 || done == total {
-                    let _ = app_hash.emit(
-                        "duplicate_scan_progress",
-                        DuplicateScanProgress {
-                            phase: "checking".to_string(),
-                            processed: done,
-                            total,
-                            skipped: stat_skipped.load(Ordering::Relaxed),
-                        },
-                    );
-                }
-                result
-            })
-            .collect();
-        let stat_skipped = stat_skipped.load(Ordering::Relaxed);
+                    result
+                })
+                .collect();
+            let stat_skipped = stat_skipped.load(Ordering::Relaxed);
 
-        let mut by_size: HashMap<u64, Vec<usize>> = HashMap::new();
-        for (i, (_, _, size)) in sized.iter().enumerate() {
-            by_size.entry(*size).or_default().push(i);
-        }
-        let candidates: Vec<usize> = by_size
-            .into_values()
-            .filter(|g| g.len() > 1)
-            .flatten()
-            .collect();
+            let mut by_size: HashMap<u64, Vec<usize>> = HashMap::new();
+            for (i, (_, _, size)) in sized.iter().enumerate() {
+                by_size.entry(*size).or_default().push(i);
+            }
+            let candidates: Vec<usize> = by_size
+                .into_values()
+                .filter(|g| g.len() > 1)
+                .flatten()
+                .collect();
 
-        if candidates.is_empty() {
-            return (vec![], stat_skipped, 0);
-        }
+            if candidates.is_empty() {
+                return (vec![], stat_skipped, 0);
+            }
 
-        // ── Phase 2: sample hash ──────────────────────────────────────────
-        let c_total = candidates.len();
-        let _ = app_hash.emit(
-            "duplicate_scan_progress",
-            DuplicateScanProgress {
-                phase: "hashing".to_string(),
-                processed: 0,
-                total: c_total,
-                skipped: stat_skipped,
-            },
-        );
-        let counter = AtomicUsize::new(0);
-        let hash_skipped = AtomicUsize::new(0);
+            // ── Phase 2: sample hash ──────────────────────────────────────────
+            let c_total = candidates.len();
+            let _ = app_hash.emit(
+                "duplicate_scan_progress",
+                DuplicateScanProgress {
+                    phase: "hashing".to_string(),
+                    processed: 0,
+                    total: c_total,
+                    skipped: stat_skipped,
+                },
+            );
+            let counter = AtomicUsize::new(0);
+            let hash_skipped = AtomicUsize::new(0);
 
-        let pairs = candidates
-            .par_iter()
-            .filter_map(|&idx| {
-                let (id, path, size) = &sized[idx];
-                let result = if *size == 0 {
-                    Some((xxh3_64(&[]), *size, *id, path.clone()))
-                } else {
-                    std::fs::File::open(path)
-                        .ok()
-                        // SAFETY: read-only; no external truncation expected during scan.
-                        .and_then(|file| unsafe { Mmap::map(&file).ok() })
-                        .map(|mmap| (sample(&mmap), *size, *id, path.clone()))
-                };
-                if result.is_none() {
-                    hash_skipped.fetch_add(1, Ordering::Relaxed);
-                }
-                let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
-                if done % 100 == 0 || done == c_total {
-                    let _ = app_hash.emit(
-                        "duplicate_scan_progress",
-                        DuplicateScanProgress {
-                            phase: "hashing".to_string(),
-                            processed: done,
-                            total: c_total,
-                            skipped: stat_skipped + hash_skipped.load(Ordering::Relaxed),
-                        },
-                    );
-                }
-                result
-            })
-            .collect();
-        (
-            pairs,
-            stat_skipped + hash_skipped.load(Ordering::Relaxed),
-            c_total,
-        )
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+            let pairs = candidates
+                .par_iter()
+                .filter_map(|&idx| {
+                    let (id, path, size) = &sized[idx];
+                    let result = if *size == 0 {
+                        Some((xxh3_64(&[]), *size, *id, path.clone()))
+                    } else {
+                        std::fs::File::open(path)
+                            .ok()
+                            // SAFETY: read-only; no external truncation expected during scan.
+                            .and_then(|file| unsafe { Mmap::map(&file).ok() })
+                            .map(|mmap| (sample(&mmap), *size, *id, path.clone()))
+                    };
+                    if result.is_none() {
+                        hash_skipped.fetch_add(1, Ordering::Relaxed);
+                    }
+                    let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                    if done % 100 == 0 || done == c_total {
+                        let _ = app_hash.emit(
+                            "duplicate_scan_progress",
+                            DuplicateScanProgress {
+                                phase: "hashing".to_string(),
+                                processed: done,
+                                total: c_total,
+                                skipped: stat_skipped + hash_skipped.load(Ordering::Relaxed),
+                            },
+                        );
+                    }
+                    result
+                })
+                .collect();
+            (
+                pairs,
+                stat_skipped + hash_skipped.load(Ordering::Relaxed),
+                c_total,
+            )
+        })
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Group by (sample_hash, file_size).
     let mut size_hash_map: std::collections::HashMap<(u64, u64), Vec<(i64, String)>> =
@@ -1276,7 +1275,7 @@ pub async fn find_duplicates(
         .filter_map(|(hash, file_size, ids)| {
             let images = db::get_images_by_ids(&conn, &ids).ok()?;
             Some(DuplicateGroup {
-                file_hash: format!("{:016x}", hash),
+                file_hash: format!("{hash:016x}"),
                 file_size,
                 images,
             })
@@ -1288,7 +1287,7 @@ pub async fn find_duplicates(
 
     // Persist results so they survive restart — best-effort, ignore errors.
     let folder_scope = match folder_id {
-        Some(id) => format!("folder:{}", id),
+        Some(id) => format!("folder:{id}"),
         None => "all".to_string(),
     };
     if let Ok(json) = serde_json::to_string(&groups) {
@@ -1309,7 +1308,7 @@ pub async fn load_duplicate_scan_cache(
     folder_id: Option<i64>,
 ) -> Result<Option<DuplicateScanCache>, String> {
     let folder_scope = match folder_id {
-        Some(id) => format!("folder:{}", id),
+        Some(id) => format!("folder:{id}"),
         None => "all".to_string(),
     };
     let conn = db.get().map_err(|e| e.to_string())?;
@@ -1329,7 +1328,7 @@ pub async fn invalidate_duplicate_scan_cache(
     folder_id: Option<i64>,
 ) -> Result<(), String> {
     let folder_scope = match folder_id {
-        Some(id) => format!("folder:{}", id),
+        Some(id) => format!("folder:{id}"),
         None => "all".to_string(),
     };
     let conn = db.get().map_err(|e| e.to_string())?;
@@ -1382,7 +1381,7 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
-fn normalize(v: &mut Vec<f32>) {
+fn normalize(v: &mut [f32]) {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 1e-10 {
         v.iter_mut().for_each(|x| *x /= norm);

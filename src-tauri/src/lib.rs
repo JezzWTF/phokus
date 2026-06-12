@@ -65,14 +65,13 @@ pub fn run() {
                 let backfilled =
                     db::backfill_embedding_jobs(&conn).expect("Failed to backfill embedding jobs");
                 if backfilled > 0 {
-                    log::info!("Backfilled {} embedding jobs.", backfilled);
+                    log::info!("Backfilled {backfilled} embedding jobs.");
                 }
                 let (orphaned_vectors, missing_vectors) = db::repair_embedding_consistency(&conn)
                     .expect("Failed to repair embedding consistency");
                 if orphaned_vectors > 0 || missing_vectors > 0 {
                     log::info!(
-                        "Repaired embedding consistency: removed {} orphaned vectors, requeued {} missing vectors.",
-                        orphaned_vectors, missing_vectors
+                        "Repaired embedding consistency: removed {orphaned_vectors} orphaned vectors, requeued {missing_vectors} missing vectors."
                     );
                 }
             }

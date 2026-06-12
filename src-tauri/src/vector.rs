@@ -10,7 +10,14 @@ static SQLITE_VEC_INIT: Once = Once::new();
 
 pub fn register_sqlite_vec() {
     SQLITE_VEC_INIT.call_once(|| unsafe {
-        sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
+        sqlite3_auto_extension(Some(std::mem::transmute::<
+            *const (),
+            unsafe extern "C" fn(
+                *mut rusqlite::ffi::sqlite3,
+                *mut *mut std::os::raw::c_char,
+                *const rusqlite::ffi::sqlite3_api_routines,
+            ) -> i32,
+        >(sqlite3_vec_init as *const ())));
     });
 }
 
@@ -18,14 +25,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     conn.execute_batch(&format!(
         "CREATE VIRTUAL TABLE IF NOT EXISTS image_vec USING vec0(
             image_id INTEGER PRIMARY KEY,
-            embedding FLOAT[{}] distance_metric=cosine
+            embedding FLOAT[{CLIP_VECTOR_DIM}] distance_metric=cosine
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS caption_vec USING vec0(
             image_id INTEGER PRIMARY KEY,
-            embedding FLOAT[{}] distance_metric=cosine
-        );",
-        CLIP_VECTOR_DIM, CLIP_VECTOR_DIM
+            embedding FLOAT[{CLIP_VECTOR_DIM}] distance_metric=cosine
+        );"
     ))?;
     Ok(())
 }
@@ -465,7 +471,7 @@ pub fn has_image_vector(conn: &Connection, image_id: i64) -> Result<bool> {
 
 #[allow(dead_code)]
 fn pack_f32(values: &[f32]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(values.len() * std::mem::size_of::<f32>());
+    let mut out = Vec::with_capacity(std::mem::size_of_val(values));
     for value in values {
         out.extend_from_slice(&value.to_le_bytes());
     }

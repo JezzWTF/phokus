@@ -51,4 +51,4 @@ jobs:
       # machine; CI runners have no CUDA toolkit and must build CPU-only.
       - name: Clippy
         working-directory: src-tauri
-        run: cargo clippy --all-targets --locked --no-default-features
+        run: cargo clippy --all-targets --locked --no-default-features -- -D warnings

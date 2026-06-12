@@ -49,11 +49,7 @@ impl MediaTools {
                 total_bytes,
                 downloaded_bytes,
             } => {
-                log::info!(
-                    "Downloading bundled FFmpeg: {}/{} bytes",
-                    downloaded_bytes,
-                    total_bytes
-                );
+                log::info!("Downloading bundled FFmpeg: {downloaded_bytes}/{total_bytes} bytes");
             }
             FfmpegDownloadProgressEvent::UnpackingArchive => {
                 log::info!("Unpacking bundled FFmpeg...");

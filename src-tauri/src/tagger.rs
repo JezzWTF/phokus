@@ -481,7 +481,7 @@ impl WdTagger {
             .try_extract_tensor::<f32>()
             .map_err(|error| anyhow::anyhow!("{error}"))?;
 
-        let probs: &[f32] = &probabilities;
+        let probs: &[f32] = probabilities;
 
         if probs.len() != self.labels.len() {
             anyhow::bail!(

@@ -160,7 +160,7 @@ impl ClipImageEmbedder {
             let ids = enc.get_ids();
             let len = ids.len().min(max_len);
             for j in 0..len {
-                flat[i * max_len + j] = ids[j] as u32;
+                flat[i * max_len + j] = ids[j];
             }
         }
 

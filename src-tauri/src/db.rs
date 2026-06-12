@@ -99,6 +99,8 @@ pub struct MetadataJob {
     pub path: String,
 }
 
+// Caption worker disabled (lib.rs) — kept for future re-enabling.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct CaptionJob {
     pub image_id: i64,
@@ -588,6 +590,7 @@ pub fn enqueue_caption_job(conn: &Connection, image_id: i64) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)] // caption worker disabled (lib.rs)
 pub fn requeue_caption_jobs(conn: &Connection, image_ids: &[i64]) -> Result<()> {
     for image_id in image_ids {
         conn.execute(
@@ -666,6 +669,7 @@ pub fn clear_caption_jobs(conn: &Connection, folder_id: Option<i64>) -> Result<u
     }
 }
 
+#[allow(dead_code)] // caption worker disabled (lib.rs)
 pub fn is_caption_job_cancelled(conn: &Connection, image_id: i64) -> Result<bool> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM caption_jobs WHERE image_id = ?1 AND status = 'cancelled'",
@@ -863,6 +867,7 @@ pub fn claim_embedding_jobs(
     Ok(claimed)
 }
 
+#[allow(dead_code)] // caption worker disabled (lib.rs)
 fn get_pending_caption_jobs_excluding(
     conn: &Connection,
     excluded_folder_ids: &std::collections::HashSet<i64>,
@@ -891,6 +896,7 @@ fn get_pending_caption_jobs_excluding(
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+#[allow(dead_code)] // caption worker disabled (lib.rs)
 pub fn claim_caption_jobs(
     conn: &mut Connection,
     paused_folder_ids: &std::collections::HashSet<i64>,
@@ -1434,6 +1440,7 @@ pub fn get_indexed_entry_by_path(
 
 /// Look up just the image id for a path. Used by the filesystem watcher
 /// to find the DB row to delete when a file is removed from disk.
+#[allow(dead_code)] // only caller is the disabled caption worker path
 pub fn get_image_id_by_path(conn: &Connection, path: &str) -> Result<Option<i64>> {
     let result = conn.query_row("SELECT id FROM images WHERE path = ?1", [path], |row| {
         row.get(0)
@@ -1539,6 +1546,7 @@ pub fn clear_folder_scan_error(conn: &Connection, folder_id: i64) -> Result<()> 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the gallery query surface; a params struct adds noise for one caller
 pub fn get_images(
     conn: &Connection,
     folder_id: Option<i64>,
@@ -1567,7 +1575,7 @@ pub fn get_images(
         _ => "modified_at DESC NULLS LAST",
     };
 
-    let search_pattern = search.map(|value| format!("%{}%", value));
+    let search_pattern = search.map(|value| format!("%{value}%"));
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
     let sql = format!(
@@ -1583,9 +1591,8 @@ pub fn get_images(
            AND (?4 = 0 OR favorite = 1)
            AND rating >= ?5
            AND (?6 = 0 OR embedding_status = 'failed')
-         ORDER BY {}
-         LIMIT ?7 OFFSET ?8",
-        order
+         ORDER BY {order}
+         LIMIT ?7 OFFSET ?8"
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(
@@ -1613,7 +1620,7 @@ pub fn count_images(
     rating_min: i64,
     embedding_failed_only: bool,
 ) -> Result<i64> {
-    let search_pattern = search.map(|value| format!("%{}%", value));
+    let search_pattern = search.map(|value| format!("%{value}%"));
 
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
@@ -1639,6 +1646,7 @@ pub fn count_images(
     Ok(count)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn search_images_by_tag(
     conn: &Connection,
     query: &str,
@@ -2388,7 +2396,7 @@ pub fn set_duplicate_scan_cache(
 }
 
 fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let existing_name: String = row.get(1)?;
@@ -2398,7 +2406,7 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
     }
 
     conn.execute(
-        &format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, definition),
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
         [],
     )?;
     Ok(())
@@ -2425,5 +2433,5 @@ fn folder_exclusion_clause(
         .map(|id| id.to_string())
         .collect::<Vec<_>>()
         .join(",");
-    format!("AND {}.folder_id NOT IN ({})", image_alias, id_list)
+    format!("AND {image_alias}.folder_id NOT IN ({id_list})")
 }

@@ -237,9 +237,7 @@ pub fn generate_video_thumbnail(
     }
 
     Err(anyhow!(
-        "ffmpeg failed generating poster for {}: {}",
-        path_str,
-        last_error
+        "ffmpeg failed generating poster for {path_str}: {last_error}"
     ))
 }
 
@@ -253,11 +251,25 @@ pub fn video_poster_path(cache_dir: &Path, video_path: &str) -> PathBuf {
 
 fn thumb_path_with_ext(cache_dir: &Path, input_path: &str, extension: &str) -> PathBuf {
     let hash = hash_path(input_path);
-    cache_dir.join(format!("{}.{}", hash, extension))
+    cache_dir.join(format!("{hash}.{extension}"))
 }
 
 fn hash_path(s: &str) -> String {
     format!("{:016x}", xxhash_rust::xxh3::xxh3_64(s.as_bytes()))
+}
+
+fn fit_dimensions(width: u32, height: u32, max_size: u32) -> (u32, u32) {
+    if width <= max_size && height <= max_size {
+        return (width.max(1), height.max(1));
+    }
+
+    if width >= height {
+        let scaled_height = ((height as f64 / width as f64) * max_size as f64).round() as u32;
+        (max_size, scaled_height.max(1))
+    } else {
+        let scaled_width = ((width as f64 / height as f64) * max_size as f64).round() as u32;
+        (scaled_width.max(1), max_size)
+    }
 }
 
 #[cfg(test)]
@@ -300,19 +312,5 @@ mod tests {
         assert_eq!(result.height, Some(1200));
         let (thumb_w, thumb_h) = image::image_dimensions(&result.path).unwrap();
         assert_eq!((thumb_w, thumb_h), (320, 240));
-    }
-}
-
-fn fit_dimensions(width: u32, height: u32, max_size: u32) -> (u32, u32) {
-    if width <= max_size && height <= max_size {
-        return (width.max(1), height.max(1));
-    }
-
-    if width >= height {
-        let scaled_height = ((height as f64 / width as f64) * max_size as f64).round() as u32;
-        (max_size, scaled_height.max(1))
-    } else {
-        let scaled_width = ((width as f64 / height as f64) * max_size as f64).round() as u32;
-        (scaled_width.max(1), max_size)
     }
 }
