@@ -318,9 +318,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // Index must be created after ensure_column adds the column; it cannot live
     // in the execute_batch above because that batch runs before the column exists
     // on databases that predate Phase 1.
-    conn.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_images_taken_at ON images(taken_at);",
-    )?;
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_images_taken_at ON images(taken_at);")?;
     ensure_column(conn, "folders", "scan_error", "TEXT")?;
 
     vector::migrate(conn)?;
@@ -1410,7 +1408,10 @@ pub fn update_image_details(
 
 /// Look up the lightweight indexed-media entry for a single path.
 /// Used by the filesystem watcher to run change-detection before upserting.
-pub fn get_indexed_entry_by_path(conn: &Connection, path: &str) -> Result<Option<IndexedMediaEntry>> {
+pub fn get_indexed_entry_by_path(
+    conn: &Connection,
+    path: &str,
+) -> Result<Option<IndexedMediaEntry>> {
     let result = conn.query_row(
         "SELECT id, path, modified_at, file_size, media_kind FROM images WHERE path = ?1",
         [path],
@@ -1434,11 +1435,9 @@ pub fn get_indexed_entry_by_path(conn: &Connection, path: &str) -> Result<Option
 /// Look up just the image id for a path. Used by the filesystem watcher
 /// to find the DB row to delete when a file is removed from disk.
 pub fn get_image_id_by_path(conn: &Connection, path: &str) -> Result<Option<i64>> {
-    let result = conn.query_row(
-        "SELECT id FROM images WHERE path = ?1",
-        [path],
-        |row| row.get(0),
-    );
+    let result = conn.query_row("SELECT id FROM images WHERE path = ?1", [path], |row| {
+        row.get(0)
+    });
     match result {
         Ok(id) => Ok(Some(id)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -1474,8 +1473,9 @@ pub fn get_images_by_ids(conn: &Connection, image_ids: &[i64]) -> Result<Vec<Ima
 }
 
 pub fn get_folders(conn: &Connection) -> Result<Vec<Folder>> {
-    let mut stmt =
-        conn.prepare("SELECT id, path, name, image_count, indexed_at, scan_error FROM folders ORDER BY name")?;
+    let mut stmt = conn.prepare(
+        "SELECT id, path, name, image_count, indexed_at, scan_error FROM folders ORDER BY name",
+    )?;
     let rows = stmt.query_map([], |row| {
         Ok(Folder {
             id: row.get(0)?,
@@ -1497,7 +1497,13 @@ pub fn rename_folder(conn: &Connection, folder_id: i64, new_name: &str) -> Resul
     Ok(())
 }
 
-pub fn update_folder_path(conn: &Connection, folder_id: i64, old_path: &str, new_path: &str, new_name: &str) -> Result<()> {
+pub fn update_folder_path(
+    conn: &Connection,
+    folder_id: i64,
+    old_path: &str,
+    new_path: &str,
+    new_name: &str,
+) -> Result<()> {
     // Both updates must be atomic: if the image path rewrite fails (e.g. a
     // uniqueness collision) the folder row must not remain at the new location.
     let tx = conn.unchecked_transaction()?;
@@ -1659,7 +1665,13 @@ pub fn search_images_by_tag(
            AND (?3 = 0 OR i.favorite = 1)
            AND i.rating >= ?4
            AND LOWER(TRIM(t.tag)) = ?5",
-        params![folder_id, media_kind, favorites_flag, rating_min, normalized_query],
+        params![
+            folder_id,
+            media_kind,
+            favorites_flag,
+            rating_min,
+            normalized_query
+        ],
         |row| row.get::<_, i64>(0),
     )? as usize;
 
@@ -1769,10 +1781,7 @@ pub fn get_image_id_and_thumbnail_by_path(
 
 /// Returns all non-null thumbnail_path values for images in a folder.
 /// Called before folder deletion so callers can remove the files from disk.
-pub fn get_thumbnail_paths_for_folder(
-    conn: &Connection,
-    folder_id: i64,
-) -> Result<Vec<String>> {
+pub fn get_thumbnail_paths_for_folder(conn: &Connection, folder_id: i64) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT thumbnail_path FROM images WHERE folder_id = ?1 AND thumbnail_path IS NOT NULL",
     )?;
@@ -2054,7 +2063,10 @@ pub fn clear_tagging_jobs(conn: &Connection, folder_id: Option<i64>) -> Result<u
                  WHERE status = 'processing'",
                 [],
             )?;
-            let n = conn.execute("DELETE FROM tagging_jobs WHERE status NOT IN ('processing', 'cancelled')", [])?;
+            let n = conn.execute(
+                "DELETE FROM tagging_jobs WHERE status NOT IN ('processing', 'cancelled')",
+                [],
+            )?;
             conn.execute(
                 "UPDATE images SET ai_tagger_error = NULL WHERE ai_tagged_at IS NULL",
                 [],

@@ -7,9 +7,9 @@ use crate::tagger::{self, WdTagger};
 use crate::thumbnail;
 use crate::vector;
 use anyhow::Result;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rayon::prelude::*;
 use serde::Serialize;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -1401,7 +1401,11 @@ impl WatcherHandle {
                 }
             }
         }
-        self.inner.folder_map.lock().unwrap().insert(path, folder_id);
+        self.inner
+            .folder_map
+            .lock()
+            .unwrap()
+            .insert(path, folder_id);
     }
 
     pub fn remove_folder(&self, path: &Path) {
@@ -1446,7 +1450,9 @@ pub fn start_watcher(app: AppHandle, pool: DbPool, thumb_dir: PathBuf) -> Watche
     // Seed the folder map from the DB so existing folders are watched on startup.
     let folder_map: Arc<Mutex<HashMap<PathBuf, i64>>> = Arc::new(Mutex::new(HashMap::new()));
     {
-        let conn = pool.get().expect("Watcher: failed to get DB connection for init");
+        let conn = pool
+            .get()
+            .expect("Watcher: failed to get DB connection for init");
         let folders = db::get_folders(&conn).unwrap_or_default();
         let mut map = folder_map.lock().unwrap();
         for f in folders {
@@ -1505,7 +1511,10 @@ pub fn start_watcher(app: AppHandle, pool: DbPool, thumb_dir: PathBuf) -> Watche
 
             // Absorb incoming event — coalesces rapid writes into one deadline.
             if let Some(Ok(event)) = received {
-                use notify::{EventKind, event::{ModifyKind, RenameMode}};
+                use notify::{
+                    event::{ModifyKind, RenameMode},
+                    EventKind,
+                };
                 if !matches!(event.kind, EventKind::Access(_)) {
                     // Intercept atomic rename events (old + new path in one event).
                     // Handle these separately to preserve embeddings and thumbnails.
@@ -1536,7 +1545,14 @@ pub fn start_watcher(app: AppHandle, pool: DbPool, thumb_dir: PathBuf) -> Watche
             // Process renames immediately — they are atomic filesystem operations
             // and do not benefit from debouncing.
             for (old_path, new_path) in pending_renames.drain(..) {
-                process_watcher_rename(&app, &pool, &folder_map_thread, &thumb_dir, &old_path, &new_path);
+                process_watcher_rename(
+                    &app,
+                    &pool,
+                    &folder_map_thread,
+                    &thumb_dir,
+                    &old_path,
+                    &new_path,
+                );
             }
 
             // Process all paths whose debounce window has expired.
@@ -1594,7 +1610,13 @@ fn process_watcher_path(
         match commit_batch(pool, &[record]) {
             Ok(committed) if !committed.is_empty() => {
                 // Always emit the images — they are committed to the DB.
-                emit_images(app, &IndexedImagesBatch { folder_id, images: committed });
+                emit_images(
+                    app,
+                    &IndexedImagesBatch {
+                        folder_id,
+                        images: committed,
+                    },
+                );
                 emit_folder_job_progress(app, pool, &[folder_id], false);
                 // Update the sidebar count only if we successfully write the new
                 // count; skip the frontend notification on pool/DB failure to
@@ -1643,7 +1665,9 @@ fn process_watcher_rename(
     let folder_id = {
         let map = folder_map.lock().unwrap();
         map.iter()
-            .find(|(fp, _)| old_path.starts_with(fp.as_path()) || new_path.starts_with(fp.as_path()))
+            .find(|(fp, _)| {
+                old_path.starts_with(fp.as_path()) || new_path.starts_with(fp.as_path())
+            })
             .map(|(_, &id)| id)
     };
     let Some(folder_id) = folder_id else { return };
@@ -1684,19 +1708,28 @@ fn process_watcher_rename(
     // the thumbnail worker regenerates it.
     let effective_thumb: Option<&str> = if thumb_ok { Some(&new_thumb_str) } else { None };
 
-    let new_filename = new_path
-        .file_name()
-        .and_then(|f| f.to_str())
-        .unwrap_or("");
+    let new_filename = new_path.file_name().and_then(|f| f.to_str()).unwrap_or("");
 
-    if let Err(e) = db::update_image_path(&conn, image_id, &new_path_str, new_filename, effective_thumb) {
+    if let Err(e) = db::update_image_path(
+        &conn,
+        image_id,
+        &new_path_str,
+        new_filename,
+        effective_thumb,
+    ) {
         eprintln!("Watcher rename: DB update error: {}", e);
         return;
     }
 
     // Emit the updated record so the frontend refreshes without a full reload.
     match db::get_image_by_id(&conn, image_id) {
-        Ok(record) => emit_images(app, &IndexedImagesBatch { folder_id, images: vec![record] }),
+        Ok(record) => emit_images(
+            app,
+            &IndexedImagesBatch {
+                folder_id,
+                images: vec![record],
+            },
+        ),
         Err(e) => eprintln!("Watcher rename: post-update fetch error: {}", e),
     }
 }

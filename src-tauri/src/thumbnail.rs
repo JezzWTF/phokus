@@ -289,8 +289,8 @@ mod tests {
         assert_eq!((decoded.width(), decoded.height()), (400, 300));
 
         // Cover mode: shortest side (1200) must stay >= 224 -> numerator 2
-        let covered = decode_jpeg_scaled(&src_path, 224, true)
-            .expect("fast path should handle plain JPEG");
+        let covered =
+            decode_jpeg_scaled(&src_path, 224, true).expect("fast path should handle plain JPEG");
         assert_eq!((covered.width(), covered.height()), (400, 300));
 
         let cache = dir.join("cache");

@@ -200,11 +200,7 @@ pub fn tagger_batch_size(app_data_dir: &Path) -> usize {
     let Ok(value) = std::fs::read_to_string(path) else {
         return 8;
     };
-    value
-        .trim()
-        .parse::<usize>()
-        .unwrap_or(8)
-        .clamp(1, 100)
+    value.trim().parse::<usize>().unwrap_or(8).clamp(1, 100)
 }
 
 pub fn set_tagger_batch_size(app_data_dir: &Path, batch_size: usize) -> Result<usize> {
