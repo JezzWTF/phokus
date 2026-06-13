@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useGalleryStore } from "../store";
-
-type WorkerKey = "thumbnail" | "metadata" | "embedding" | "tagging";
+import { useGalleryStore, WorkerKey } from "../store";
 
 const WORKER_FOR_STAGE: Record<string, WorkerKey> = {
   Thumbnails: "thumbnail",
@@ -38,21 +36,6 @@ interface FailedEmbeddingItem {
   error: string | null;
 }
 
-interface FolderWorkerStates {
-  folder_id: number;
-  thumbnail_paused: boolean;
-  metadata_paused: boolean;
-  embedding_paused: boolean;
-  tagging_paused: boolean;
-}
-
-const DEFAULT_PAUSED_STATE: Record<WorkerKey, boolean> = {
-  thumbnail: false,
-  metadata: false,
-  embedding: false,
-  tagging: false,
-};
-
 export function BackgroundTasks() {
   const folders = useGalleryStore((state) => state.folders);
   const indexingProgress = useGalleryStore((state) => state.indexingProgress);
@@ -63,32 +46,15 @@ export function BackgroundTasks() {
   const duplicateScanProgress = useGalleryStore((state) => state.duplicateScanProgress);
   const [expanded, setExpanded] = useState(false);
   const [dismissed, setDismissed] = useState<Record<number, string>>({});
-  const [paused, setPaused] = useState<Record<number, Record<WorkerKey, boolean>>>({});
   const [failedItems, setFailedItems] = useState<Record<number, FailedEmbeddingItem[]>>({});
 
-  useEffect(() => {
-    const folderIds = folders.map((folder) => folder.id);
-    if (folderIds.length === 0) {
-      setPaused({});
-      return;
-    }
+  const workerPaused = useGalleryStore((state) => state.workerPaused);
+  const loadWorkerStates = useGalleryStore((state) => state.loadWorkerStates);
+  const setWorkerPaused = useGalleryStore((state) => state.setWorkerPaused);
 
-    invoke<FolderWorkerStates[]>("get_worker_states", { folderIds }).then((states) => {
-      setPaused(
-        Object.fromEntries(
-          states.map((state) => [
-            state.folder_id,
-            {
-              thumbnail: state.thumbnail_paused,
-              metadata: state.metadata_paused,
-              embedding: state.embedding_paused,
-              tagging: state.tagging_paused,
-            },
-          ]),
-        ),
-      );
-    });
-  }, [folders]);
+  useEffect(() => {
+    void loadWorkerStates();
+  }, [folders, loadWorkerStates]);
 
   // Fetch failed embedding filenames whenever the expanded panel opens or failure counts change.
   const failedCounts = useMemo(
@@ -113,20 +79,11 @@ export function BackgroundTasks() {
   }, [expanded, failedCounts]);
 
   const isWorkerPaused = (folderId: number, worker: WorkerKey) => {
-    return paused[folderId]?.[worker] ?? DEFAULT_PAUSED_STATE[worker];
+    return workerPaused[folderId]?.[worker] ?? false;
   };
 
   const toggleWorker = (folderId: number, worker: WorkerKey) => {
-    const next = !isWorkerPaused(folderId, worker);
-    setPaused((prev) => ({
-      ...prev,
-      [folderId]: {
-        ...DEFAULT_PAUSED_STATE,
-        ...prev[folderId],
-        [worker]: next,
-      },
-    }));
-    void invoke("set_worker_paused", { worker, folderId, paused: next });
+    setWorkerPaused(folderId, worker, !isWorkerPaused(folderId, worker));
   };
 
   const dismissTask = (id: number, snapshot: string) => {

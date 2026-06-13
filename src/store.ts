@@ -266,6 +266,18 @@ export type SortOrder =
 
 export type UpdateStatus = "idle" | "checking" | "upToDate" | "available" | "downloading" | "installing" | "error";
 
+export type WorkerKey = "thumbnail" | "metadata" | "embedding" | "tagging";
+
+const WORKER_KEYS: WorkerKey[] = ["thumbnail", "metadata", "embedding", "tagging"];
+
+interface FolderWorkerStates {
+  folder_id: number;
+  thumbnail_paused: boolean;
+  metadata_paused: boolean;
+  embedding_paused: boolean;
+  tagging_paused: boolean;
+}
+
 export type FfmpegStatus = "unknown" | "starting" | "downloading" | "unpacking" | "installed" | "error";
 
 interface FfmpegProgressEvent {
@@ -329,6 +341,9 @@ interface GalleryState {
   taggingQueueFolderIds: number[];
   mutedFolderIds: number[];
   notificationsPaused: boolean;
+  // Per-folder background-worker pause flags, shared by the BackgroundTasks
+  // bar and the sidebar folder context menu.
+  workerPaused: Record<number, Record<WorkerKey, boolean>>;
 
   appVersion: string | null;
   updateStatus: UpdateStatus;
@@ -421,6 +436,9 @@ interface GalleryState {
   toggleMutedFolder: (folderId: number) => void;
   loadNotificationsPaused: () => Promise<void>;
   setNotificationsPaused: (paused: boolean) => void;
+  loadWorkerStates: () => Promise<void>;
+  setWorkerPaused: (folderId: number, worker: WorkerKey, paused: boolean) => void;
+  setAllWorkersPaused: (folderId: number, paused: boolean) => void;
   loadAppVersion: () => Promise<void>;
   checkForUpdates: (options?: { quiet?: boolean }) => Promise<void>;
   installUpdate: () => Promise<void>;
@@ -708,6 +726,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   taggingQueueFolderIds: [],
   mutedFolderIds: [],
   notificationsPaused: false,
+  workerPaused: {},
 
   appVersion: null,
   updateStatus: "idle",
@@ -1524,6 +1543,62 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   setNotificationsPaused: (paused) => {
     set({ notificationsPaused: paused });
     void invoke("set_notifications_paused", { paused }).catch(() => {});
+  },
+
+  loadWorkerStates: async () => {
+    const folderIds = get().folders.map((folder) => folder.id);
+    if (folderIds.length === 0) {
+      set({ workerPaused: {} });
+      return;
+    }
+    try {
+      const states = await invoke<FolderWorkerStates[]>("get_worker_states", { folderIds });
+      set({
+        workerPaused: Object.fromEntries(
+          states.map((state) => [
+            state.folder_id,
+            {
+              thumbnail: state.thumbnail_paused,
+              metadata: state.metadata_paused,
+              embedding: state.embedding_paused,
+              tagging: state.tagging_paused,
+            },
+          ]),
+        ),
+      });
+    } catch {
+      // leave the existing snapshot in place
+    }
+  },
+
+  setWorkerPaused: (folderId, worker, paused) => {
+    set((state) => {
+      const current = state.workerPaused[folderId] ?? {
+        thumbnail: false,
+        metadata: false,
+        embedding: false,
+        tagging: false,
+      };
+      return {
+        workerPaused: {
+          ...state.workerPaused,
+          [folderId]: { ...current, [worker]: paused },
+        },
+      };
+    });
+    void invoke("set_worker_paused", { worker, folderId, paused }).catch(() => {});
+  },
+
+  setAllWorkersPaused: (folderId, paused) => {
+    set((state) => ({
+      workerPaused: {
+        ...state.workerPaused,
+        [folderId]: { thumbnail: paused, metadata: paused, embedding: paused, tagging: paused },
+      },
+    }));
+    for (const worker of WORKER_KEYS) {
+      void invoke("set_worker_paused", { worker, folderId, paused }).catch(() => {});
+    }
   },
 
   loadAppVersion: async () => {
