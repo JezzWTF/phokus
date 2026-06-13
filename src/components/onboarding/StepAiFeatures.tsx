@@ -98,7 +98,7 @@ export function StepAiFeatures() {
           <p className="mt-1 text-xs leading-relaxed text-gray-500">
             Powers <code className="rounded bg-white/[0.07] px-1 py-0.5 text-[11px] text-gray-200">/s</code> search,
             "find similar", and the Explore view, so it's part of the standard pipeline: the CLIP model
-            (~330 MB) downloads automatically the first time embeddings run. Nothing to do — you'll see it
+            (~580 MB) downloads automatically the first time embeddings run. Nothing to do — you'll see it
             in the background-tasks bar.
           </p>
         </div>
