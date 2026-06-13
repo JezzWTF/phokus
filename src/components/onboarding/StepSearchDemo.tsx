@@ -1,24 +1,24 @@
 import { useEffect, useState } from "react";
-import { FakeTile } from "./fakes";
+import { SEARCH_RESULTS } from "./fakes";
 
 const DEMOS = [
   {
     query: "beach-day_042.jpg",
     mode: "Filename",
     description: "Plain text matches file names — the default, instant search.",
-    tiles: [2, 5, 0],
+    results: SEARCH_RESULTS.filename,
   },
   {
     query: "/s golden sunset over water",
     mode: "Semantic",
     description: "Describe what's in the picture. Visual embeddings find matches even when filenames say nothing.",
-    tiles: [1, 7, 5],
+    results: SEARCH_RESULTS.semantic,
   },
   {
     query: "/t landscape",
     mode: "Tags",
     description: "Search by AI or manual tags. Autocomplete suggests tags as you type.",
-    tiles: [4, 2, 6],
+    results: SEARCH_RESULTS.tags,
   },
 ] as const;
 
@@ -69,9 +69,11 @@ export function StepSearchDemo() {
       </div>
 
       {/* Fake results */}
-      <div className={`mt-3 grid grid-cols-6 gap-1.5 transition-opacity duration-300 ${fullyTyped ? "opacity-100" : "opacity-30"}`}>
-        {demo.tiles.map((tileIndex, i) => (
-          <FakeTile key={`${demoIndex}-${i}`} index={tileIndex} />
+      <div className={`mt-3 grid grid-cols-3 gap-1.5 transition-opacity duration-300 ${fullyTyped ? "opacity-100" : "opacity-30"}`}>
+        {demo.results.map((src, i) => (
+          <div key={`${demoIndex}-${i}`} className="aspect-square overflow-hidden rounded-xl bg-white/[0.04]">
+            <img src={src} alt="" className="h-full w-full object-cover" />
+          </div>
         ))}
       </div>
 

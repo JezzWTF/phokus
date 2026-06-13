@@ -1,7 +1,51 @@
 // Shared placeholder primitives for the onboarding tour. Everything here is
-// deliberately fake — gradient stand-ins for media, looping demo progress —
-// so new users see the real UI's shapes before their own library exists.
+// deliberately fake — rights-clean demo stills (generated, owned), looping
+// demo progress — so new users see the real UI's shapes before their own
+// library exists.
+import sunset from "../../assets/onboarding/sunset.webp";
+import beach from "../../assets/onboarding/beach.webp";
+import landscape1 from "../../assets/onboarding/landscape1.webp";
+import landscape2 from "../../assets/onboarding/landscape2.webp";
+import forest from "../../assets/onboarding/forest.webp";
+import citynight from "../../assets/onboarding/citynight.webp";
+import flower from "../../assets/onboarding/flower.webp";
+import alpinelake from "../../assets/onboarding/alpinelake.webp";
+import dunes from "../../assets/onboarding/dunes.webp";
+import cozy from "../../assets/onboarding/cozy.webp";
+import cat from "../../assets/onboarding/cat.webp";
+import balloon from "../../assets/onboarding/balloon.webp";
+import architecture from "../../assets/onboarding/architecture.webp";
 
+// Ordered for grid variety: adjacent indices are visually distinct.
+const FAKE_IMAGES = [
+  sunset,
+  cozy,
+  landscape1,
+  citynight,
+  flower,
+  dunes,
+  alpinelake,
+  cat,
+  forest,
+  balloon,
+  landscape2,
+  beach,
+  architecture,
+];
+
+export function fakeImage(index: number): string {
+  return FAKE_IMAGES[index % FAKE_IMAGES.length];
+}
+
+// Curated result sets so each search demo returns thematically right images.
+export const SEARCH_RESULTS = {
+  filename: [beach, dunes, sunset], // "beach-day_042.jpg"
+  semantic: [sunset, alpinelake, beach], // "golden sunset over water"
+  tags: [landscape1, landscape2, forest], // "landscape"
+} as const;
+
+// Abstract gradient blobs/ticks for the Explore & Timeline mini-previews,
+// where small non-photographic shapes read more clearly than tiny stills.
 const TILE_GRADIENTS = [
   "from-sky-900/70 via-slate-800 to-slate-900",
   "from-amber-900/60 via-stone-800 to-stone-900",
@@ -35,7 +79,7 @@ export function FakeTile({
   return (
     <div className={`group relative aspect-square overflow-hidden rounded-xl bg-white/[0.04] ${className}`}>
       {loaded ? (
-        <div className={`absolute inset-0 bg-gradient-to-br ${tileGradient(index)} transition-opacity duration-500`} />
+        <img src={fakeImage(index)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
       ) : (
         <div className="absolute inset-0 animate-pulse bg-white/[0.04]" />
       )}
