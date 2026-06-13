@@ -3,6 +3,7 @@
 // demo progress — so new users see the real UI's shapes before their own
 // library exists.
 import sunset from "../../assets/onboarding/sunset.webp";
+import sunset2 from "../../assets/onboarding/sunset2.webp";
 import beach from "../../assets/onboarding/beach.webp";
 import landscape1 from "../../assets/onboarding/landscape1.webp";
 import landscape2 from "../../assets/onboarding/landscape2.webp";
@@ -37,11 +38,14 @@ export function fakeImage(index: number): string {
   return FAKE_IMAGES[index % FAKE_IMAGES.length];
 }
 
-// Curated result sets so each search demo returns thematically right images.
+// Result sets matched to what each query would genuinely return.
+// - filename: one exact file (a filename search hits a specific name)
+// - semantic "golden sunset over water": only the ocean-sunset stills
+// - tags "landscape": mountain valleys + the alpine lake (all landscapes)
 export const SEARCH_RESULTS = {
-  filename: [beach, dunes, sunset], // "beach-day_042.jpg"
-  semantic: [sunset, alpinelake, beach], // "golden sunset over water"
-  tags: [landscape1, landscape2, forest], // "landscape"
+  filename: [beach],
+  semantic: [sunset, sunset2],
+  tags: [landscape1, landscape2, alpinelake],
 } as const;
 
 // Abstract gradient blobs/ticks for the Explore & Timeline mini-previews,
@@ -130,6 +134,21 @@ export function FakeProgressBar({ fraction, className = "" }: { fraction: number
         />
       )}
     </div>
+  );
+}
+
+export function ReplayButton({ onClick, label = "Replay" }: { onClick: () => void; label?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/10 hover:text-gray-200"
+    >
+      <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12a7.5 7.5 0 0012.9 5.3M19.5 12A7.5 7.5 0 006.6 6.7M4.5 6.5v3h3M19.5 17.5v-3h-3" />
+      </svg>
+      {label}
+    </button>
   );
 }
 

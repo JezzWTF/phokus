@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { SEARCH_RESULTS } from "./fakes";
+import { ReplayButton, SEARCH_RESULTS } from "./fakes";
 
 const DEMOS = [
   {
     query: "beach-day_042.jpg",
     mode: "Filename",
-    description: "Plain text matches file names — the default, instant search.",
+    description: "Plain text matches file names — the default, instant search. One name, one file.",
     results: SEARCH_RESULTS.filename,
   },
   {
@@ -25,25 +25,39 @@ const DEMOS = [
 const TYPE_MS = 55;
 const HOLD_MS = 2600;
 
-/// A mock search bar that "types" each demo query, shows fake results, and
-/// cycles to the next mode.
+/// Types each demo query, shows matching results, advances through all three
+/// modes once, then stops on the last with a replay control.
 export function StepSearchDemo() {
   const [demoIndex, setDemoIndex] = useState(0);
   const [typed, setTyped] = useState(0);
+  const [finished, setFinished] = useState(false);
 
   const demo = DEMOS[demoIndex];
+  const isLastDemo = demoIndex === DEMOS.length - 1;
 
   useEffect(() => {
+    if (finished) return;
     if (typed < demo.query.length) {
       const timer = setTimeout(() => setTyped((n) => n + 1), TYPE_MS);
       return () => clearTimeout(timer);
     }
+    // Fully typed: hold, then advance — or finish on the last demo.
     const timer = setTimeout(() => {
-      setDemoIndex((i) => (i + 1) % DEMOS.length);
-      setTyped(0);
+      if (isLastDemo) {
+        setFinished(true);
+      } else {
+        setDemoIndex((i) => i + 1);
+        setTyped(0);
+      }
     }, HOLD_MS);
     return () => clearTimeout(timer);
-  }, [typed, demo.query.length]);
+  }, [typed, demo.query.length, isLastDemo, finished]);
+
+  const replay = () => {
+    setDemoIndex(0);
+    setTyped(0);
+    setFinished(false);
+  };
 
   const fullyTyped = typed >= demo.query.length;
 
@@ -61,23 +75,26 @@ export function StepSearchDemo() {
         </svg>
         <span className="text-sm text-white">
           {demo.query.slice(0, typed)}
-          <span className="animate-pulse text-gray-500">|</span>
+          {!finished ? <span className="animate-pulse text-gray-500">|</span> : null}
         </span>
         <span className="ml-auto shrink-0 rounded-md border border-sky-400/25 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300">
           {demo.mode}
         </span>
       </div>
 
-      {/* Fake results */}
-      <div className={`mt-3 grid grid-cols-3 gap-1.5 transition-opacity duration-300 ${fullyTyped ? "opacity-100" : "opacity-30"}`}>
+      {/* Results — fixed-width tiles, centered, so 1/2/3 results all look right */}
+      <div className={`mt-3 flex flex-wrap justify-center gap-1.5 transition-opacity duration-300 ${fullyTyped ? "opacity-100" : "opacity-30"}`}>
         {demo.results.map((src, i) => (
-          <div key={`${demoIndex}-${i}`} className="aspect-square overflow-hidden rounded-xl bg-white/[0.04]">
+          <div key={`${demoIndex}-${i}`} className="aspect-square w-36 overflow-hidden rounded-xl bg-white/[0.04]">
             <img src={src} alt="" className="h-full w-full object-cover" />
           </div>
         ))}
       </div>
 
-      <p className="mt-4 min-h-10 text-xs leading-relaxed text-gray-500">{demo.description}</p>
+      <div className="mt-4 flex min-h-10 items-start justify-between gap-4">
+        <p className="text-xs leading-relaxed text-gray-500">{demo.description}</p>
+        {finished ? <ReplayButton onClick={replay} /> : null}
+      </div>
     </div>
   );
 }
