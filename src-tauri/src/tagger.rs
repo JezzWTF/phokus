@@ -94,56 +94,6 @@ pub struct TaggerModelProgress {
     pub done: bool,
 }
 
-/// Adapts hf-hub's `Progress` trait to throttled `tagger-model-progress`
-/// events so the 1.3 GB model download reports real bytes, not a spinner.
-struct HubProgress<'a, F: Fn(TaggerModelProgress)> {
-    emit: &'a F,
-    total_files: usize,
-    completed_files: usize,
-    current_file: String,
-    downloaded: u64,
-    total: u64,
-    last_emit: Instant,
-}
-
-impl<F: Fn(TaggerModelProgress)> hf_hub::api::Progress for HubProgress<'_, F> {
-    fn init(&mut self, size: usize, _filename: &str) {
-        self.total = size as u64;
-        self.downloaded = 0;
-        self.last_emit = Instant::now();
-        (self.emit)(self.snapshot(false));
-    }
-
-    fn update(&mut self, size: usize) {
-        self.downloaded = self.downloaded.saturating_add(size as u64);
-        if self.last_emit.elapsed() >= std::time::Duration::from_millis(200) {
-            self.last_emit = Instant::now();
-            (self.emit)(self.snapshot(false));
-        }
-    }
-
-    fn finish(&mut self) {
-        (self.emit)(self.snapshot(false));
-    }
-}
-
-impl<F: Fn(TaggerModelProgress)> HubProgress<'_, F> {
-    fn snapshot(&self, done: bool) -> TaggerModelProgress {
-        TaggerModelProgress {
-            total_files: self.total_files,
-            completed_files: self.completed_files,
-            current_file: Some(self.current_file.clone()),
-            downloaded_bytes: Some(self.downloaded),
-            total_bytes: if self.total > 0 {
-                Some(self.total)
-            } else {
-                None
-            },
-            done,
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Runtime probe types exposed to the frontend
 // ---------------------------------------------------------------------------
@@ -350,9 +300,14 @@ pub fn prepare_tagger_model_with_progress(
         )?;
         completed_files += dll_count;
     }
+    log::info!("Tagger: ONNX runtime DLLs ready; initializing runtime");
     crate::captioner::ensure_onnx_runtime(&caption_model_dir)?;
+    log::info!("Tagger: runtime initialized; downloading model files");
 
-    // ── Tagger model files (model.onnx is ~1.3 GB) ──
+    // ── Tagger model files (model.onnx is ~446 MB) ──
+    // Download directly from the resolved URL with our resilient downloader
+    // (timeout + resume), rather than hf-hub's download_with_progress, whose
+    // agent has no read timeout and would hang on a stalled connection.
     let api = Api::new()?;
     let repo = api.repo(Repo::new(WD_TAGGER_MODEL_ID.to_string(), RepoType::Model));
 
@@ -361,17 +316,22 @@ pub fn prepare_tagger_model_with_progress(
         if destination.exists() {
             continue;
         }
-        let progress = HubProgress {
-            emit: &emit_progress,
-            total_files,
-            completed_files,
-            current_file: (*file).to_string(),
-            downloaded: 0,
-            total: 0,
-            last_emit: Instant::now(),
-        };
-        let cached = repo.download_with_progress(file, progress)?;
-        std::fs::copy(cached, destination)?;
+        let url = repo.url(file);
+        let label = (*file).to_string();
+        let mut last_emit = Instant::now() - std::time::Duration::from_secs(1);
+        crate::captioner::download_file_resilient(&url, &destination, |downloaded, total| {
+            if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+                last_emit = Instant::now();
+                emit_progress(TaggerModelProgress {
+                    total_files,
+                    completed_files,
+                    current_file: Some(label.clone()),
+                    downloaded_bytes: Some(downloaded),
+                    total_bytes: total,
+                    done: false,
+                });
+            }
+        })?;
         completed_files += 1;
     }
 
