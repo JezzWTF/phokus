@@ -3,7 +3,8 @@
 // demo progress — so new users see the real UI's shapes before their own
 // library exists.
 import sunset from "../../assets/onboarding/sunset.webp";
-import sunset2 from "../../assets/onboarding/sunset2.webp";
+import sunsetcoast from "../../assets/onboarding/sunsetcoast.webp";
+import sunsetlake from "../../assets/onboarding/sunsetlake.webp";
 import beach from "../../assets/onboarding/beach.webp";
 import landscape1 from "../../assets/onboarding/landscape1.webp";
 import landscape2 from "../../assets/onboarding/landscape2.webp";
@@ -44,7 +45,7 @@ export function fakeImage(index: number): string {
 // - tags "landscape": mountain valleys + the alpine lake (all landscapes)
 export const SEARCH_RESULTS = {
   filename: [beach],
-  semantic: [sunset, sunset2],
+  semantic: [sunsetcoast, sunset, sunsetlake],
   tags: [landscape1, landscape2, alpinelake],
 } as const;
 
