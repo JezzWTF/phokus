@@ -112,6 +112,8 @@ export interface TaggerModelProgress {
   total_files: number;
   completed_files: number;
   current_file: string | null;
+  downloaded_bytes: number | null;
+  total_bytes: number | null;
   done: boolean;
 }
 

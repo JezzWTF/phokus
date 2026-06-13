@@ -1,8 +1,19 @@
 import { useEffect } from "react";
-import { useGalleryStore } from "../../store";
-import { FakeProgressBar } from "./fakes";
+import { TaggerModelProgress, useGalleryStore } from "../../store";
+import { FakeProgressBar, formatBytes } from "./fakes";
 
 const FAKE_TAGS = ["landscape", "sunset", "outdoors", "no_humans", "ocean", "cloudy_sky"];
+
+// Prefer the current file's byte fraction (the 1.3 GB model dominates); fall
+// back to the coarse step count; null renders an indeterminate bar.
+function taggerDownloadFraction(progress: TaggerModelProgress | null): number | null {
+  if (!progress) return null;
+  if (progress.downloaded_bytes != null && progress.total_bytes != null && progress.total_bytes > 0) {
+    return progress.downloaded_bytes / progress.total_bytes;
+  }
+  if (progress.total_files > 0) return progress.completed_files / progress.total_files;
+  return null;
+}
 
 export function StepAiFeatures() {
   const taggerModelStatus = useGalleryStore((s) => s.taggerModelStatus);
@@ -61,16 +72,15 @@ export function StepAiFeatures() {
           </div>
           {taggerModelPreparing ? (
             <div className="mt-3">
-              <FakeProgressBar
-                fraction={
-                  taggerModelProgress && taggerModelProgress.total_files > 0
-                    ? taggerModelProgress.completed_files / taggerModelProgress.total_files
-                    : null
-                }
-              />
-              {taggerModelProgress?.current_file ? (
-                <p className="mt-1.5 truncate text-[11px] text-gray-600">{taggerModelProgress.current_file}</p>
-              ) : null}
+              <FakeProgressBar fraction={taggerDownloadFraction(taggerModelProgress)} />
+              <div className="mt-1.5 flex items-center justify-between gap-3 text-[11px] text-gray-600">
+                <span className="truncate">{taggerModelProgress?.current_file ?? "Preparing..."}</span>
+                {taggerModelProgress?.downloaded_bytes != null && taggerModelProgress.total_bytes != null ? (
+                  <span className="shrink-0 tabular-nums">
+                    {formatBytes(taggerModelProgress.downloaded_bytes)} / {formatBytes(taggerModelProgress.total_bytes)}
+                  </span>
+                ) : null}
+              </div>
             </div>
           ) : null}
           {!taggerModelPreparing && taggerModelError ? (

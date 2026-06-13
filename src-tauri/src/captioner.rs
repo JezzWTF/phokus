@@ -669,18 +669,43 @@ pub fn ensure_onnx_runtime(local_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Download any ONNX Runtime DLLs that are missing from `local_dir`. Unlike
+/// Download any ONNX Runtime DLLs missing from `local_dir`, reporting per-file
+/// byte progress as `(short_label, downloaded_bytes, total_bytes)`.
+/// `total_bytes` is `None` when the server omits Content-Length. Unlike
 /// `ensure_onnx_runtime` (init only), this actually provisions the files —
-/// callers that can run on a clean install must call this first.
-pub fn provision_onnx_runtime(local_dir: &Path) -> Result<()> {
+/// callers that can run on a clean install must call this first. The callback
+/// fires per chunk; callers should throttle.
+pub fn provision_onnx_runtime_with_progress(
+    local_dir: &Path,
+    mut on_progress: impl FnMut(&str, u64, Option<u64>),
+) -> Result<()> {
     for (destination_file, source_url, archive_path) in ONNX_RUNTIME_FILES {
         let destination = local_dir.join(destination_file);
         if destination.exists() {
             continue;
         }
-        download_nuget_file(source_url, archive_path, &destination)?;
+        // Strip the "onnxruntime/" prefix for a clean label.
+        let label = destination_file
+            .rsplit('/')
+            .next()
+            .unwrap_or(destination_file);
+        download_nuget_file(
+            source_url,
+            archive_path,
+            &destination,
+            |downloaded, total| on_progress(label, downloaded, total),
+        )?;
     }
     Ok(())
+}
+
+/// Number of ONNX Runtime DLLs still missing from `local_dir` (for progress
+/// step counts before downloading).
+pub fn missing_onnx_runtime_count(local_dir: &Path) -> usize {
+    ONNX_RUNTIME_FILES
+        .iter()
+        .filter(|(destination_file, _, _)| !local_dir.join(destination_file).exists())
+        .count()
 }
 
 fn download_onnx_runtime_files(local_dir: &Path) -> Result<()> {
@@ -692,22 +717,43 @@ fn download_onnx_runtime_files(local_dir: &Path) -> Result<()> {
 
     for (destination_file, source_url, archive_path) in ONNX_RUNTIME_FILES {
         let destination = local_dir.join(destination_file);
-        download_nuget_file(source_url, archive_path, &destination)?;
+        download_nuget_file(source_url, archive_path, &destination, |_, _| {})?;
     }
 
     Ok(())
 }
 
-fn download_nuget_file(source_url: &str, archive_path: &str, destination: &Path) -> Result<()> {
+fn download_nuget_file(
+    source_url: &str,
+    archive_path: &str,
+    destination: &Path,
+    mut on_progress: impl FnMut(u64, Option<u64>),
+) -> Result<()> {
     let mut response = ureq::get(source_url)
         .call()
         .map_err(|error| anyhow::anyhow!("{error}"))?;
-    let mut bytes = Vec::new();
-    response
-        .body_mut()
-        .as_reader()
-        .read_to_end(&mut bytes)
-        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    let total_bytes = response
+        .headers()
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+
+    // Stream into memory (the zip reader needs Seek) while reporting bytes.
+    let mut bytes = Vec::with_capacity(total_bytes.unwrap_or(0) as usize);
+    let mut reader = response.body_mut().as_reader();
+    let mut buffer = [0u8; 64 * 1024];
+    let mut downloaded = 0u64;
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        downloaded += read as u64;
+        on_progress(downloaded, total_bytes);
+    }
 
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
     let mut dll = archive.by_name(archive_path)?;

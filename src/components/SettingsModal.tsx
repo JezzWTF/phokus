@@ -9,6 +9,12 @@ const SECTIONS: { id: SettingsSection; label: string; detail: string }[] = [
   { id: "general", label: "General", detail: "App data and diagnostics" },
 ];
 
+function formatBytesShort(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+  return `${(bytes / 1024).toFixed(0)} KB`;
+}
+
 function StatusPill({ children, tone }: { children: React.ReactNode; tone: "ready" | "muted" | "busy" }) {
   const className =
     tone === "ready"
@@ -235,16 +241,24 @@ export function SettingsModal() {
         : "no folders selected";
   const thresholdDisplay = taggerThresholdDraft ?? String(taggerThreshold);
   const batchSizeDisplay = taggerBatchSizeDraft ?? String(taggerBatchSize);
-  const taggerDownloadLabel = taggerModelProgress
-    ? `Downloading ${taggerModelProgress.completed_files}/${taggerModelProgress.total_files}`
-    : taggerModelPreparing
-      ? "Preparing WD Tagger..."
-      : taggerReady
-        ? "Installed"
-        : "Install model";
-  const taggerDownloadPercent = taggerModelProgress
-    ? Math.round((taggerModelProgress.completed_files / Math.max(taggerModelProgress.total_files, 1)) * 100)
-    : 0;
+  const taggerBytesKnown =
+    taggerModelProgress?.downloaded_bytes != null &&
+    taggerModelProgress.total_bytes != null &&
+    taggerModelProgress.total_bytes > 0;
+  const taggerDownloadLabel = taggerBytesKnown
+    ? `Downloading ${formatBytesShort(taggerModelProgress!.downloaded_bytes!)} / ${formatBytesShort(taggerModelProgress!.total_bytes!)}`
+    : taggerModelProgress
+      ? `Downloading ${taggerModelProgress.completed_files}/${taggerModelProgress.total_files}`
+      : taggerModelPreparing
+        ? "Preparing WD Tagger..."
+        : taggerReady
+          ? "Installed"
+          : "Install model";
+  const taggerDownloadPercent = taggerBytesKnown
+    ? Math.round((taggerModelProgress!.downloaded_bytes! / taggerModelProgress!.total_bytes!) * 100)
+    : taggerModelProgress
+      ? Math.round((taggerModelProgress.completed_files / Math.max(taggerModelProgress.total_files, 1)) * 100)
+      : 0;
 
   const runQueueAction = (action: "queue" | "clear") => {
     const selectedIds = taggingQueueFolderIds;

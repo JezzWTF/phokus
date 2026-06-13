@@ -87,7 +87,61 @@ pub struct TaggerModelProgress {
     pub total_files: usize,
     pub completed_files: usize,
     pub current_file: Option<String>,
+    // Byte progress for the file currently downloading. None for files whose
+    // size isn't known up front (or between files).
+    pub downloaded_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
     pub done: bool,
+}
+
+/// Adapts hf-hub's `Progress` trait to throttled `tagger-model-progress`
+/// events so the 1.3 GB model download reports real bytes, not a spinner.
+struct HubProgress<'a, F: Fn(TaggerModelProgress)> {
+    emit: &'a F,
+    total_files: usize,
+    completed_files: usize,
+    current_file: String,
+    downloaded: u64,
+    total: u64,
+    last_emit: Instant,
+}
+
+impl<F: Fn(TaggerModelProgress)> hf_hub::api::Progress for HubProgress<'_, F> {
+    fn init(&mut self, size: usize, _filename: &str) {
+        self.total = size as u64;
+        self.downloaded = 0;
+        self.last_emit = Instant::now();
+        (self.emit)(self.snapshot(false));
+    }
+
+    fn update(&mut self, size: usize) {
+        self.downloaded = self.downloaded.saturating_add(size as u64);
+        if self.last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+            self.last_emit = Instant::now();
+            (self.emit)(self.snapshot(false));
+        }
+    }
+
+    fn finish(&mut self) {
+        (self.emit)(self.snapshot(false));
+    }
+}
+
+impl<F: Fn(TaggerModelProgress)> HubProgress<'_, F> {
+    fn snapshot(&self, done: bool) -> TaggerModelProgress {
+        TaggerModelProgress {
+            total_files: self.total_files,
+            completed_files: self.completed_files,
+            current_file: Some(self.current_file.clone()),
+            downloaded_bytes: Some(self.downloaded),
+            total_bytes: if self.total > 0 {
+                Some(self.total)
+            } else {
+                None
+            },
+            done,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -250,59 +304,83 @@ pub fn prepare_tagger_model_with_progress(
     let local_dir = model_dir(app_data_dir);
     std::fs::create_dir_all(&local_dir)?;
 
-    // Ensure the shared ONNX runtime DLLs are present. The tagger shares
-    // them with the captioner; download them here so the tagger is fully
-    // functional even on a clean install where the caption model has never
-    // been downloaded (ensure_onnx_runtime only initializes, never downloads).
+    // The tagger shares the ONNX runtime DLLs with the captioner; download
+    // them here so the tagger works even on a clean install where the caption
+    // model has never been fetched (ensure_onnx_runtime only initializes).
+    const DOWNLOAD_FILES: &[&str] = &["model.onnx", "selected_tags.csv"];
     let caption_model_dir = crate::captioner::model_dir(app_data_dir);
     std::fs::create_dir_all(&caption_model_dir)?;
-    crate::captioner::provision_onnx_runtime(&caption_model_dir)?;
-    crate::captioner::ensure_onnx_runtime(&caption_model_dir)?;
 
-    // Download the two tagger-specific files.
-    const DOWNLOAD_FILES: &[&str] = &["model.onnx", "selected_tags.csv"];
-
-    let api = Api::new()?;
-    let repo = api.repo(Repo::new(WD_TAGGER_MODEL_ID.to_string(), RepoType::Model));
-
-    let mut completed_files = DOWNLOAD_FILES
+    // Unified step count across DLLs and tagger files so the bar is coherent.
+    let dll_count = crate::captioner::missing_onnx_runtime_count(&caption_model_dir);
+    let model_pending = DOWNLOAD_FILES
         .iter()
-        .filter(|file| local_dir.join(file).exists())
+        .filter(|file| !local_dir.join(file).exists())
         .count();
+    let total_files = dll_count + model_pending;
+    let mut completed_files = 0usize;
 
     emit_progress(TaggerModelProgress {
-        total_files: DOWNLOAD_FILES.len(),
+        total_files,
         completed_files,
         current_file: None,
-        done: completed_files == DOWNLOAD_FILES.len(),
+        downloaded_bytes: None,
+        total_bytes: None,
+        done: total_files == 0,
     });
+
+    // ── ONNX runtime DLLs (small, but non-trivial on a slow link) ──
+    {
+        let mut last_emit = Instant::now() - std::time::Duration::from_secs(1);
+        crate::captioner::provision_onnx_runtime_with_progress(
+            &caption_model_dir,
+            |label, downloaded, total| {
+                if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+                    last_emit = Instant::now();
+                    emit_progress(TaggerModelProgress {
+                        total_files,
+                        completed_files,
+                        current_file: Some(format!("ONNX Runtime: {label}")),
+                        downloaded_bytes: Some(downloaded),
+                        total_bytes: total,
+                        done: false,
+                    });
+                }
+            },
+        )?;
+        completed_files += dll_count;
+    }
+    crate::captioner::ensure_onnx_runtime(&caption_model_dir)?;
+
+    // ── Tagger model files (model.onnx is ~1.3 GB) ──
+    let api = Api::new()?;
+    let repo = api.repo(Repo::new(WD_TAGGER_MODEL_ID.to_string(), RepoType::Model));
 
     for file in DOWNLOAD_FILES {
         let destination = local_dir.join(file);
         if destination.exists() {
             continue;
         }
-        emit_progress(TaggerModelProgress {
-            total_files: DOWNLOAD_FILES.len(),
+        let progress = HubProgress {
+            emit: &emit_progress,
+            total_files,
             completed_files,
-            current_file: Some((*file).to_string()),
-            done: false,
-        });
-        let cached = repo.get(file)?;
+            current_file: (*file).to_string(),
+            downloaded: 0,
+            total: 0,
+            last_emit: Instant::now(),
+        };
+        let cached = repo.download_with_progress(file, progress)?;
         std::fs::copy(cached, destination)?;
         completed_files += 1;
-        emit_progress(TaggerModelProgress {
-            total_files: DOWNLOAD_FILES.len(),
-            completed_files,
-            current_file: Some((*file).to_string()),
-            done: completed_files == DOWNLOAD_FILES.len(),
-        });
     }
 
     emit_progress(TaggerModelProgress {
-        total_files: DOWNLOAD_FILES.len(),
+        total_files,
         completed_files,
         current_file: None,
+        downloaded_bytes: None,
+        total_bytes: None,
         done: true,
     });
 
