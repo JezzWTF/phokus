@@ -82,8 +82,10 @@ export function StepSearchDemo() {
         </span>
       </div>
 
-      {/* Results — fixed-width tiles, centered, so 1/2/3 results all look right */}
-      <div className={`mt-3 flex flex-wrap justify-center gap-1.5 transition-opacity duration-300 ${fullyTyped ? "opacity-100" : "opacity-30"}`}>
+      {/* Results — hidden (not greyed) until the query finishes typing, so it
+          doesn't look like the app is reading the user's mind. Space is held
+          by the invisible tiles so the layout doesn't jump when they appear. */}
+      <div className={`mt-3 flex flex-wrap justify-center gap-1.5 transition-opacity duration-300 ${fullyTyped ? "opacity-100" : "opacity-0"}`}>
         {demo.results.map((src, i) => (
           <div key={`${demoIndex}-${i}`} className="aspect-square w-36 overflow-hidden rounded-xl bg-white/[0.04]">
             <img src={src} alt="" className="h-full w-full object-cover" />

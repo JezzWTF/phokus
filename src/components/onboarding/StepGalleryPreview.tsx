@@ -3,18 +3,15 @@ import { FakeTile, ReplayButton } from "./fakes";
 
 const REVEAL_MS = 280;
 
+// Two rows (cols-4) keeps the explainer text visible without scrolling.
 const TILE_PROPS: { favorite?: boolean; rating?: number; duration?: string }[] = [
   {},
   { favorite: true },
   {},
   { duration: "1:24" },
   { rating: 5 },
-  {},
   { favorite: true, rating: 3 },
-  {},
   { duration: "0:09" },
-  {},
-  { rating: 4 },
   {},
 ];
 
