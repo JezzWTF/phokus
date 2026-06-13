@@ -795,16 +795,28 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   removeFolder: async (folderId) => {
-    await invoke("remove_folder", { folderId });
     const { selectedFolderId, loadFolders, loadImages, loadBackgroundJobProgress } = get();
+    // Optimistically drop it from the sidebar for instant feedback (the backend
+    // delete of its images/thumbnails can take a moment), clearing the active
+    // selection if it was this folder.
+    set((state) => {
+      const folders = state.folders.filter((folder) => folder.id !== folderId);
+      return selectedFolderId === folderId ? { folders, selectedFolderId: null } : { folders };
+    });
+    try {
+      await invoke("remove_folder", { folderId });
+    } catch (error) {
+      // Removal failed — resync the authoritative list and surface the error.
+      await loadFolders();
+      throw error;
+    }
     await loadFolders();
     await loadBackgroundJobProgress();
-    // Invalidate tag cloud and explore-tags cache since library content changed
+    // Invalidate tag cloud and explore-tags cache since library content changed.
     set({ tagCloudFolderId: undefined, tagCloudEntries: [], exploreTagsFolderId: undefined });
-    if (selectedFolderId === folderId) {
-      set({ selectedFolderId: null });
-      await loadImages(true);
-    }
+    // Always refresh the gallery: the removed folder's images may be on screen
+    // (e.g. in All Media), not only when that folder was the active selection.
+    await loadImages(true);
   },
 
   reindexFolder: async (folderId) => {
