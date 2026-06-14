@@ -105,8 +105,8 @@ export function StepAiFeatures() {
       </div>
 
       <p className="mt-5 text-xs leading-relaxed text-gray-500">
-        That's the tour. Add folders from the sidebar, and revisit any of this from Settings — including
-        re-running this tour.
+        Semantic search and similarity are part of the standard pipeline; AI tagging stays optional and
+        can be downloaded any time from Settings.
       </p>
     </div>
   );

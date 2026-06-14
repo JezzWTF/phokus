@@ -8,6 +8,7 @@ import { StepGalleryPreview } from "./StepGalleryPreview";
 import { StepSearchDemo } from "./StepSearchDemo";
 import { StepViews } from "./StepViews";
 import { StepAiFeatures } from "./StepAiFeatures";
+import { StepUpdates } from "./StepUpdates";
 
 const STEPS: { id: string; title: string; component: () => React.ReactNode }[] = [
   { id: "welcome", title: "Welcome", component: () => <StepWelcome /> },
@@ -17,6 +18,7 @@ const STEPS: { id: string; title: string; component: () => React.ReactNode }[] =
   { id: "search", title: "Search", component: () => <StepSearchDemo /> },
   { id: "views", title: "Views", component: () => <StepViews /> },
   { id: "ai", title: "AI features", component: () => <StepAiFeatures /> },
+  { id: "updates", title: "Staying current", component: () => <StepUpdates /> },
 ];
 
 export function OnboardingOverlay() {

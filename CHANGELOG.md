@@ -38,9 +38,11 @@ installer with a built-in updater.
   the background-tasks bar.
 - **Guided first-run onboarding** — background FFmpeg provisioning with live
   progress and retry, a walkthrough of the library, pipeline, search modes,
-  and views, and an optional AI-tagger download. Re-runnable from Settings.
-- **Updater** — checks GitHub Releases on launch and from Settings; downloads
-  and installs signed update artifacts.
+  views, and updates, plus an optional AI-tagger download. Re-runnable from
+  Settings.
+- **Updater** — checks GitHub Releases on launch and from Settings; a title-bar
+  indicator lights up when a new version is ready, and one click downloads,
+  installs the signed update, and relaunches.
 - **Maintenance** — database compaction and orphaned-thumbnail cleanup from
   Settings, with live size/reclaimable stats.
 - **Window state** persistence and single-instance handling.
