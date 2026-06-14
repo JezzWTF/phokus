@@ -115,6 +115,29 @@ function rectToNormalisedCrop(
 /** Minimum selection size as a fraction of the viewport container dimension. */
 const MIN_SELECTION_FRACTION = 0.02;
 
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 4;
+
+interface ViewTransform {
+  zoom: number;
+  panX: number;
+  panY: number;
+}
+
+const IDENTITY_VIEW: ViewTransform = { zoom: 1, panX: 0, panY: 0 };
+
+/** Re-anchor the pan so the point at (anchorX, anchorY) — measured from the
+ *  viewport centre — stays under the cursor across a zoom change. */
+function zoomViewAt(view: ViewTransform, newZoom: number, anchorX: number, anchorY: number): ViewTransform {
+  if (newZoom <= 1) return { ...IDENTITY_VIEW, zoom: newZoom };
+  const ratio = newZoom / view.zoom;
+  return {
+    zoom: newZoom,
+    panX: anchorX - (anchorX - view.panX) * ratio,
+    panY: anchorY - (anchorY - view.panY) * ratio,
+  };
+}
+
 export function Lightbox() {
   const selectedImage = useGalleryStore((state) => state.selectedImage);
   const closeImage = useGalleryStore((state) => state.closeImage);
@@ -135,7 +158,10 @@ export function Lightbox() {
   const currentImageIdRef = useRef<number | null>(null);
   currentImageIdRef.current = selectedImage?.id ?? null;
 
-  const [zoom, setZoom] = useState(1);
+  const [view, setView] = useState<ViewTransform>(IDENTITY_VIEW);
+  const zoom = view.zoom;
+  const [isPanning, setIsPanning] = useState(false);
+  const lastPanPointRef = useRef({ x: 0, y: 0 });
   const [imageTags, setImageTags] = useState<ImageTag[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [tagAdding, setTagAdding] = useState(false);
@@ -169,8 +195,24 @@ export function Lightbox() {
     setDragRect(null);
   }, []);
 
+  // Keep the pan within bounds: when the scaled image overflows the viewport
+  // the image edge may not be dragged past the viewport edge; when it fits,
+  // the pan snaps back to centre on that axis.
+  const clampPan = useCallback((v: ViewTransform): ViewTransform => {
+    const img = imgRef.current;
+    const vp = imageViewportRef.current;
+    if (!img || !vp) return v;
+    const maxX = Math.max(0, (img.offsetWidth * v.zoom - vp.clientWidth) / 2);
+    const maxY = Math.max(0, (img.offsetHeight * v.zoom - vp.clientHeight) / 2);
+    return {
+      ...v,
+      panX: Math.min(maxX, Math.max(-maxX, v.panX)),
+      panY: Math.min(maxY, Math.max(-maxY, v.panY)),
+    };
+  }, []);
+
   useEffect(() => {
-    setZoom(1);
+    setView(IDENTITY_VIEW);
     setImageTags([]);
     setTagInput("");
     setTagsExpanded(false);
@@ -203,15 +245,19 @@ export function Lightbox() {
       if (regionSelectMode) return; // don't zoom during selection
       if (!event.ctrlKey && Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
       event.preventDefault();
-      setZoom((value) => {
+      const bounds = viewport.getBoundingClientRect();
+      const anchorX = event.clientX - (bounds.left + bounds.width / 2);
+      const anchorY = event.clientY - (bounds.top + bounds.height / 2);
+      setView((v) => {
         const delta = event.deltaY < 0 ? 0.15 : -0.15;
-        return Math.min(4, Math.max(0.5, value + delta));
+        const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.zoom + delta));
+        return clampPan(zoomViewAt(v, next, anchorX, anchorY));
       });
     };
 
     viewport.addEventListener("wheel", handleWheel, { passive: false });
     return () => viewport.removeEventListener("wheel", handleWheel);
-  }, [selectedImage, regionSelectMode]);
+  }, [selectedImage, regionSelectMode, clampPan]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -227,18 +273,29 @@ export function Lightbox() {
       // Shift+arrows are reserved for video seeking (handled by VideoPlayer)
       if (event.key === "ArrowLeft" && !event.shiftKey) goPrev();
       if (event.key === "ArrowRight" && !event.shiftKey) goNext();
-      if (event.key === "+" || event.key === "=") setZoom((value) => Math.min(3, value + 0.25));
-      if (event.key === "-") setZoom((value) => Math.max(0.75, value - 0.25));
+      if (event.key === "+" || event.key === "=")
+        setView((v) => clampPan(zoomViewAt(v, Math.min(3, v.zoom + 0.25), 0, 0)));
+      if (event.key === "-")
+        setView((v) => clampPan(zoomViewAt(v, Math.max(0.75, v.zoom - 0.25), 0, 0)));
     };
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selectedImage, closeImage, goPrev, goNext, regionSelectMode, exitRegionMode]);
+  }, [selectedImage, closeImage, goPrev, goNext, regionSelectMode, exitRegionMode, clampPan]);
 
-  // ── Region selection pointer handlers ───────────────────────────────────────
+  // ── Region selection / pan pointer handlers ─────────────────────────────────
   const handleRegionPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (!regionSelectMode) return;
+      if (!regionSelectMode) {
+        // Drag-to-pan when the image is zoomed in
+        if (zoom > 1 && event.button === 0 && selectedImage?.media_kind === "image") {
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          lastPanPointRef.current = { x: event.clientX, y: event.clientY };
+          setIsPanning(true);
+        }
+        return;
+      }
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
       setIsDragging(true);
@@ -249,21 +306,33 @@ export function Lightbox() {
         endY: event.clientY,
       });
     },
-    [regionSelectMode],
+    [regionSelectMode, zoom, selectedImage?.media_kind],
   );
 
   const handleRegionPointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
+      if (isPanning) {
+        const dx = event.clientX - lastPanPointRef.current.x;
+        const dy = event.clientY - lastPanPointRef.current.y;
+        lastPanPointRef.current = { x: event.clientX, y: event.clientY };
+        setView((v) => clampPan({ ...v, panX: v.panX + dx, panY: v.panY + dy }));
+        return;
+      }
       if (!isDragging) return;
       setDragRect((prev) =>
         prev ? { ...prev, endX: event.clientX, endY: event.clientY } : null,
       );
     },
-    [isDragging],
+    [isDragging, isPanning, clampPan],
   );
 
   const handleRegionPointerUp = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
+      if (isPanning) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        setIsPanning(false);
+        return;
+      }
       if (!isDragging || !dragRect || !selectedImage || !imgRef.current) {
         setIsDragging(false);
         return;
@@ -296,7 +365,7 @@ export function Lightbox() {
       void loadSimilarByRegion(selectedImage.id, crop, folderId, selectedImage.folder_id)
         .finally(() => setRegionSearching(false));
     },
-    [isDragging, dragRect, selectedImage, similarScope, loadSimilarByRegion, exitRegionMode],
+    [isPanning, isDragging, dragRect, selectedImage, similarScope, loadSimilarByRegion, exitRegionMode],
   );
 
   // Build the CSS rect for the selection overlay (viewport-relative)
@@ -332,8 +401,14 @@ export function Lightbox() {
             <div className="flex flex-1 overflow-hidden">
               <div
                 ref={imageViewportRef}
-                className={`group relative flex flex-1 items-center justify-center overflow-auto p-10 ${
-                  regionSelectMode ? "cursor-crosshair select-none" : ""
+                className={`group relative flex flex-1 items-center justify-center overflow-hidden p-10 ${
+                  regionSelectMode
+                    ? "cursor-crosshair select-none"
+                    : isPanning
+                    ? "cursor-grabbing select-none"
+                    : zoom > 1 && selectedImage.media_kind === "image"
+                    ? "cursor-grab"
+                    : ""
                 }`}
                 onPointerDown={handleRegionPointerDown}
                 onPointerMove={handleRegionPointerMove}
@@ -386,9 +461,10 @@ export function Lightbox() {
                           src={convertFileSrc(selectedImage.path)}
                           alt={selectedImage.filename}
                           className="max-w-full rounded-2xl shadow-2xl"
+                          draggable={false}
                           style={{
                             maxHeight: "calc(100vh - 10rem)",
-                            transform: `scale(${zoom})`,
+                            transform: `translate(${view.panX}px, ${view.panY}px) scale(${zoom})`,
                             transformOrigin: "center center",
                             // Slightly dim the image while in region select mode
                             ...(regionSelectMode ? { opacity: 0.85 } : {}),
@@ -399,14 +475,14 @@ export function Lightbox() {
                             <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-black/55 px-2 py-1 backdrop-blur">
                               <button
                                 className="px-2 text-sm text-gray-300 hover:text-white"
-                                onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}
+                                onClick={() => setView((v) => clampPan(zoomViewAt(v, Math.max(MIN_ZOOM, v.zoom - 0.25), 0, 0)))}
                               >
                                 -
                               </button>
                               <span className="min-w-14 text-center text-xs text-gray-300">{Math.round(zoom * 100)}%</span>
                               <button
                                 className="px-2 text-sm text-gray-300 hover:text-white"
-                                onClick={() => setZoom((value) => Math.min(4, value + 0.25))}
+                                onClick={() => setView((v) => clampPan(zoomViewAt(v, Math.min(MAX_ZOOM, v.zoom + 0.25), 0, 0)))}
                               >
                                 +
                               </button>

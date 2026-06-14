@@ -7,9 +7,9 @@ use crate::tagger::{self, WdTagger};
 use crate::thumbnail;
 use crate::vector;
 use anyhow::Result;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rayon::prelude::*;
 use serde::Serialize;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -24,6 +24,7 @@ const IMAGE_EXTENSIONS: &[&str] = &[
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "m4v", "webm"];
 
 const JOB_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(750);
+#[allow(dead_code)] // caption worker disabled (lib.rs)
 const CAPTION_BATCH_SIZE: usize = 1;
 
 static LAST_JOB_PROGRESS_EMIT: OnceLock<Mutex<HashMap<i64, Instant>>> = OnceLock::new();
@@ -141,14 +142,18 @@ fn higher_priority_work_pending(pool: &DbPool, own_tier: WorkerTier) -> Result<b
     let conn = pool.get()?;
     let active_folders = active_indexing_folders();
 
+    // Video jobs are unclaimable until FFmpeg is provisioned; they must not
+    // count as pending higher-priority work or they'd stall lower tiers.
+    let ffmpeg_ready = crate::media::ffmpeg_ready();
+
     if own_tier > WorkerTier::Thumbnail {
         let mut excluded = paused_folder_ids("thumbnail");
         excluded.extend(active_folders.iter().copied());
-        if db::has_claimable_thumbnail_jobs(&conn, &excluded)? {
+        if db::has_claimable_thumbnail_jobs(&conn, &excluded, ffmpeg_ready)? {
             return Ok(true);
         }
     }
-    if own_tier > WorkerTier::Metadata {
+    if own_tier > WorkerTier::Metadata && ffmpeg_ready {
         let mut excluded = paused_folder_ids("metadata");
         excluded.extend(active_folders.iter().copied());
         if db::has_claimable_metadata_jobs(&conn, &excluded)? {
@@ -200,7 +205,7 @@ pub fn index_folder(app: AppHandle, pool: DbPool, folder_id: i64, folder_path: P
         // not be silently destroyed.
         if !folder_path.is_dir() {
             let error_msg = format!("Folder not found: {}", folder_path.display());
-            eprintln!("Indexing error for folder {}: {}", folder_id, error_msg);
+            log::error!("Indexing error for folder {folder_id}: {error_msg}");
             if let Ok(conn) = pool.get() {
                 let _ = db::set_folder_scan_error(&conn, folder_id, &error_msg);
             }
@@ -221,7 +226,7 @@ pub fn index_folder(app: AppHandle, pool: DbPool, folder_id: i64, folder_path: P
         let storage_profile = detect_storage_profile(&folder_path);
         set_folder_storage_profile(folder_id, RuntimeAdaptiveProfile::new(storage_profile));
         if let Err(error) = do_index(app.clone(), &pool, folder_id, folder_path) {
-            eprintln!("Indexing error for folder {}: {}", folder_id, error);
+            log::error!("Indexing error for folder {folder_id}: {error}");
             if let Ok(conn) = pool.get() {
                 let _ = db::set_folder_scan_error(&conn, folder_id, &error.to_string());
             }
@@ -254,7 +259,7 @@ pub fn start_thumbnail_worker(
             Ok(true) => {}
             Ok(false) => std::thread::sleep(std::time::Duration::from_millis(250)),
             Err(error) => {
-                eprintln!("Thumbnail worker error: {}", error);
+                log::error!("Thumbnail worker error: {error}");
                 std::thread::sleep(std::time::Duration::from_millis(250));
             }
         }
@@ -269,7 +274,7 @@ pub fn start_metadata_worker(app: AppHandle, pool: DbPool, media_tools: MediaToo
             Ok(true) => {}
             Ok(false) => std::thread::sleep(std::time::Duration::from_millis(250)),
             Err(error) => {
-                eprintln!("Metadata worker error: {}", error);
+                log::error!("Metadata worker error: {error}");
                 std::thread::sleep(std::time::Duration::from_millis(250));
             }
         }
@@ -279,7 +284,7 @@ pub fn start_metadata_worker(app: AppHandle, pool: DbPool, media_tools: MediaToo
 pub fn start_embedding_worker(app: AppHandle, pool: DbPool) {
     std::thread::spawn(move || {
         let mut embedder: Option<ClipImageEmbedder> = None;
-        println!("Embedding worker started.");
+        log::info!("Embedding worker started.");
         loop {
             // Only back off when the queue is empty (or errored); while jobs
             // are pending, claim the next batch immediately.
@@ -287,7 +292,7 @@ pub fn start_embedding_worker(app: AppHandle, pool: DbPool) {
                 Ok(true) => {}
                 Ok(false) => std::thread::sleep(std::time::Duration::from_millis(500)),
                 Err(error) => {
-                    eprintln!("Embedding worker error: {}", error);
+                    log::error!("Embedding worker error: {error}");
                     std::thread::sleep(std::time::Duration::from_millis(500));
                 }
             }
@@ -295,19 +300,20 @@ pub fn start_embedding_worker(app: AppHandle, pool: DbPool) {
     });
 }
 
+#[allow(dead_code)] // caption worker disabled (lib.rs)
 pub fn start_caption_worker(app: AppHandle, pool: DbPool, app_data_dir: PathBuf) {
     std::thread::spawn(move || {
         let mut captioner: Option<FlorenceCaptioner> = None;
-        println!("Caption worker started.");
+        log::info!("Caption worker started.");
         loop {
             // If the acceleration setting changed, drop the cached session so
             // the next batch picks it up with the new execution provider.
             if captioner::CAPTION_SESSION_DIRTY.swap(false, std::sync::atomic::Ordering::Relaxed) {
-                println!("Caption worker: acceleration setting changed — resetting session.");
+                log::info!("Caption worker: acceleration setting changed — resetting session.");
                 captioner = None;
             }
             if let Err(error) = process_caption_batch(&app, &pool, &app_data_dir, &mut captioner) {
-                eprintln!("Caption worker error: {}", error);
+                log::error!("Caption worker error: {error}");
                 captioner = None;
             }
             std::thread::sleep(std::time::Duration::from_millis(750));
@@ -318,12 +324,12 @@ pub fn start_caption_worker(app: AppHandle, pool: DbPool, app_data_dir: PathBuf)
 pub fn start_tagging_worker(app: AppHandle, pool: DbPool, app_data_dir: PathBuf) {
     std::thread::spawn(move || {
         let mut tagger_instance: Option<WdTagger> = None;
-        println!("Tagging worker started.");
+        log::info!("Tagging worker started.");
         loop {
             // If the acceleration setting changed, drop the cached session so
             // the next batch picks it up with the new execution provider.
             if tagger::TAGGER_SESSION_DIRTY.swap(false, std::sync::atomic::Ordering::Relaxed) {
-                println!("Tagging worker: acceleration setting changed — resetting session.");
+                log::info!("Tagging worker: acceleration setting changed — resetting session.");
                 tagger_instance = None;
             }
             // Only back off when the queue is empty (or errored); while jobs
@@ -332,7 +338,7 @@ pub fn start_tagging_worker(app: AppHandle, pool: DbPool, app_data_dir: PathBuf)
                 Ok(true) => {}
                 Ok(false) => std::thread::sleep(std::time::Duration::from_millis(750)),
                 Err(error) => {
-                    eprintln!("Tagging worker error: {}", error);
+                    log::error!("Tagging worker error: {error}");
                     tagger_instance = None;
                     std::thread::sleep(std::time::Duration::from_millis(750));
                 }
@@ -369,7 +375,7 @@ fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf)
                 if let Some(path) = err.path() {
                     unreadable_prefixes.push(path.to_string_lossy().into_owned());
                 }
-                eprintln!(
+                log::error!(
                     "WalkDir error while scanning folder {}: {}",
                     folder_path.display(),
                     err
@@ -414,7 +420,7 @@ fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf)
         }
 
         if !records.is_empty() {
-            let committed = commit_batch(&pool, &records)?;
+            let committed = commit_batch(pool, &records)?;
             emit_images(
                 &app,
                 &IndexedImagesBatch {
@@ -422,7 +428,7 @@ fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf)
                     images: committed,
                 },
             );
-            emit_folder_job_progress(&app, &pool, &[folder_id], false);
+            emit_folder_job_progress(&app, pool, &[folder_id], false);
         }
 
         processed += path_chunk.len();
@@ -473,7 +479,7 @@ fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf)
         let _ = db::clear_folder_scan_error(&conn, folder_id);
         // Invalidate duplicate scan cache — any reindex can change file contents
         // or the set of files, making cached duplicate groups stale.
-        let folder_scope = format!("folder:{}", folder_id);
+        let folder_scope = format!("folder:{folder_id}");
         let _ = db::clear_duplicate_scan_cache(&conn, &folder_scope);
         let _ = db::clear_duplicate_scan_cache(&conn, "all");
     }
@@ -488,7 +494,7 @@ fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf)
             done: true,
         },
     );
-    emit_folder_job_progress(&app, &pool, &[folder_id], true);
+    emit_folder_job_progress(&app, pool, &[folder_id], true);
     Ok(())
 }
 
@@ -639,6 +645,7 @@ fn process_thumbnail_batch(
                 &mut conn,
                 &active_folders,
                 &paused_folders,
+                crate::media::ffmpeg_ready(),
                 worker_fetch_size,
                 worker_batch_size,
             )
@@ -649,7 +656,7 @@ fn process_thumbnail_batch(
         return Ok(false);
     }
 
-    println!("Thumbnail batch claimed: {} items", jobs.len());
+    log::info!("Thumbnail batch claimed: {} items", jobs.len());
 
     let (image_jobs, video_jobs): (Vec<_>, Vec<_>) =
         jobs.into_iter().partition(|job| job.media_kind == "image");
@@ -746,6 +753,11 @@ fn process_metadata_batch(
     pool: &DbPool,
     media_tools: &MediaTools,
 ) -> Result<bool> {
+    // Metadata jobs are video-only and need ffprobe; leave them pending until
+    // FFmpeg is provisioned — the worker poll loop drains them once ready.
+    if !crate::media::ffmpeg_ready() {
+        return Ok(false);
+    }
     if higher_priority_work_pending(pool, WorkerTier::Metadata)? {
         return Ok(false);
     }
@@ -846,7 +858,7 @@ fn process_embedding_batch(
         *embedder = Some(ClipImageEmbedder::new()?);
     }
 
-    println!("Embedding batch claimed: {} items", jobs.len());
+    log::info!("Embedding batch claimed: {} items", jobs.len());
     let folder_ids = jobs.iter().map(|job| job.folder_id).collect::<HashSet<_>>();
     emit_folder_job_progress(
         app,
@@ -897,10 +909,7 @@ fn process_embedding_batch(
                 }
             }
             Err(batch_error) => {
-                eprintln!(
-                    "Embedding batch fallback to per-image mode: {}",
-                    batch_error
-                );
+                log::error!("Embedding batch fallback to per-image mode: {batch_error}");
                 for (job, source_path) in embeddable_jobs
                     .into_iter()
                     .zip(embeddable_paths.into_iter())
@@ -921,7 +930,7 @@ fn process_embedding_batch(
         for job in &jobs {
             let embedding_result: Result<Vec<f32>> =
                 if let Some(err) = pre_failed.remove(&job.image_id) {
-                    Err(anyhow::anyhow!("{}", err))
+                    Err(anyhow::anyhow!("{err}"))
                 } else if let Some(r) = embed_results.remove(&job.image_id) {
                     r
                 } else {
@@ -946,7 +955,7 @@ fn process_embedding_batch(
     })?;
 
     if !updated_images.is_empty() {
-        println!("Embedding batch completed: {} items", updated_images.len());
+        log::info!("Embedding batch completed: {} items", updated_images.len());
         let folder_ids = updated_images
             .iter()
             .map(|image| image.folder_id)
@@ -962,14 +971,14 @@ fn process_embedding_batch(
 
     let write_elapsed = write_started_at.elapsed();
     let batch_elapsed = batch_started_at.elapsed();
-    println!(
-        "Embedding batch timing: claimed {} in {:?}, infer {:?}, write {:?}, total {:?}",
-        EMBEDDING_BATCH_SIZE, claim_elapsed, infer_elapsed, write_elapsed, batch_elapsed
+    log::info!(
+        "Embedding batch timing: claimed {EMBEDDING_BATCH_SIZE} in {claim_elapsed:?}, infer {infer_elapsed:?}, write {write_elapsed:?}, total {batch_elapsed:?}"
     );
 
     Ok(true)
 }
 
+#[allow(dead_code)] // caption worker disabled (lib.rs)
 fn process_caption_batch(
     app: &AppHandle,
     pool: &DbPool,
@@ -1182,7 +1191,7 @@ fn process_tagging_batch(
         tx.commit()?;
         Ok(updated_images)
     })
-    .or_else(|db_err| {
+    .inspect_err(|_db_err| {
         // The DB write failed.  Try to requeue the claimed jobs so they aren't
         // left stuck in 'processing' until the next app restart.
         let image_ids: Vec<i64> = jobs.iter().map(|job| job.image_id).collect();
@@ -1190,7 +1199,6 @@ fn process_tagging_batch(
             let conn = pool.get()?;
             db::requeue_tagging_jobs(&conn, &image_ids)
         });
-        Err(db_err)
     })?;
 
     if !updated_images.is_empty() {
@@ -1296,7 +1304,7 @@ fn emit_media_updates(app: &AppHandle, batch: &MediaUpdateBatch) {
 }
 
 pub fn emit_folder_job_progress(app: &AppHandle, pool: &DbPool, folder_ids: &[i64], force: bool) {
-    let mut unique_folder_ids = folder_ids.iter().copied().collect::<Vec<_>>();
+    let mut unique_folder_ids = folder_ids.to_vec();
     unique_folder_ids.sort_unstable();
     unique_folder_ids.dedup();
 
@@ -1397,11 +1405,15 @@ impl WatcherHandle {
             let mut w = self.inner.watcher.lock().unwrap();
             if path.is_dir() {
                 if let Err(e) = w.watch(&path, RecursiveMode::Recursive) {
-                    eprintln!("Watcher: failed to watch {:?}: {}", path, e);
+                    log::error!("Watcher: failed to watch {path:?}: {e}");
                 }
             }
         }
-        self.inner.folder_map.lock().unwrap().insert(path, folder_id);
+        self.inner
+            .folder_map
+            .lock()
+            .unwrap()
+            .insert(path, folder_id);
     }
 
     pub fn remove_folder(&self, path: &Path) {
@@ -1418,7 +1430,7 @@ impl WatcherHandle {
             let _ = w.unwatch(old_path);
             if new_path.is_dir() {
                 if let Err(e) = w.watch(&new_path, RecursiveMode::Recursive) {
-                    eprintln!("Watcher: failed to watch {:?}: {}", new_path, e);
+                    log::error!("Watcher: failed to watch {new_path:?}: {e}");
                 }
             }
         }
@@ -1446,7 +1458,9 @@ pub fn start_watcher(app: AppHandle, pool: DbPool, thumb_dir: PathBuf) -> Watche
     // Seed the folder map from the DB so existing folders are watched on startup.
     let folder_map: Arc<Mutex<HashMap<PathBuf, i64>>> = Arc::new(Mutex::new(HashMap::new()));
     {
-        let conn = pool.get().expect("Watcher: failed to get DB connection for init");
+        let conn = pool
+            .get()
+            .expect("Watcher: failed to get DB connection for init");
         let folders = db::get_folders(&conn).unwrap_or_default();
         let mut map = folder_map.lock().unwrap();
         for f in folders {
@@ -1461,7 +1475,7 @@ pub fn start_watcher(app: AppHandle, pool: DbPool, thumb_dir: PathBuf) -> Watche
         for path in map.keys() {
             if path.is_dir() {
                 if let Err(e) = w.watch(path, RecursiveMode::Recursive) {
-                    eprintln!("Watcher: failed to watch {:?}: {}", path, e);
+                    log::error!("Watcher: failed to watch {path:?}: {e}");
                 }
             }
         }
@@ -1505,7 +1519,10 @@ pub fn start_watcher(app: AppHandle, pool: DbPool, thumb_dir: PathBuf) -> Watche
 
             // Absorb incoming event — coalesces rapid writes into one deadline.
             if let Some(Ok(event)) = received {
-                use notify::{EventKind, event::{ModifyKind, RenameMode}};
+                use notify::{
+                    event::{ModifyKind, RenameMode},
+                    EventKind,
+                };
                 if !matches!(event.kind, EventKind::Access(_)) {
                     // Intercept atomic rename events (old + new path in one event).
                     // Handle these separately to preserve embeddings and thumbnails.
@@ -1536,7 +1553,14 @@ pub fn start_watcher(app: AppHandle, pool: DbPool, thumb_dir: PathBuf) -> Watche
             // Process renames immediately — they are atomic filesystem operations
             // and do not benefit from debouncing.
             for (old_path, new_path) in pending_renames.drain(..) {
-                process_watcher_rename(&app, &pool, &folder_map_thread, &thumb_dir, &old_path, &new_path);
+                process_watcher_rename(
+                    &app,
+                    &pool,
+                    &folder_map_thread,
+                    &thumb_dir,
+                    &old_path,
+                    &new_path,
+                );
             }
 
             // Process all paths whose debounce window has expired.
@@ -1577,7 +1601,7 @@ fn process_watcher_path(
     let conn = match pool.get() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Watcher: DB pool error: {}", e);
+            log::error!("Watcher: DB pool error: {e}");
             return;
         }
     };
@@ -1594,7 +1618,13 @@ fn process_watcher_path(
         match commit_batch(pool, &[record]) {
             Ok(committed) if !committed.is_empty() => {
                 // Always emit the images — they are committed to the DB.
-                emit_images(app, &IndexedImagesBatch { folder_id, images: committed });
+                emit_images(
+                    app,
+                    &IndexedImagesBatch {
+                        folder_id,
+                        images: committed,
+                    },
+                );
                 emit_folder_job_progress(app, pool, &[folder_id], false);
                 // Update the sidebar count only if we successfully write the new
                 // count; skip the frontend notification on pool/DB failure to
@@ -1606,7 +1636,7 @@ fn process_watcher_path(
                 }
             }
             Ok(_) => {}
-            Err(e) => eprintln!("Watcher: commit error for {:?}: {}", path, e),
+            Err(e) => log::error!("Watcher: commit error for {path:?}: {e}"),
         }
     } else {
         // File removed from disk — clean up DB row and thumbnail.
@@ -1623,7 +1653,7 @@ fn process_watcher_path(
                 }
             }
             Ok(None) => {} // never indexed or already removed
-            Err(e) => eprintln!("Watcher: lookup error for {:?}: {}", path, e),
+            Err(e) => log::error!("Watcher: lookup error for {path:?}: {e}"),
         }
     }
 }
@@ -1643,7 +1673,9 @@ fn process_watcher_rename(
     let folder_id = {
         let map = folder_map.lock().unwrap();
         map.iter()
-            .find(|(fp, _)| old_path.starts_with(fp.as_path()) || new_path.starts_with(fp.as_path()))
+            .find(|(fp, _)| {
+                old_path.starts_with(fp.as_path()) || new_path.starts_with(fp.as_path())
+            })
             .map(|(_, &id)| id)
     };
     let Some(folder_id) = folder_id else { return };
@@ -1651,7 +1683,7 @@ fn process_watcher_rename(
     let conn = match pool.get() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Watcher rename: DB pool error: {}", e);
+            log::error!("Watcher rename: DB pool error: {e}");
             return;
         }
     };
@@ -1668,7 +1700,7 @@ fn process_watcher_rename(
             return;
         }
         Err(e) => {
-            eprintln!("Watcher rename: DB lookup error: {}", e);
+            log::error!("Watcher rename: DB lookup error: {e}");
             return;
         }
     };
@@ -1684,19 +1716,28 @@ fn process_watcher_rename(
     // the thumbnail worker regenerates it.
     let effective_thumb: Option<&str> = if thumb_ok { Some(&new_thumb_str) } else { None };
 
-    let new_filename = new_path
-        .file_name()
-        .and_then(|f| f.to_str())
-        .unwrap_or("");
+    let new_filename = new_path.file_name().and_then(|f| f.to_str()).unwrap_or("");
 
-    if let Err(e) = db::update_image_path(&conn, image_id, &new_path_str, new_filename, effective_thumb) {
-        eprintln!("Watcher rename: DB update error: {}", e);
+    if let Err(e) = db::update_image_path(
+        &conn,
+        image_id,
+        &new_path_str,
+        new_filename,
+        effective_thumb,
+    ) {
+        log::error!("Watcher rename: DB update error: {e}");
         return;
     }
 
     // Emit the updated record so the frontend refreshes without a full reload.
     match db::get_image_by_id(&conn, image_id) {
-        Ok(record) => emit_images(app, &IndexedImagesBatch { folder_id, images: vec![record] }),
-        Err(e) => eprintln!("Watcher rename: post-update fetch error: {}", e),
+        Ok(record) => emit_images(
+            app,
+            &IndexedImagesBatch {
+                folder_id,
+                images: vec![record],
+            },
+        ),
+        Err(e) => log::error!("Watcher rename: post-update fetch error: {e}"),
     }
 }

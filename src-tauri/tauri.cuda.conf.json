@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/JezzWTF/phokus/releases/latest/download/latest-cuda.json"
+      ]
+    }
+  },
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/cuda-hooks.nsh"
+      }
+    }
+  }
+}

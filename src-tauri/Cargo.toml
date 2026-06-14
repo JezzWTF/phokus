@@ -1,8 +1,9 @@
 [package]
 name = "phokus"
 version = "0.1.0"
-description = "A performant image gallery application"
+description = "Local-first desktop media library"
 authors = ["JezzWTF"]
+license = "MIT"
 edition = "2021"
 
 [lib]
@@ -13,7 +14,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [features]
-default = []
+# CUDA is on by default for the main dev machine; build with
+# `--no-default-features` (pnpm dev:app:cpu) on machines without the toolkit.
+default = ["candle-cuda"]
 candle-cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 
 [dependencies]
@@ -32,18 +35,16 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 fast_image_resize = { version = "6.0.0", features = ["image"] }
 walkdir = "2"
 rayon = "1"
-tokio = { version = "1", features = ["full"] }
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+chrono = "0.4"
 anyhow = "1"
-log = "0.4"
 ffmpeg-sidecar = "2.5.0"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 memmap2 = "0.9"
 sysinfo = "0.38.4"
-candle-core = { version = "0.10.2", features = ["cuda"] }
-candle-nn = { version = "0.10.2", features = ["cuda"] }
-candle-transformers = { version = "0.10.2", features = ["cuda"] }
+candle-core = "0.10.2"
+candle-nn = "0.10.2"
+candle-transformers = "0.10.2"
 hf-hub = { version = "0.5.0", default-features = false, features = ["ureq", "native-tls"] }
 tokenizers = "0.22.1"
 ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "download-binaries", "copy-dylibs", "load-dynamic", "directml", "api-24", "tls-native"] }
@@ -54,6 +55,12 @@ kamadak-exif = "0.5"
 notify = "6"
 tauri-plugin-notification = "2"
 mozjpeg = "0.10.13"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-log = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+log = "0.4"
 
 # ── Dev-mode performance ────────────────────────────────────────────────────
 # opt-level=1 on the main crate keeps incremental compile short.

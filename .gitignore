@@ -35,3 +35,10 @@ dist-ssr
 *.json
 
 *.pyc
+
+# Bundled CUDA runtime DLLs for the CUDA build (copied from the toolkit
+# locally; ~600 MB, never committed). See RELEASE_PLAN.md "CUDA release variant".
+src-tauri/cuda-redist/
+
+# Keep the CUDA build config overlay tracked despite the *.json rule above.
+!src-tauri/tauri.cuda.conf.json

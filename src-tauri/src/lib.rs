@@ -16,6 +16,30 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be the first plugin: a second launch hands its args to the
+        // running instance and exits before anything else initializes.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("phokus".into()),
+                    }),
+                ])
+                .level(log::LevelFilter::Info)
+                .max_file_size(5 * 1024 * 1024)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
+        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -28,7 +52,10 @@ pub fn run() {
 
             std::fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
 
-            media::MediaTools::ensure_installed().expect("Failed to provision FFmpeg sidecar");
+            // FFmpeg provisioning happens in the background so the window
+            // appears immediately; workers gate video jobs on readiness and
+            // the onboarding/Settings UI shows progress and retry.
+            media::spawn_ffmpeg_provision(app.handle().clone());
 
             let db_path = app_dir.join("gallery.db");
             let pool = db::create_pool(&db_path).expect("Failed to create database pool");
@@ -41,20 +68,32 @@ pub fn run() {
                 let backfilled =
                     db::backfill_embedding_jobs(&conn).expect("Failed to backfill embedding jobs");
                 if backfilled > 0 {
-                    println!("Backfilled {} embedding jobs.", backfilled);
+                    log::info!("Backfilled {backfilled} embedding jobs.");
                 }
                 let (orphaned_vectors, missing_vectors) = db::repair_embedding_consistency(&conn)
                     .expect("Failed to repair embedding consistency");
                 if orphaned_vectors > 0 || missing_vectors > 0 {
-                    println!(
-                        "Repaired embedding consistency: removed {} orphaned vectors, requeued {} missing vectors.",
-                        orphaned_vectors, missing_vectors
+                    log::info!(
+                        "Repaired embedding consistency: removed {orphaned_vectors} orphaned vectors, requeued {missing_vectors} missing vectors."
                     );
                 }
             }
 
             let thumb_dir = app_dir.join("thumbnails");
             std::fs::create_dir_all(&thumb_dir).expect("Failed to create thumbnail dir");
+
+            // The asset protocol scope is no longer a blanket "**": thumbnails
+            // are allowed statically in tauri.conf.json, and each indexed
+            // folder is allowed here (and in add_folder/update_folder_path).
+            {
+                let scope = app.asset_protocol_scope();
+                let conn = pool.get().expect("Failed to get connection for asset scope");
+                for folder in db::get_folders(&conn).unwrap_or_default() {
+                    if let Err(error) = scope.allow_directory(&folder.path, true) {
+                        log::error!("Failed to allow asset scope for {}: {}", folder.path, error);
+                    }
+                }
+            }
 
             let thumbnail_worker_count = std::thread::available_parallelism()
                 .map(|parallelism| StorageProfile::Balanced.thumbnail_workers(parallelism.get()))
@@ -150,6 +189,10 @@ pub fn run() {
             commands::cleanup_orphaned_thumbnails,
             commands::get_muted_folder_ids,
             commands::set_muted_folder_ids,
+            commands::get_ffmpeg_status,
+            commands::retry_ffmpeg_download,
+            commands::get_onboarding_completed,
+            commands::set_onboarding_completed,
             commands::get_notifications_paused,
             commands::set_notifications_paused,
         ])

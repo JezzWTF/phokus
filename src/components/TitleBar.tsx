@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useGalleryStore } from "../store";
+import { PhokusMark } from "./PhokusMark";
 
 // SVG icons for window controls
 function MinimizeIcon() {
@@ -39,6 +40,9 @@ function CloseIcon() {
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const setSettingsOpen = useGalleryStore((state) => state.setSettingsOpen);
+  const updateStatus = useGalleryStore((state) => state.updateStatus);
+  const updateVersion = useGalleryStore((state) => state.updateVersion);
+  const installUpdate = useGalleryStore((state) => state.installUpdate);
   const appWindow = getCurrentWindow();
 
   useEffect(() => {
@@ -59,6 +63,10 @@ export function TitleBar() {
   const handleMaximize = () => appWindow.toggleMaximize();
   const handleClose = () => appWindow.close();
 
+  // An update is waiting for the user to act. Covers the "clicked Later" case too,
+  // since dismissing the toast doesn't change updateStatus.
+  const updatePending = updateStatus === "available";
+
   return (
     // data-tauri-drag-region is the recommended Tauri approach for drag regions.
     // WebkitAppRegion is kept as a CSS fallback for compatibility.
@@ -67,15 +75,32 @@ export function TitleBar() {
       className="titlebar relative z-50 flex h-9 shrink-0 items-center bg-gray-950 select-none"
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     >
-      {/* App icon + name — left side */}
+      {/* App icon + name — left side. When an update is waiting, the iris lights
+          up its focal point and the chip becomes a button that re-opens the prompt. */}
       <div className="flex items-center gap-2 pl-3 pr-4">
-        <div className="flex h-5 w-5 items-center justify-center rounded-md bg-white/8 overflow-hidden">
-          {/* Phokus logo placeholder — replace with <img src={logo} /> if you have an SVG */}
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <circle cx="6" cy="6" r="4" stroke="#a78bfa" strokeWidth="1.5" />
-            <circle cx="6" cy="6" r="1.5" fill="#a78bfa" />
-          </svg>
-        </div>
+        {updatePending ? (
+          <div
+            className="group relative"
+            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+          >
+            <button
+              onClick={() => void installUpdate()}
+              aria-label={`Update available — click to update to Phokus v${updateVersion}`}
+              className="relative flex h-5 w-5 items-center justify-center rounded-md bg-white/8 overflow-hidden text-gray-300 transition-colors hover:bg-white/12"
+            >
+              <span className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-400/60 animate-ping" />
+              <PhokusMark className="relative h-4 w-4" dotClassName="fill-amber-400" />
+            </button>
+            {/* Custom tooltip — fades in ~100ms instead of the native ~500ms delay. */}
+            <span className="pointer-events-none absolute left-0 top-full z-50 mt-1.5 whitespace-nowrap rounded-md border border-white/10 bg-gray-800 px-2 py-1 text-[11px] text-gray-200 opacity-0 shadow-lg transition-opacity duration-100 group-hover:opacity-100">
+              Click to update — v{updateVersion}
+            </span>
+          </div>
+        ) : (
+          <div className="flex h-5 w-5 items-center justify-center rounded-md bg-white/8 overflow-hidden text-gray-300">
+            <PhokusMark className="h-4 w-4" />
+          </div>
+        )}
         <span className="text-[11px] font-semibold text-gray-400 tracking-wide">Phokus</span>
       </div>
 

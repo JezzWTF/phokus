@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, TaggerAcceleration, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
+import { FfmpegStatusRow } from "./onboarding/StepWelcome";
 
 type SettingsSection = "workspace" | "general";
 
@@ -7,6 +8,12 @@ const SECTIONS: { id: SettingsSection; label: string; detail: string }[] = [
   { id: "workspace", label: "AI Workspace", detail: "Tagging models and queue targets" },
   { id: "general", label: "General", detail: "App data and diagnostics" },
 ];
+
+function formatBytesShort(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+  return `${(bytes / 1024).toFixed(0)} KB`;
+}
 
 function StatusPill({ children, tone }: { children: React.ReactNode; tone: "ready" | "muted" | "busy" }) {
   const className =
@@ -178,6 +185,13 @@ export function SettingsModal() {
   const vacuumDatabase = useGalleryStore((state) => state.vacuumDatabase);
   const getOrphanedThumbnailsInfo = useGalleryStore((state) => state.getOrphanedThumbnailsInfo);
   const cleanupOrphanedThumbnails = useGalleryStore((state) => state.cleanupOrphanedThumbnails);
+  const appVersion = useGalleryStore((state) => state.appVersion);
+  const updateStatus = useGalleryStore((state) => state.updateStatus);
+  const updateVersion = useGalleryStore((state) => state.updateVersion);
+  const updateError = useGalleryStore((state) => state.updateError);
+  const checkForUpdates = useGalleryStore((state) => state.checkForUpdates);
+  const installUpdate = useGalleryStore((state) => state.installUpdate);
+  const openOnboarding = useGalleryStore((state) => state.openOnboarding);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -227,16 +241,24 @@ export function SettingsModal() {
         : "no folders selected";
   const thresholdDisplay = taggerThresholdDraft ?? String(taggerThreshold);
   const batchSizeDisplay = taggerBatchSizeDraft ?? String(taggerBatchSize);
-  const taggerDownloadLabel = taggerModelProgress
-    ? `Downloading ${taggerModelProgress.completed_files}/${taggerModelProgress.total_files}`
-    : taggerModelPreparing
-      ? "Preparing WD Tagger..."
-      : taggerReady
-        ? "Installed"
-        : "Install model";
-  const taggerDownloadPercent = taggerModelProgress
-    ? Math.round((taggerModelProgress.completed_files / Math.max(taggerModelProgress.total_files, 1)) * 100)
-    : 0;
+  const taggerBytesKnown =
+    taggerModelProgress?.downloaded_bytes != null &&
+    taggerModelProgress.total_bytes != null &&
+    taggerModelProgress.total_bytes > 0;
+  const taggerDownloadLabel = taggerBytesKnown
+    ? `Downloading ${formatBytesShort(taggerModelProgress!.downloaded_bytes!)} / ${formatBytesShort(taggerModelProgress!.total_bytes!)}`
+    : taggerModelProgress
+      ? `Downloading ${taggerModelProgress.completed_files}/${taggerModelProgress.total_files}`
+      : taggerModelPreparing
+        ? "Preparing WD Tagger..."
+        : taggerReady
+          ? "Installed"
+          : "Install model";
+  const taggerDownloadPercent = taggerBytesKnown
+    ? Math.round((taggerModelProgress!.downloaded_bytes! / taggerModelProgress!.total_bytes!) * 100)
+    : taggerModelProgress
+      ? Math.round((taggerModelProgress.completed_files / Math.max(taggerModelProgress.total_files, 1)) * 100)
+      : 0;
 
   const runQueueAction = (action: "queue" | "clear") => {
     const selectedIds = taggingQueueFolderIds;
@@ -578,6 +600,65 @@ export function SettingsModal() {
               </div>
             ) : (
               <div className="mt-8 space-y-9">
+                <SettingsGroup title="Updates">
+                  <SettingsItem
+                    label={
+                      <span className="inline-flex items-center gap-2.5">
+                        <span>Phokus {appVersion ? `v${appVersion}` : "—"}</span>
+                        {updateStatus === "available" || updateStatus === "downloading" || updateStatus === "installing" ? (
+                          <StatusPill tone="busy">v{updateVersion} available</StatusPill>
+                        ) : updateStatus === "upToDate" ? (
+                          <StatusPill tone="ready">Up to date</StatusPill>
+                        ) : null}
+                      </span>
+                    }
+                    description={
+                      updateStatus === "error" ? (
+                        <span className="text-amber-300/90">Update check failed: {updateError}</span>
+                      ) : updateStatus === "downloading" || updateStatus === "installing" ? (
+                        "Downloading update — the app will restart when it finishes."
+                      ) : (
+                        "Updates are checked quietly at launch and installed only when you choose."
+                      )
+                    }
+                  >
+                    {updateStatus === "available" ? (
+                      <button
+                        className="rounded-md border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25"
+                        onClick={() => void installUpdate()}
+                      >
+                        Install &amp; restart
+                      </button>
+                    ) : (
+                      <button
+                        className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                        onClick={() => void checkForUpdates()}
+                        disabled={updateStatus === "checking" || updateStatus === "downloading" || updateStatus === "installing"}
+                      >
+                        {updateStatus === "checking" ? "Checking..." : "Check for updates"}
+                      </button>
+                    )}
+                  </SettingsItem>
+                </SettingsGroup>
+
+                <SettingsGroup title="Setup">
+                  <FfmpegStatusRow />
+                  <SettingsItem
+                    label="Welcome tour"
+                    description="Replay the guided first-run tour — library setup, the background pipeline, search modes, and AI features."
+                  >
+                    <button
+                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                      onClick={() => {
+                        setSettingsOpen(false);
+                        openOnboarding();
+                      }}
+                    >
+                      Show welcome tour
+                    </button>
+                  </SettingsItem>
+                </SettingsGroup>
+
                 <SettingsGroup title="Storage & notifications">
                   <SettingsItem
                     label="App data folder"

@@ -99,6 +99,8 @@ pub struct MetadataJob {
     pub path: String,
 }
 
+// Caption worker disabled (lib.rs) — kept for future re-enabling.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct CaptionJob {
     pub image_id: i64,
@@ -318,9 +320,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // Index must be created after ensure_column adds the column; it cannot live
     // in the execute_batch above because that batch runs before the column exists
     // on databases that predate Phase 1.
-    conn.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_images_taken_at ON images(taken_at);",
-    )?;
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_images_taken_at ON images(taken_at);")?;
     ensure_column(conn, "folders", "scan_error", "TEXT")?;
 
     vector::migrate(conn)?;
@@ -590,6 +590,7 @@ pub fn enqueue_caption_job(conn: &Connection, image_id: i64) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)] // caption worker disabled (lib.rs)
 pub fn requeue_caption_jobs(conn: &Connection, image_ids: &[i64]) -> Result<()> {
     for image_id in image_ids {
         conn.execute(
@@ -668,6 +669,7 @@ pub fn clear_caption_jobs(conn: &Connection, folder_id: Option<i64>) -> Result<u
     }
 }
 
+#[allow(dead_code)] // caption worker disabled (lib.rs)
 pub fn is_caption_job_cancelled(conn: &Connection, image_id: i64) -> Result<bool> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM caption_jobs WHERE image_id = ?1 AND status = 'cancelled'",
@@ -865,6 +867,7 @@ pub fn claim_embedding_jobs(
     Ok(claimed)
 }
 
+#[allow(dead_code)] // caption worker disabled (lib.rs)
 fn get_pending_caption_jobs_excluding(
     conn: &Connection,
     excluded_folder_ids: &std::collections::HashSet<i64>,
@@ -893,6 +896,7 @@ fn get_pending_caption_jobs_excluding(
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+#[allow(dead_code)] // caption worker disabled (lib.rs)
 pub fn claim_caption_jobs(
     conn: &mut Connection,
     paused_folder_ids: &std::collections::HashSet<i64>,
@@ -1128,6 +1132,7 @@ pub fn get_all_folder_job_progress(conn: &Connection) -> Result<Vec<FolderJobPro
 fn get_pending_thumbnail_jobs_excluding(
     conn: &Connection,
     excluded_folder_ids: &std::collections::HashSet<i64>,
+    include_videos: bool,
     limit: usize,
 ) -> Result<Vec<ThumbnailJob>> {
     let sql = format!(
@@ -1136,8 +1141,10 @@ fn get_pending_thumbnail_jobs_excluding(
          JOIN images i ON i.id = j.image_id
          WHERE j.status = 'pending'
            {}
+           {}
          ORDER BY j.updated_at, j.image_id
          LIMIT ?1",
+        media_kind_clause(include_videos),
         folder_exclusion_clause("i", excluded_folder_ids)
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -1150,6 +1157,17 @@ fn get_pending_thumbnail_jobs_excluding(
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Video jobs need FFmpeg; while it isn't provisioned they must be invisible
+/// to both claiming and the tier-priority checks, or pending video jobs would
+/// stall every lower tier indefinitely.
+fn media_kind_clause(include_videos: bool) -> &'static str {
+    if include_videos {
+        ""
+    } else {
+        "AND i.media_kind = 'image'"
+    }
 }
 
 /// True if any claimable (pending, non-excluded) jobs exist in `job_table`.
@@ -1180,8 +1198,14 @@ fn has_claimable_jobs(
 pub fn has_claimable_thumbnail_jobs(
     conn: &Connection,
     excluded_folder_ids: &std::collections::HashSet<i64>,
+    include_videos: bool,
 ) -> Result<bool> {
-    has_claimable_jobs(conn, "thumbnail_jobs", "", excluded_folder_ids)
+    has_claimable_jobs(
+        conn,
+        "thumbnail_jobs",
+        media_kind_clause(include_videos),
+        excluded_folder_ids,
+    )
 }
 
 pub fn has_claimable_metadata_jobs(
@@ -1207,6 +1231,7 @@ pub fn claim_thumbnail_jobs(
     conn: &mut Connection,
     active_folder_ids: &std::collections::HashSet<i64>,
     paused_folder_ids: &std::collections::HashSet<i64>,
+    include_videos: bool,
     fetch_limit: usize,
     claim_limit: usize,
 ) -> Result<Vec<ThumbnailJob>> {
@@ -1215,7 +1240,12 @@ pub fn claim_thumbnail_jobs(
         .union(paused_folder_ids)
         .copied()
         .collect::<std::collections::HashSet<_>>();
-    let candidates = get_pending_thumbnail_jobs_excluding(&tx, &excluded_folder_ids, fetch_limit)?;
+    let candidates = get_pending_thumbnail_jobs_excluding(
+        &tx,
+        &excluded_folder_ids,
+        include_videos,
+        fetch_limit,
+    )?;
     let mut claimed = Vec::with_capacity(claim_limit);
 
     for job in candidates {
@@ -1410,7 +1440,10 @@ pub fn update_image_details(
 
 /// Look up the lightweight indexed-media entry for a single path.
 /// Used by the filesystem watcher to run change-detection before upserting.
-pub fn get_indexed_entry_by_path(conn: &Connection, path: &str) -> Result<Option<IndexedMediaEntry>> {
+pub fn get_indexed_entry_by_path(
+    conn: &Connection,
+    path: &str,
+) -> Result<Option<IndexedMediaEntry>> {
     let result = conn.query_row(
         "SELECT id, path, modified_at, file_size, media_kind FROM images WHERE path = ?1",
         [path],
@@ -1433,12 +1466,11 @@ pub fn get_indexed_entry_by_path(conn: &Connection, path: &str) -> Result<Option
 
 /// Look up just the image id for a path. Used by the filesystem watcher
 /// to find the DB row to delete when a file is removed from disk.
+#[allow(dead_code)] // only caller is the disabled caption worker path
 pub fn get_image_id_by_path(conn: &Connection, path: &str) -> Result<Option<i64>> {
-    let result = conn.query_row(
-        "SELECT id FROM images WHERE path = ?1",
-        [path],
-        |row| row.get(0),
-    );
+    let result = conn.query_row("SELECT id FROM images WHERE path = ?1", [path], |row| {
+        row.get(0)
+    });
     match result {
         Ok(id) => Ok(Some(id)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -1474,8 +1506,9 @@ pub fn get_images_by_ids(conn: &Connection, image_ids: &[i64]) -> Result<Vec<Ima
 }
 
 pub fn get_folders(conn: &Connection) -> Result<Vec<Folder>> {
-    let mut stmt =
-        conn.prepare("SELECT id, path, name, image_count, indexed_at, scan_error FROM folders ORDER BY name")?;
+    let mut stmt = conn.prepare(
+        "SELECT id, path, name, image_count, indexed_at, scan_error FROM folders ORDER BY name",
+    )?;
     let rows = stmt.query_map([], |row| {
         Ok(Folder {
             id: row.get(0)?,
@@ -1497,7 +1530,13 @@ pub fn rename_folder(conn: &Connection, folder_id: i64, new_name: &str) -> Resul
     Ok(())
 }
 
-pub fn update_folder_path(conn: &Connection, folder_id: i64, old_path: &str, new_path: &str, new_name: &str) -> Result<()> {
+pub fn update_folder_path(
+    conn: &Connection,
+    folder_id: i64,
+    old_path: &str,
+    new_path: &str,
+    new_name: &str,
+) -> Result<()> {
     // Both updates must be atomic: if the image path rewrite fails (e.g. a
     // uniqueness collision) the folder row must not remain at the new location.
     let tx = conn.unchecked_transaction()?;
@@ -1533,6 +1572,7 @@ pub fn clear_folder_scan_error(conn: &Connection, folder_id: i64) -> Result<()> 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the gallery query surface; a params struct adds noise for one caller
 pub fn get_images(
     conn: &Connection,
     folder_id: Option<i64>,
@@ -1561,7 +1601,7 @@ pub fn get_images(
         _ => "modified_at DESC NULLS LAST",
     };
 
-    let search_pattern = search.map(|value| format!("%{}%", value));
+    let search_pattern = search.map(|value| format!("%{value}%"));
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
     let sql = format!(
@@ -1577,9 +1617,8 @@ pub fn get_images(
            AND (?4 = 0 OR favorite = 1)
            AND rating >= ?5
            AND (?6 = 0 OR embedding_status = 'failed')
-         ORDER BY {}
-         LIMIT ?7 OFFSET ?8",
-        order
+         ORDER BY {order}
+         LIMIT ?7 OFFSET ?8"
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(
@@ -1607,7 +1646,7 @@ pub fn count_images(
     rating_min: i64,
     embedding_failed_only: bool,
 ) -> Result<i64> {
-    let search_pattern = search.map(|value| format!("%{}%", value));
+    let search_pattern = search.map(|value| format!("%{value}%"));
 
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
@@ -1633,6 +1672,7 @@ pub fn count_images(
     Ok(count)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn search_images_by_tag(
     conn: &Connection,
     query: &str,
@@ -1659,7 +1699,13 @@ pub fn search_images_by_tag(
            AND (?3 = 0 OR i.favorite = 1)
            AND i.rating >= ?4
            AND LOWER(TRIM(t.tag)) = ?5",
-        params![folder_id, media_kind, favorites_flag, rating_min, normalized_query],
+        params![
+            folder_id,
+            media_kind,
+            favorites_flag,
+            rating_min,
+            normalized_query
+        ],
         |row| row.get::<_, i64>(0),
     )? as usize;
 
@@ -1769,10 +1815,7 @@ pub fn get_image_id_and_thumbnail_by_path(
 
 /// Returns all non-null thumbnail_path values for images in a folder.
 /// Called before folder deletion so callers can remove the files from disk.
-pub fn get_thumbnail_paths_for_folder(
-    conn: &Connection,
-    folder_id: i64,
-) -> Result<Vec<String>> {
+pub fn get_thumbnail_paths_for_folder(conn: &Connection, folder_id: i64) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT thumbnail_path FROM images WHERE folder_id = ?1 AND thumbnail_path IS NOT NULL",
     )?;
@@ -2054,7 +2097,10 @@ pub fn clear_tagging_jobs(conn: &Connection, folder_id: Option<i64>) -> Result<u
                  WHERE status = 'processing'",
                 [],
             )?;
-            let n = conn.execute("DELETE FROM tagging_jobs WHERE status NOT IN ('processing', 'cancelled')", [])?;
+            let n = conn.execute(
+                "DELETE FROM tagging_jobs WHERE status NOT IN ('processing', 'cancelled')",
+                [],
+            )?;
             conn.execute(
                 "UPDATE images SET ai_tagger_error = NULL WHERE ai_tagged_at IS NULL",
                 [],
@@ -2376,7 +2422,7 @@ pub fn set_duplicate_scan_cache(
 }
 
 fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let existing_name: String = row.get(1)?;
@@ -2386,7 +2432,7 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
     }
 
     conn.execute(
-        &format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, definition),
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
         [],
     )?;
     Ok(())
@@ -2413,5 +2459,5 @@ fn folder_exclusion_clause(
         .map(|id| id.to_string())
         .collect::<Vec<_>>()
         .join(",");
-    format!("AND {}.folder_id NOT IN ({})", image_alias, id_list)
+    format!("AND {image_alias}.folder_id NOT IN ({id_list})")
 }

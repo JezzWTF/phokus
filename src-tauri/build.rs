@@ -15,13 +15,17 @@ fn main() {
             if let Ok(path) = &cuda_path {
                 println!("cargo:warning=CUDA Toolkit found at {path} — GPU acceleration enabled.");
             } else {
-                println!("cargo:warning=CUDA Toolkit (nvcc) found in PATH — GPU acceleration enabled.");
+                println!(
+                    "cargo:warning=CUDA Toolkit (nvcc) found in PATH — GPU acceleration enabled."
+                );
             }
         } else {
             println!("cargo:warning=━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             println!("cargo:warning=  candle-cuda feature is enabled but no CUDA Toolkit found.");
             println!("cargo:warning=  Install CUDA Toolkit from https://developer.nvidia.com/cuda-downloads");
-            println!("cargo:warning=  Or build without GPU support: cargo build --no-default-features");
+            println!(
+                "cargo:warning=  Or build without GPU support: cargo build --no-default-features"
+            );
             println!("cargo:warning=━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         }
     }

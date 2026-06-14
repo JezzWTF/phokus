@@ -12,21 +12,25 @@ function FolderContextMenu({
   menu,
   folder,
   isMuted,
+  isPausedAll,
   onClose,
   onRename,
   onReindex,
   onLocate,
   onToggleMute,
+  onTogglePauseAll,
   onRemove,
 }: {
   menu: ContextMenuState;
   folder: Folder;
   isMuted: boolean;
+  isPausedAll: boolean;
   onClose: () => void;
   onRename: () => void;
   onReindex: () => void;
   onLocate: () => void;
   onToggleMute: () => void;
+  onTogglePauseAll: () => void;
   onRemove: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -65,6 +69,7 @@ function FolderContextMenu({
     >
       {item("Reindex", onReindex)}
       {item("Rename", onRename)}
+      {item(isPausedAll ? "Resume background work" : "Pause background work", onTogglePauseAll)}
       {item(isMuted ? "Unmute notifications" : "Mute notifications", onToggleMute)}
       {folder.scan_error && item("Locate Folder", onLocate)}
       <div className="my-1 border-t border-white/[0.06]" />
@@ -84,7 +89,12 @@ function FolderItem({
 }) {
   const { selectFolder, removeFolder, reindexFolder, renameFolder, updateFolderPath, toggleMutedFolder } = useGalleryStore();
   const mutedFolderIds = useGalleryStore((state) => state.mutedFolderIds);
+  const setAllWorkersPaused = useGalleryStore((state) => state.setAllWorkersPaused);
+  const folderWorkers = useGalleryStore((state) => state.workerPaused[folder.id]);
   const isMuted = mutedFolderIds.includes(folder.id);
+  // "Fully paused" only when every worker for this folder is paused.
+  const isPausedAll = !!folderWorkers &&
+    folderWorkers.thumbnail && folderWorkers.metadata && folderWorkers.embedding && folderWorkers.tagging;
   const isIndexing = progress && !progress.done;
   const isMissing = !!folder.scan_error && !isIndexing;
 
@@ -258,11 +268,13 @@ function FolderItem({
           menu={contextMenu}
           folder={folder}
           isMuted={isMuted}
+          isPausedAll={isPausedAll}
           onClose={() => setContextMenu(null)}
           onRename={() => setRenaming(true)}
           onReindex={() => void reindexFolder(folder.id)}
           onLocate={() => void handleLocateFolder()}
           onToggleMute={() => toggleMutedFolder(folder.id)}
+          onTogglePauseAll={() => setAllWorkersPaused(folder.id, !isPausedAll)}
           onRemove={() => setConfirmingRemoval(true)}
         />
       )}

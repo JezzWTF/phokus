@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Phokus",
-  "version": "0.1.0",
+  "version": null,
   "identifier": "wtf.jezz.phokus",
   "build": {
     "beforeDevCommand": "pnpm dev:vite",
@@ -22,18 +22,34 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:; object-src 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420; font-src 'self' data:; object-src 'none'",
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "**"
+          "$APPDATA/thumbnails/**"
         ]
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYyMDVBQzkyOENENjYzOTUKUldTVlk5YU1rcXdGWW9JRklYdHpOVXA1MDNMVEpyell6cVlma0VGS3pYaUVBLzJydy9nNUtJdlUK",
+      "endpoints": [
+        "https://github.com/JezzWTF/phokus/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "publisher": "JezzWTF",
+    "license": "MIT",
+    "copyright": "Copyright © 2026 JezzWTF",
+    "shortDescription": "Local-first desktop media library",
+    "longDescription": "A local-first desktop media library for browsing, filtering, and curating image and video folders, with AI tagging, semantic search, and duplicate detection — all processed on-device.",
+    "homepage": "https://git.jezz.wtf/jezzwtf/phokus",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

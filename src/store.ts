@@ -2,6 +2,9 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
+import { getVersion } from "@tauri-apps/api/app";
+import { check, Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { notifyTaskComplete } from "./notifications";
 
 // Per-folder debounce timers for batching notifications.
@@ -109,6 +112,8 @@ export interface TaggerModelProgress {
   total_files: number;
   completed_files: number;
   current_file: string | null;
+  downloaded_bytes: number | null;
+  total_bytes: number | null;
   done: boolean;
 }
 
@@ -259,6 +264,33 @@ export type SortOrder =
   | "taken_desc"
   | "taken_asc";
 
+export type UpdateStatus = "idle" | "checking" | "upToDate" | "available" | "downloading" | "installing" | "error";
+
+export type WorkerKey = "thumbnail" | "metadata" | "embedding" | "tagging";
+
+const WORKER_KEYS: WorkerKey[] = ["thumbnail", "metadata", "embedding", "tagging"];
+
+interface FolderWorkerStates {
+  folder_id: number;
+  thumbnail_paused: boolean;
+  metadata_paused: boolean;
+  embedding_paused: boolean;
+  tagging_paused: boolean;
+}
+
+export type FfmpegStatus = "unknown" | "starting" | "downloading" | "unpacking" | "installed" | "error";
+
+interface FfmpegProgressEvent {
+  phase: string;
+  downloaded_bytes: number | null;
+  total_bytes: number | null;
+  error: string | null;
+}
+
+// The Update handle from the plugin carries the download method; it's not
+// serializable state, so it lives outside the store.
+let pendingUpdate: Update | null = null;
+
 interface GalleryState {
   folders: Folder[];
   selectedFolderId: number | null;
@@ -309,6 +341,23 @@ interface GalleryState {
   taggingQueueFolderIds: number[];
   mutedFolderIds: number[];
   notificationsPaused: boolean;
+  // Per-folder background-worker pause flags, shared by the BackgroundTasks
+  // bar and the sidebar folder context menu.
+  workerPaused: Record<number, Record<WorkerKey, boolean>>;
+
+  appVersion: string | null;
+  updateStatus: UpdateStatus;
+  updateVersion: string | null;
+  updateProgress: number | null; // 0..1 download progress, null while size unknown
+  updateError: string | null;
+  updateDismissed: boolean;
+
+  ffmpegStatus: FfmpegStatus;
+  ffmpegProgress: { downloaded_bytes: number; total_bytes: number } | null;
+  ffmpegError: string | null;
+  onboardingCompleted: boolean | null; // null = not loaded yet
+  onboardingOpen: boolean;
+  onboardingStep: number;
 
   taggerModelStatus: TaggerModelStatus | null;
   taggerModelPreparing: boolean;
@@ -387,6 +436,19 @@ interface GalleryState {
   toggleMutedFolder: (folderId: number) => void;
   loadNotificationsPaused: () => Promise<void>;
   setNotificationsPaused: (paused: boolean) => void;
+  loadWorkerStates: () => Promise<void>;
+  setWorkerPaused: (folderId: number, worker: WorkerKey, paused: boolean) => void;
+  setAllWorkersPaused: (folderId: number, paused: boolean) => void;
+  loadAppVersion: () => Promise<void>;
+  checkForUpdates: (options?: { quiet?: boolean }) => Promise<void>;
+  installUpdate: () => Promise<void>;
+  dismissUpdate: () => void;
+  loadFfmpegStatus: () => Promise<void>;
+  retryFfmpegDownload: () => Promise<void>;
+  loadOnboardingCompleted: () => Promise<void>;
+  completeOnboarding: () => void;
+  openOnboarding: () => void;
+  setOnboardingStep: (step: number) => void;
   openAppDataFolder: () => Promise<void>;
   getDatabaseInfo: () => Promise<DatabaseInfo>;
   vacuumDatabase: () => Promise<VacuumResult>;
@@ -664,6 +726,21 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   taggingQueueFolderIds: [],
   mutedFolderIds: [],
   notificationsPaused: false,
+  workerPaused: {},
+
+  appVersion: null,
+  updateStatus: "idle",
+  updateVersion: null,
+  updateProgress: null,
+  updateError: null,
+  updateDismissed: false,
+
+  ffmpegStatus: "unknown",
+  ffmpegProgress: null,
+  ffmpegError: null,
+  onboardingCompleted: null,
+  onboardingOpen: false,
+  onboardingStep: 0,
 
   taggerModelStatus: null,
   taggerModelPreparing: false,
@@ -718,16 +795,28 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   removeFolder: async (folderId) => {
-    await invoke("remove_folder", { folderId });
     const { selectedFolderId, loadFolders, loadImages, loadBackgroundJobProgress } = get();
+    // Optimistically drop it from the sidebar for instant feedback (the backend
+    // delete of its images/thumbnails can take a moment), clearing the active
+    // selection if it was this folder.
+    set((state) => {
+      const folders = state.folders.filter((folder) => folder.id !== folderId);
+      return selectedFolderId === folderId ? { folders, selectedFolderId: null } : { folders };
+    });
+    try {
+      await invoke("remove_folder", { folderId });
+    } catch (error) {
+      // Removal failed — resync the authoritative list and surface the error.
+      await loadFolders();
+      throw error;
+    }
     await loadFolders();
     await loadBackgroundJobProgress();
-    // Invalidate tag cloud and explore-tags cache since library content changed
+    // Invalidate tag cloud and explore-tags cache since library content changed.
     set({ tagCloudFolderId: undefined, tagCloudEntries: [], exploreTagsFolderId: undefined });
-    if (selectedFolderId === folderId) {
-      set({ selectedFolderId: null });
-      await loadImages(true);
-    }
+    // Always refresh the gallery: the removed folder's images may be on screen
+    // (e.g. in All Media), not only when that folder was the active selection.
+    await loadImages(true);
   },
 
   reindexFolder: async (folderId) => {
@@ -1468,6 +1557,183 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     void invoke("set_notifications_paused", { paused }).catch(() => {});
   },
 
+  loadWorkerStates: async () => {
+    const folderIds = get().folders.map((folder) => folder.id);
+    if (folderIds.length === 0) {
+      set({ workerPaused: {} });
+      return;
+    }
+    try {
+      const states = await invoke<FolderWorkerStates[]>("get_worker_states", { folderIds });
+      set({
+        workerPaused: Object.fromEntries(
+          states.map((state) => [
+            state.folder_id,
+            {
+              thumbnail: state.thumbnail_paused,
+              metadata: state.metadata_paused,
+              embedding: state.embedding_paused,
+              tagging: state.tagging_paused,
+            },
+          ]),
+        ),
+      });
+    } catch {
+      // leave the existing snapshot in place
+    }
+  },
+
+  setWorkerPaused: (folderId, worker, paused) => {
+    set((state) => {
+      const current = state.workerPaused[folderId] ?? {
+        thumbnail: false,
+        metadata: false,
+        embedding: false,
+        tagging: false,
+      };
+      return {
+        workerPaused: {
+          ...state.workerPaused,
+          [folderId]: { ...current, [worker]: paused },
+        },
+      };
+    });
+    void invoke("set_worker_paused", { worker, folderId, paused }).catch(() => {});
+  },
+
+  setAllWorkersPaused: (folderId, paused) => {
+    set((state) => ({
+      workerPaused: {
+        ...state.workerPaused,
+        [folderId]: { thumbnail: paused, metadata: paused, embedding: paused, tagging: paused },
+      },
+    }));
+    for (const worker of WORKER_KEYS) {
+      void invoke("set_worker_paused", { worker, folderId, paused }).catch(() => {});
+    }
+  },
+
+  loadAppVersion: async () => {
+    try {
+      set({ appVersion: await getVersion() });
+    } catch {
+      // leave null; the UI falls back to a dash
+    }
+  },
+
+  checkForUpdates: async (options) => {
+    const quiet = options?.quiet ?? false;
+    const { updateStatus } = get();
+    if (updateStatus === "checking" || updateStatus === "downloading" || updateStatus === "installing") return;
+
+    set({ updateStatus: "checking", updateError: null });
+    try {
+      const update = await check();
+      if (update) {
+        pendingUpdate = update;
+        set({ updateStatus: "available", updateVersion: update.version, updateDismissed: false });
+      } else {
+        pendingUpdate = null;
+        set({ updateStatus: "upToDate", updateVersion: null });
+      }
+    } catch (error) {
+      pendingUpdate = null;
+      if (quiet) {
+        // Launch-time check: stay silent on network/endpoint failures.
+        set({ updateStatus: "idle" });
+      } else {
+        set({ updateStatus: "error", updateError: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  },
+
+  installUpdate: async () => {
+    const update = pendingUpdate;
+    if (!update || get().updateStatus !== "available") return;
+
+    set({ updateStatus: "downloading", updateProgress: null, updateError: null });
+    try {
+      let contentLength: number | null = null;
+      let downloaded = 0;
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case "Started":
+            contentLength = event.data.contentLength ?? null;
+            set({ updateProgress: contentLength ? 0 : null });
+            break;
+          case "Progress":
+            downloaded += event.data.chunkLength;
+            if (contentLength) {
+              set({ updateProgress: Math.min(downloaded / contentLength, 1) });
+            }
+            break;
+          case "Finished":
+            set({ updateStatus: "installing", updateProgress: 1 });
+            break;
+        }
+      });
+      await relaunch();
+    } catch (error) {
+      set({ updateStatus: "error", updateError: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
+  dismissUpdate: () => set({ updateDismissed: true }),
+
+  loadFfmpegStatus: async () => {
+    try {
+      const status = await invoke<{ installed: boolean; downloading: boolean; failed: boolean }>(
+        "get_ffmpeg_status",
+      );
+      if (status.installed) {
+        set({ ffmpegStatus: "installed" });
+      } else if (status.failed) {
+        // The download failed before our event listener attached — surface
+        // the error state so the retry button is reachable.
+        set({ ffmpegStatus: "error", ffmpegError: "The download could not be completed. Check your connection and retry." });
+      } else {
+        // Not installed and possibly not downloading yet — the provision
+        // thread starts with the app, so treat the gap as "starting" and let
+        // the first ffmpeg-progress event settle the real state.
+        set({ ffmpegStatus: "starting" });
+      }
+    } catch {
+      // leave "unknown"; events will correct it
+    }
+  },
+
+  retryFfmpegDownload: async () => {
+    set({ ffmpegStatus: "starting", ffmpegError: null, ffmpegProgress: null });
+    try {
+      await invoke("retry_ffmpeg_download");
+    } catch (error) {
+      set({ ffmpegStatus: "error", ffmpegError: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
+  loadOnboardingCompleted: async () => {
+    try {
+      const completed = await invoke<boolean>("get_onboarding_completed");
+      set(
+        completed
+          ? { onboardingCompleted: true }
+          : { onboardingCompleted: false, onboardingOpen: true, onboardingStep: 0 },
+      );
+    } catch {
+      // If the flag can't be read, don't trap the user in onboarding.
+      set({ onboardingCompleted: true });
+    }
+  },
+
+  completeOnboarding: () => {
+    set({ onboardingOpen: false, onboardingCompleted: true });
+    void invoke("set_onboarding_completed", { completed: true }).catch(() => {});
+  },
+
+  openOnboarding: () => set({ onboardingOpen: true, onboardingStep: 0 }),
+
+  setOnboardingStep: (step) => set({ onboardingStep: step }),
+
   openAppDataFolder: async () => {
     await invoke("open_app_data_folder");
   },
@@ -1976,6 +2242,33 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       void get().loadFolders();
     });
 
+    const unlistenFfmpegProgress = await listen<FfmpegProgressEvent>("ffmpeg-progress", (event) => {
+      const payload = event.payload;
+      switch (payload.phase) {
+        case "starting":
+          set({ ffmpegStatus: "starting", ffmpegError: null });
+          break;
+        case "downloading":
+          set({
+            ffmpegStatus: "downloading",
+            ffmpegProgress:
+              payload.downloaded_bytes !== null && payload.total_bytes !== null
+                ? { downloaded_bytes: payload.downloaded_bytes, total_bytes: payload.total_bytes }
+                : null,
+          });
+          break;
+        case "unpacking":
+          set({ ffmpegStatus: "unpacking" });
+          break;
+        case "done":
+          set({ ffmpegStatus: "installed", ffmpegProgress: null, ffmpegError: null });
+          break;
+        case "error":
+          set({ ffmpegStatus: "error", ffmpegError: payload.error ?? "Download failed" });
+          break;
+      }
+    });
+
     return () => {
       unlistenProgress();
       unlistenMediaJobs();
@@ -1985,6 +2278,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       unlistenThumbnails();
       unlistenWatcherDeleted();
       unlistenFolderCounts();
+      unlistenFfmpegProgress();
     };
   },
 }));

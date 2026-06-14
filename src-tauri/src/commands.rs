@@ -227,6 +227,14 @@ pub async fn add_folder(
         return Err("Path is not a valid directory".into());
     }
 
+    // Let the webview load media from this folder via the asset protocol.
+    if let Err(error) = app
+        .asset_protocol_scope()
+        .allow_directory(&folder_path, true)
+    {
+        log::error!("Failed to allow asset scope for {path}: {error}");
+    }
+
     let name = folder_path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -395,8 +403,17 @@ pub async fn update_folder_path(
 ) -> Result<(), String> {
     let new_path_buf = PathBuf::from(&new_path);
     if !new_path_buf.is_dir() {
-        return Err(format!("Path is not a valid directory: {}", new_path));
+        return Err(format!("Path is not a valid directory: {new_path}"));
     }
+
+    // Let the webview load media from the relocated folder via the asset protocol.
+    if let Err(error) = app
+        .asset_protocol_scope()
+        .allow_directory(&new_path_buf, true)
+    {
+        log::error!("Failed to allow asset scope for {new_path}: {error}");
+    }
+
     let new_name = new_path_buf
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -445,7 +462,7 @@ pub async fn find_similar_images(
         offset,
         limit + 1,
     )
-        .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())?;
     let has_more = matches.len() > limit;
     let image_ids = matches
         .into_iter()
@@ -499,8 +516,9 @@ pub async fn find_similar_by_region(
         None => {
             // Fetch one extra candidate to compensate for the source image that
             // will be removed, so has_more is accurate and results span multiple pages.
-            let mut ids = vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 2)
-                .map_err(|e| e.to_string())?;
+            let mut ids =
+                vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 2)
+                    .map_err(|e| e.to_string())?;
             ids.retain(|&id| id != params.image_id);
             ids
         }
@@ -575,7 +593,7 @@ pub async fn semantic_search_images(
     let has_filters = params.folder_id.is_some()
         || params.media_kind.is_some()
         || params.favorites_only.unwrap_or(false)
-        || params.rating_min.map_or(false, |r| r > 0);
+        || params.rating_min.is_some_and(|r| r > 0);
 
     if !has_filters {
         // No post-query filtering — a single fetch of exactly `limit` results is optimal.
@@ -639,7 +657,12 @@ pub async fn search_images_by_tag(
         offset,
     )
     .map_err(|e| e.to_string())?;
-    Ok(TagSearchPage { images, total, offset, limit })
+    Ok(TagSearchPage {
+        images,
+        total,
+        offset,
+        limit,
+    })
 }
 
 #[tauri::command]
@@ -835,7 +858,6 @@ pub struct TagCloudEntry {
     pub image_ids: Vec<i64>,
 }
 
-
 /// Clusters the library's image embeddings with k-means and returns one representative
 /// image per cluster — the member whose embedding is closest to its cluster centroid.
 /// Results are cached in SQLite keyed by a hash of the embedded image IDs, so repeated
@@ -872,7 +894,7 @@ pub async fn get_tag_cloud(
         hasher.digest()
     };
     let folder_scope = match folder_id {
-        Some(id) => format!("folder_{}", id),
+        Some(id) => format!("folder_{id}"),
         None => "all".to_string(),
     };
 
@@ -957,7 +979,8 @@ pub async fn get_explore_tags(
     params: GetExploreTagsParams,
 ) -> Result<Vec<ExploreTagEntry>, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
-    db::get_explore_tags(&conn, params.folder_id, params.limit.unwrap_or(48)).map_err(|e| e.to_string())
+    db::get_explore_tags(&conn, params.folder_id, params.limit.unwrap_or(48))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -969,8 +992,13 @@ pub async fn search_tags_autocomplete(
         return Ok(vec![]);
     }
     let conn = db.get().map_err(|e| e.to_string())?;
-    db::search_tags_autocomplete(&conn, &params.query, params.folder_id, params.limit.unwrap_or(10))
-        .map_err(|e| e.to_string())
+    db::search_tags_autocomplete(
+        &conn,
+        &params.query,
+        params.folder_id,
+        params.limit.unwrap_or(10),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -985,12 +1013,15 @@ pub async fn find_duplicates(
     };
 
     let total = records.len();
-    let _ = app.emit("duplicate_scan_progress", DuplicateScanProgress {
-        phase: "checking".to_string(),
-        processed: 0,
-        total,
-        skipped: 0,
-    });
+    let _ = app.emit(
+        "duplicate_scan_progress",
+        DuplicateScanProgress {
+            phase: "checking".to_string(),
+            processed: 0,
+            total,
+            skipped: 0,
+        },
+    );
 
     // Three-phase detection.
     //
@@ -1007,126 +1038,140 @@ pub async fn find_duplicates(
     //   For sample-hash groups that contain files > 64 KB, compute a full-file
     //   hash to confirm the match before presenting them as deletable duplicates.
     let app_hash = app.clone();
-    let (pairs, skipped_before_confirm, candidate_total):
-        (Vec<(u64, u64, i64, String)>, usize, usize) = tokio::task::spawn_blocking(move || {
-        use memmap2::Mmap;
-        use rayon::prelude::*;
-        use std::collections::HashMap;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use xxhash_rust::xxh3::{xxh3_64, Xxh3};
+    // (size, sample/full hash, image_id, path) for each confirmed candidate.
+    type HashedCandidate = (u64, u64, i64, String);
+    let (pairs, skipped_before_confirm, candidate_total): (Vec<HashedCandidate>, usize, usize) =
+        tokio::task::spawn_blocking(move || {
+            use memmap2::Mmap;
+            use rayon::prelude::*;
+            use std::collections::HashMap;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            use xxhash_rust::xxh3::{xxh3_64, Xxh3};
 
-        const WINDOW: usize = 16 * 1024; // 16 KB per sample window
-        const N: usize = 4;              // windows at 0%, 33%, 66%, 100%
-        const COVERED: usize = WINDOW * N; // 64 KB total; also full-coverage threshold
+            const WINDOW: usize = 16 * 1024; // 16 KB per sample window
+            const N: usize = 4; // windows at 0%, 33%, 66%, 100%
+            const COVERED: usize = WINDOW * N; // 64 KB total; also full-coverage threshold
 
-        // Hash four evenly-spaced 16 KB windows. For files ≤ 64 KB this is
-        // equivalent to hashing the entire file.
-        fn sample(mmap: &[u8]) -> u64 {
-            if mmap.len() <= COVERED {
-                return xxh3_64(mmap);
+            // Hash four evenly-spaced 16 KB windows. For files ≤ 64 KB this is
+            // equivalent to hashing the entire file.
+            fn sample(mmap: &[u8]) -> u64 {
+                if mmap.len() <= COVERED {
+                    return xxh3_64(mmap);
+                }
+                let mut h = Xxh3::new();
+                for i in 0..N {
+                    let pos = (mmap.len() - WINDOW) * i / (N - 1);
+                    h.update(&mmap[pos..pos + WINDOW]);
+                }
+                h.digest()
             }
-            let mut h = Xxh3::new();
-            for i in 0..N {
-                let pos = (mmap.len() - WINDOW) * i / (N - 1);
-                h.update(&mmap[pos..pos + WINDOW]);
-            }
-            h.digest()
-        }
 
-        // ── Phase 1: stat ─────────────────────────────────────────────────
-        let stat_counter = AtomicUsize::new(0);
-        let stat_skipped = AtomicUsize::new(0);
-        let sized: Vec<(i64, String, u64)> = records
-            .par_iter()
-            .filter_map(|r| {
-                let result = match std::fs::metadata(&r.path) {
-                    Ok(metadata) => Some((r.id, r.path.clone(), metadata.len())),
-                    Err(_) => {
-                        stat_skipped.fetch_add(1, Ordering::Relaxed);
-                        None
+            // ── Phase 1: stat ─────────────────────────────────────────────────
+            let stat_counter = AtomicUsize::new(0);
+            let stat_skipped = AtomicUsize::new(0);
+            let sized: Vec<(i64, String, u64)> = records
+                .par_iter()
+                .filter_map(|r| {
+                    let result = match std::fs::metadata(&r.path) {
+                        Ok(metadata) => Some((r.id, r.path.clone(), metadata.len())),
+                        Err(_) => {
+                            stat_skipped.fetch_add(1, Ordering::Relaxed);
+                            None
+                        }
+                    };
+                    let done = stat_counter.fetch_add(1, Ordering::Relaxed) + 1;
+                    if done % 100 == 0 || done == total {
+                        let _ = app_hash.emit(
+                            "duplicate_scan_progress",
+                            DuplicateScanProgress {
+                                phase: "checking".to_string(),
+                                processed: done,
+                                total,
+                                skipped: stat_skipped.load(Ordering::Relaxed),
+                            },
+                        );
                     }
-                };
-                let done = stat_counter.fetch_add(1, Ordering::Relaxed) + 1;
-                if done % 100 == 0 || done == total {
-                    let _ = app_hash.emit("duplicate_scan_progress", DuplicateScanProgress {
-                        phase: "checking".to_string(),
-                        processed: done,
-                        total,
-                        skipped: stat_skipped.load(Ordering::Relaxed),
-                    });
-                }
-                result
-            })
-            .collect();
-        let stat_skipped = stat_skipped.load(Ordering::Relaxed);
+                    result
+                })
+                .collect();
+            let stat_skipped = stat_skipped.load(Ordering::Relaxed);
 
-        let mut by_size: HashMap<u64, Vec<usize>> = HashMap::new();
-        for (i, (_, _, size)) in sized.iter().enumerate() {
-            by_size.entry(*size).or_default().push(i);
-        }
-        let candidates: Vec<usize> = by_size
-            .into_values()
-            .filter(|g| g.len() > 1)
-            .flatten()
-            .collect();
+            let mut by_size: HashMap<u64, Vec<usize>> = HashMap::new();
+            for (i, (_, _, size)) in sized.iter().enumerate() {
+                by_size.entry(*size).or_default().push(i);
+            }
+            let candidates: Vec<usize> = by_size
+                .into_values()
+                .filter(|g| g.len() > 1)
+                .flatten()
+                .collect();
 
-        if candidates.is_empty() {
-            return (vec![], stat_skipped, 0);
-        }
+            if candidates.is_empty() {
+                return (vec![], stat_skipped, 0);
+            }
 
-        // ── Phase 2: sample hash ──────────────────────────────────────────
-        let c_total = candidates.len();
-        let _ = app_hash.emit("duplicate_scan_progress", DuplicateScanProgress {
-            phase: "hashing".to_string(),
-            processed: 0,
-            total: c_total,
-            skipped: stat_skipped,
-        });
-        let counter = AtomicUsize::new(0);
-        let hash_skipped = AtomicUsize::new(0);
+            // ── Phase 2: sample hash ──────────────────────────────────────────
+            let c_total = candidates.len();
+            let _ = app_hash.emit(
+                "duplicate_scan_progress",
+                DuplicateScanProgress {
+                    phase: "hashing".to_string(),
+                    processed: 0,
+                    total: c_total,
+                    skipped: stat_skipped,
+                },
+            );
+            let counter = AtomicUsize::new(0);
+            let hash_skipped = AtomicUsize::new(0);
 
-        let pairs = candidates
-            .par_iter()
-            .filter_map(|&idx| {
-                let (id, path, size) = &sized[idx];
-                let result = if *size == 0 {
-                    Some((xxh3_64(&[]), *size, *id, path.clone()))
-                } else {
-                    std::fs::File::open(path)
-                        .ok()
-                        // SAFETY: read-only; no external truncation expected during scan.
-                        .and_then(|file| unsafe { Mmap::map(&file).ok() })
-                        .map(|mmap| (sample(&mmap), *size, *id, path.clone()))
-                };
-                if result.is_none() {
-                    hash_skipped.fetch_add(1, Ordering::Relaxed);
-                }
-                let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
-                if done % 100 == 0 || done == c_total {
-                    let _ = app_hash.emit("duplicate_scan_progress", DuplicateScanProgress {
-                        phase: "hashing".to_string(),
-                        processed: done,
-                        total: c_total,
-                        skipped: stat_skipped + hash_skipped.load(Ordering::Relaxed),
-                    });
-                }
-                result
-            })
-            .collect();
-        (
-            pairs,
-            stat_skipped + hash_skipped.load(Ordering::Relaxed),
-            c_total,
-        )
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+            let pairs = candidates
+                .par_iter()
+                .filter_map(|&idx| {
+                    let (id, path, size) = &sized[idx];
+                    let result = if *size == 0 {
+                        Some((xxh3_64(&[]), *size, *id, path.clone()))
+                    } else {
+                        std::fs::File::open(path)
+                            .ok()
+                            // SAFETY: read-only; no external truncation expected during scan.
+                            .and_then(|file| unsafe { Mmap::map(&file).ok() })
+                            .map(|mmap| (sample(&mmap), *size, *id, path.clone()))
+                    };
+                    if result.is_none() {
+                        hash_skipped.fetch_add(1, Ordering::Relaxed);
+                    }
+                    let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                    if done % 100 == 0 || done == c_total {
+                        let _ = app_hash.emit(
+                            "duplicate_scan_progress",
+                            DuplicateScanProgress {
+                                phase: "hashing".to_string(),
+                                processed: done,
+                                total: c_total,
+                                skipped: stat_skipped + hash_skipped.load(Ordering::Relaxed),
+                            },
+                        );
+                    }
+                    result
+                })
+                .collect();
+            (
+                pairs,
+                stat_skipped + hash_skipped.load(Ordering::Relaxed),
+                c_total,
+            )
+        })
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Group by (sample_hash, file_size).
     let mut size_hash_map: std::collections::HashMap<(u64, u64), Vec<(i64, String)>> =
         std::collections::HashMap::new();
     for (hash, file_size, id, path) in pairs {
-        size_hash_map.entry((hash, file_size)).or_default().push((id, path));
+        size_hash_map
+            .entry((hash, file_size))
+            .or_default()
+            .push((id, path));
     }
 
     // Phase 3: for large-file groups (> 64 KB) the sample hash is not exact;
@@ -1140,12 +1185,15 @@ pub async fn find_duplicates(
         .map(|(_, entries)| entries.len())
         .sum();
     if confirming_total > 0 {
-        let _ = app.emit("duplicate_scan_progress", DuplicateScanProgress {
-            phase: "confirming".to_string(),
-            processed: 0,
-            total: confirming_total,
-            skipped: skipped_before_confirm,
-        });
+        let _ = app.emit(
+            "duplicate_scan_progress",
+            DuplicateScanProgress {
+                phase: "confirming".to_string(),
+                processed: 0,
+                total: confirming_total,
+                skipped: skipped_before_confirm,
+            },
+        );
     }
     let app_confirm = app.clone();
     let (confirmed, skipped_files): (Vec<(u64, u64, Vec<i64>)>, usize) =
@@ -1163,7 +1211,11 @@ pub async fn find_duplicates(
                 .flat_map(|((sample_hash, file_size), entries)| {
                     if file_size <= COVERED {
                         // Sample was already a full hash — one group, no re-read needed.
-                        return vec![(sample_hash, file_size, entries.into_iter().map(|(id, _)| id).collect())];
+                        return vec![(
+                            sample_hash,
+                            file_size,
+                            entries.into_iter().map(|(id, _)| id).collect(),
+                        )];
                     }
                     // Full-file hash pass. Group by full hash so that two sets of
                     // files that collide only in the sample produce separate groups.
@@ -1179,13 +1231,16 @@ pub async fn find_duplicates(
                             }
                             let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
                             if done % 100 == 0 || done == confirming_total {
-                                let _ = app_confirm.emit("duplicate_scan_progress", DuplicateScanProgress {
-                                    phase: "confirming".to_string(),
-                                    processed: done,
-                                    total: confirming_total,
-                                    skipped: skipped_before_confirm
-                                        + confirm_skipped.load(Ordering::Relaxed),
-                                });
+                                let _ = app_confirm.emit(
+                                    "duplicate_scan_progress",
+                                    DuplicateScanProgress {
+                                        phase: "confirming".to_string(),
+                                        processed: done,
+                                        total: confirming_total,
+                                        skipped: skipped_before_confirm
+                                            + confirm_skipped.load(Ordering::Relaxed),
+                                    },
+                                );
                             }
                             (*id, hash)
                         })
@@ -1220,7 +1275,7 @@ pub async fn find_duplicates(
         .filter_map(|(hash, file_size, ids)| {
             let images = db::get_images_by_ids(&conn, &ids).ok()?;
             Some(DuplicateGroup {
-                file_hash: format!("{:016x}", hash),
+                file_hash: format!("{hash:016x}"),
                 file_size,
                 images,
             })
@@ -1232,7 +1287,7 @@ pub async fn find_duplicates(
 
     // Persist results so they survive restart — best-effort, ignore errors.
     let folder_scope = match folder_id {
-        Some(id) => format!("folder:{}", id),
+        Some(id) => format!("folder:{id}"),
         None => "all".to_string(),
     };
     if let Ok(json) = serde_json::to_string(&groups) {
@@ -1253,7 +1308,7 @@ pub async fn load_duplicate_scan_cache(
     folder_id: Option<i64>,
 ) -> Result<Option<DuplicateScanCache>, String> {
     let folder_scope = match folder_id {
-        Some(id) => format!("folder:{}", id),
+        Some(id) => format!("folder:{id}"),
         None => "all".to_string(),
     };
     let conn = db.get().map_err(|e| e.to_string())?;
@@ -1273,7 +1328,7 @@ pub async fn invalidate_duplicate_scan_cache(
     folder_id: Option<i64>,
 ) -> Result<(), String> {
     let folder_scope = match folder_id {
-        Some(id) => format!("folder:{}", id),
+        Some(id) => format!("folder:{id}"),
         None => "all".to_string(),
     };
     let conn = db.get().map_err(|e| e.to_string())?;
@@ -1326,7 +1381,7 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
-fn normalize(v: &mut Vec<f32>) {
+fn normalize(v: &mut [f32]) {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 1e-10 {
         v.iter_mut().for_each(|x| *x /= norm);
@@ -1470,16 +1525,17 @@ pub async fn get_worker_states(folder_ids: Vec<i64>) -> Result<Vec<FolderWorkerS
     Ok(folder_ids
         .into_iter()
         .map(|folder_id| {
-            let state = states
-                .get(&folder_id)
-                .copied()
-                .unwrap_or(indexer::FolderWorkerPausedState {
-                    thumbnail: false,
-                    metadata: false,
-                    embedding: false,
-                    caption: false,
-                    tagging: false,
-                });
+            let state =
+                states
+                    .get(&folder_id)
+                    .copied()
+                    .unwrap_or(indexer::FolderWorkerPausedState {
+                        thumbnail: false,
+                        metadata: false,
+                        embedding: false,
+                        caption: false,
+                        tagging: false,
+                    });
             FolderWorkerStates {
                 folder_id,
                 thumbnail_paused: state.thumbnail,
@@ -1631,7 +1687,11 @@ pub async fn queue_tagging_jobs(
 ) -> Result<usize, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     let requested_folder_ids = params.folder_ids.unwrap_or_default();
-    let (total, folder_ids) = match (params.folder_id, params.image_id, requested_folder_ids.is_empty()) {
+    let (total, folder_ids) = match (
+        params.folder_id,
+        params.image_id,
+        requested_folder_ids.is_empty(),
+    ) {
         (_, Some(image_id), _) => {
             db::enqueue_tagging_job(&conn, image_id).map_err(|e| e.to_string())?;
             // Look up just this image's folder_id rather than fetching all folders
@@ -1675,27 +1735,29 @@ pub async fn clear_tagging_jobs(
 ) -> Result<usize, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     let requested_folder_ids = params.folder_ids.unwrap_or_default();
-    let (n, folder_ids): (usize, Vec<i64>) = match (params.folder_id, requested_folder_ids.is_empty()) {
-        (Some(id), _) => (
-            db::clear_tagging_jobs(&conn, Some(id)).map_err(|e| e.to_string())?,
-            vec![id],
-        ),
-        (None, false) => {
-            let mut total = 0usize;
-            for &folder_id in &requested_folder_ids {
-                total += db::clear_tagging_jobs(&conn, Some(folder_id)).map_err(|e| e.to_string())?;
+    let (n, folder_ids): (usize, Vec<i64>) =
+        match (params.folder_id, requested_folder_ids.is_empty()) {
+            (Some(id), _) => (
+                db::clear_tagging_jobs(&conn, Some(id)).map_err(|e| e.to_string())?,
+                vec![id],
+            ),
+            (None, false) => {
+                let mut total = 0usize;
+                for &folder_id in &requested_folder_ids {
+                    total += db::clear_tagging_jobs(&conn, Some(folder_id))
+                        .map_err(|e| e.to_string())?;
+                }
+                (total, requested_folder_ids)
             }
-            (total, requested_folder_ids)
-        }
-        (None, true) => (
-            db::clear_tagging_jobs(&conn, None).map_err(|e| e.to_string())?,
-            db::get_folders(&conn)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|f| f.id)
-            .collect(),
-        ),
-    };
+            (None, true) => (
+                db::clear_tagging_jobs(&conn, None).map_err(|e| e.to_string())?,
+                db::get_folders(&conn)
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .map(|f| f.id)
+                    .collect(),
+            ),
+        };
     drop(conn);
     indexer::emit_folder_job_progress(&app, db.inner(), &folder_ids, true);
     Ok(n)
@@ -1747,7 +1809,11 @@ pub async fn get_tagging_queue_scope(app: AppHandle) -> Result<String, String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let path = app_dir.join(TAGGING_QUEUE_SCOPE_FILE);
     let value = std::fs::read_to_string(path).unwrap_or_default();
-    Ok(if value.trim() == "selected" { "selected".to_string() } else { "all".to_string() })
+    Ok(if value.trim() == "selected" {
+        "selected".to_string()
+    } else {
+        "all".to_string()
+    })
 }
 
 #[tauri::command]
@@ -1760,7 +1826,11 @@ pub async fn set_tagging_queue_scope(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let value = if params.scope == "selected" { "selected" } else { "all" };
+    let value = if params.scope == "selected" {
+        "selected"
+    } else {
+        "all"
+    };
     std::fs::write(path, value).map_err(|e| e.to_string())?;
     Ok(value.to_string())
 }
@@ -1825,14 +1895,21 @@ pub struct VacuumResult {
 }
 
 #[tauri::command]
-pub async fn get_database_info(app: AppHandle, db: State<'_, DbState>) -> Result<DatabaseInfo, String> {
+pub async fn get_database_info(
+    app: AppHandle,
+    db: State<'_, DbState>,
+) -> Result<DatabaseInfo, String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let db_path = app_dir.join("gallery.db");
     let size_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
     let conn = db.get().map_err(|e| e.to_string())?;
-    let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0)).map_err(|e| e.to_string())?;
-    let freelist_count: i64 = conn.query_row("PRAGMA freelist_count", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    let page_size: i64 = conn
+        .query_row("PRAGMA page_size", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let freelist_count: i64 = conn
+        .query_row("PRAGMA freelist_count", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
 
     Ok(DatabaseInfo {
         size_mb: size_bytes as f64 / 1_048_576.0,
@@ -1841,13 +1918,17 @@ pub async fn get_database_info(app: AppHandle, db: State<'_, DbState>) -> Result
 }
 
 #[tauri::command]
-pub async fn vacuum_database(app: AppHandle, db: State<'_, DbState>) -> Result<VacuumResult, String> {
+pub async fn vacuum_database(
+    app: AppHandle,
+    db: State<'_, DbState>,
+) -> Result<VacuumResult, String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let db_path = app_dir.join("gallery.db");
     let before_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
     let conn = db.get().map_err(|e| e.to_string())?;
-    conn.execute_batch("PRAGMA wal_checkpoint(FULL); VACUUM;").map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA wal_checkpoint(FULL); VACUUM;")
+        .map_err(|e| e.to_string())?;
     drop(conn);
 
     let after_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
@@ -1870,7 +1951,9 @@ pub struct CleanupOrphanedThumbnailsResult {
     pub freed_mb: f64,
 }
 
-fn collect_db_thumbnail_filenames(conn: &rusqlite::Connection) -> Result<std::collections::HashSet<String>, String> {
+fn collect_db_thumbnail_filenames(
+    conn: &rusqlite::Connection,
+) -> Result<std::collections::HashSet<String>, String> {
     let mut stmt = conn
         .prepare("SELECT thumbnail_path FROM images WHERE thumbnail_path IS NOT NULL")
         .map_err(|e| e.to_string())?;
@@ -1993,8 +2076,7 @@ pub async fn set_muted_folder_ids(
         .map(|id| id.to_string())
         .collect::<Vec<_>>()
         .join(",");
-    std::fs::write(settings_dir.join("muted_folder_ids.txt"), content)
-        .map_err(|e| e.to_string())
+    std::fs::write(settings_dir.join("muted_folder_ids.txt"), content).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2016,6 +2098,53 @@ pub async fn set_notifications_paused(app: AppHandle, paused: bool) -> Result<()
     std::fs::write(
         settings_dir.join("notifications_paused.txt"),
         if paused { "true" } else { "false" },
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+pub struct FfmpegStatus {
+    pub installed: bool,
+    pub downloading: bool,
+    pub failed: bool,
+}
+
+#[tauri::command]
+pub async fn get_ffmpeg_status() -> Result<FfmpegStatus, String> {
+    Ok(FfmpegStatus {
+        installed: crate::media::ffmpeg_ready(),
+        downloading: crate::media::ffmpeg_downloading(),
+        failed: crate::media::ffmpeg_failed(),
+    })
+}
+
+#[tauri::command]
+pub async fn retry_ffmpeg_download(app: AppHandle) -> Result<(), String> {
+    crate::media::spawn_ffmpeg_provision(app);
+    Ok(())
+}
+
+const ONBOARDING_COMPLETED_FILE: &str = "settings/onboarding_completed.txt";
+
+#[tauri::command]
+pub async fn get_onboarding_completed(app: AppHandle) -> Result<bool, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(ONBOARDING_COMPLETED_FILE);
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(content.trim() == "true")
+}
+
+#[tauri::command]
+pub async fn set_onboarding_completed(app: AppHandle, completed: bool) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let settings_dir = app_dir.join("settings");
+    std::fs::create_dir_all(&settings_dir).map_err(|e| e.to_string())?;
+    std::fs::write(
+        settings_dir.join("onboarding_completed.txt"),
+        if completed { "true" } else { "false" },
     )
     .map_err(|e| e.to_string())
 }

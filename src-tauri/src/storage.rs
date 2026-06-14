@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use sysinfo::{DiskKind, Disks};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,7 +107,7 @@ pub fn detect_storage_profile(path: &Path) -> StorageProfile {
     }
 }
 
-fn fallback_profile_for_path(path: &PathBuf) -> StorageProfile {
+fn fallback_profile_for_path(path: &Path) -> StorageProfile {
     let path_str = path.to_string_lossy().to_lowercase();
     if path_str.starts_with("\\\\") {
         return StorageProfile::Conservative;

@@ -8,12 +8,19 @@ use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::{Shape, Tensor};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::io::{Cursor, Read};
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::Mutex;
 use std::time::Instant;
 use tokenizers::Tokenizer;
+
+// Suppress the console window when spawning curl.exe from the GUI app.
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub const FLORENCE_MODEL_ID: &str = "onnx-community/Florence-2-base-ft";
 pub const FLORENCE_CAPTION_MODEL_NAME: &str = "florence-2-base-ft-onnx-q4";
@@ -62,7 +69,10 @@ const REQUIRED_FILES: &[&str] = &[
     "onnx/embed_tokens_fp16.onnx",
 ];
 
-static ORT_RUNTIME_INIT: OnceLock<std::result::Result<(), String>> = OnceLock::new();
+// Mutex<bool> rather than OnceLock<Result>: a failed attempt (DLL not yet
+// downloaded) must NOT be cached, or a later successful download could never
+// recover within the same app session.
+static ORT_RUNTIME_INIT: Mutex<bool> = Mutex::new(false);
 
 /// Set to `true` by `set_caption_acceleration` so the caption worker loop
 /// knows to drop its cached `FlorenceCaptioner` and reload with the new EP.
@@ -470,7 +480,7 @@ impl FlorenceCaptioner {
             acceleration,
             false,
         )?;
-        println!(
+        log::info!(
             "Florence sessions loaded in {:?} with {:?} acceleration (total init {:?})",
             sessions_started_at.elapsed(),
             acceleration,
@@ -490,9 +500,9 @@ impl FlorenceCaptioner {
 
     pub fn generate(&mut self, image_path: &Path) -> Result<String> {
         let started_at = Instant::now();
-        println!("Florence caption started: {}", image_path.display());
+        log::info!("Florence caption started: {}", image_path.display());
         let image_features = run_vision_encoder(&mut self.vision_session, image_path)?;
-        println!("Florence vision encoder done in {:?}", started_at.elapsed());
+        log::info!("Florence vision encoder done in {:?}", started_at.elapsed());
         let prompt_ids = self
             .tokenizer
             .encode(self.caption_detail.prompt(), false)
@@ -502,7 +512,7 @@ impl FlorenceCaptioner {
             .map(|id| i64::from(*id))
             .collect::<Vec<_>>();
         let prompt_embeds = run_token_embedder(&mut self.embed_session, &prompt_ids)?;
-        println!(
+        log::info!(
             "Florence token embeddings done in {:?}",
             started_at.elapsed()
         );
@@ -513,7 +523,7 @@ impl FlorenceCaptioner {
             &encoder_embeds,
             &encoder_attention_mask,
         )?;
-        println!("Florence encoder done in {:?}", started_at.elapsed());
+        log::info!("Florence encoder done in {:?}", started_at.elapsed());
 
         let generated_ids = run_decoder(
             &mut self.decoder_prefill_session,
@@ -523,7 +533,7 @@ impl FlorenceCaptioner {
             &encoder_attention_mask,
             self.caption_detail.max_new_tokens(),
         )?;
-        println!("Florence decoder done in {:?}", started_at.elapsed());
+        log::info!("Florence decoder done in {:?}", started_at.elapsed());
 
         let generated_u32 = generated_ids
             .into_iter()
@@ -648,23 +658,61 @@ fn probe_vision_session(
 }
 
 pub fn ensure_onnx_runtime(local_dir: &Path) -> Result<()> {
+    let mut initialized = ORT_RUNTIME_INIT
+        .lock()
+        .map_err(|_| anyhow::anyhow!("ONNX runtime init lock poisoned"))?;
+    if *initialized {
+        return Ok(());
+    }
     let dll_path = local_dir.join(ONNX_RUNTIME_DLL_FILE);
-    ORT_RUNTIME_INIT
-        .get_or_init(|| {
-            if !dll_path.exists() {
-                return Err(format!(
-                    "ONNX Runtime DLL is missing: {}",
-                    dll_path.display()
-                ));
-            }
-            ort::environment::init_from(&dll_path)
-                .map_err(|error| error.to_string())?
-                .with_name("phokus-florence")
-                .commit();
-            Ok(())
-        })
-        .clone()
-        .map_err(anyhow::Error::msg)
+    if !dll_path.exists() {
+        anyhow::bail!("ONNX Runtime DLL is missing: {}", dll_path.display());
+    }
+    ort::environment::init_from(&dll_path)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?
+        .with_name("phokus-florence")
+        .commit();
+    *initialized = true;
+    Ok(())
+}
+
+/// Download any ONNX Runtime DLLs missing from `local_dir`, reporting per-file
+/// byte progress as `(short_label, downloaded_bytes, total_bytes)`.
+/// `total_bytes` is `None` when the server omits Content-Length. Unlike
+/// `ensure_onnx_runtime` (init only), this actually provisions the files —
+/// callers that can run on a clean install must call this first. The callback
+/// fires per chunk; callers should throttle.
+pub fn provision_onnx_runtime_with_progress(
+    local_dir: &Path,
+    mut on_progress: impl FnMut(&str, u64, Option<u64>),
+) -> Result<()> {
+    for (destination_file, source_url, archive_path) in ONNX_RUNTIME_FILES {
+        let destination = local_dir.join(destination_file);
+        if destination.exists() {
+            continue;
+        }
+        // Strip the "onnxruntime/" prefix for a clean label.
+        let label = destination_file
+            .rsplit('/')
+            .next()
+            .unwrap_or(destination_file);
+        download_nuget_file(
+            source_url,
+            archive_path,
+            &destination,
+            |downloaded, total| on_progress(label, downloaded, total),
+        )?;
+    }
+    Ok(())
+}
+
+/// Number of ONNX Runtime DLLs still missing from `local_dir` (for progress
+/// step counts before downloading).
+pub fn missing_onnx_runtime_count(local_dir: &Path) -> usize {
+    ONNX_RUNTIME_FILES
+        .iter()
+        .filter(|(destination_file, _, _)| !local_dir.join(destination_file).exists())
+        .count()
 }
 
 fn download_onnx_runtime_files(local_dir: &Path) -> Result<()> {
@@ -676,35 +724,218 @@ fn download_onnx_runtime_files(local_dir: &Path) -> Result<()> {
 
     for (destination_file, source_url, archive_path) in ONNX_RUNTIME_FILES {
         let destination = local_dir.join(destination_file);
-        download_nuget_file(source_url, archive_path, &destination)?;
+        download_nuget_file(source_url, archive_path, &destination, |_, _| {})?;
     }
 
     Ok(())
 }
 
-fn download_nuget_file(source_url: &str, archive_path: &str, destination: &Path) -> Result<()> {
-    let mut response = ureq::get(source_url)
-        .call()
-        .map_err(|error| anyhow::anyhow!("{error}"))?;
-    let mut bytes = Vec::new();
-    response
-        .body_mut()
-        .as_reader()
-        .read_to_end(&mut bytes)
-        .map_err(|error| anyhow::anyhow!("{error}"))?;
+// Give up only after this many *consecutive* curl runs that download nothing;
+// a run that makes any progress resets the counter, so a large file completes
+// across however many resumes it takes. Kept low so a hard stall (e.g. a
+// broken VM NIC) fails in a couple of minutes — surfacing a retryable error —
+// rather than locking the UI on "preparing" for many minutes.
+const MAX_STALL_RETRIES: usize = 3;
 
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
-    let mut dll = archive.by_name(archive_path)?;
+/// Resiliently download `url` to `destination` using the system `curl.exe`.
+///
+/// ureq's read timeout does not fire on a stalled large transfer on Windows
+/// (schannel doesn't honor the socket read timeout), so a stall there hangs
+/// forever. curl detects an inactivity stall (`--speed-time`), resumes from
+/// the partial file (`-C -`), and retries internally — the same behavior a
+/// browser gets. We monitor the `.part` file's size for the progress bar and
+/// wrap curl in an outer progress-aware retry as a backstop. The partial file
+/// survives an app restart, so a later retry continues from disk.
+pub fn download_file_resilient(
+    url: &str,
+    destination: &Path,
+    mut on_progress: impl FnMut(u64, Option<u64>),
+) -> Result<()> {
     if let Some(parent) = destination.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let part = match destination.extension() {
+        Some(ext) => destination.with_extension(format!("{}.part", ext.to_string_lossy())),
+        None => destination.with_extension("part"),
+    };
+    let name = destination
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| url.to_string());
 
+    log::info!("{name}: resolving download size");
+    let total = remote_content_length(url);
+
+    // Reconcile any existing `.part` against the real size: exactly complete →
+    // finish; oversized (stale/corrupt) → discard so curl restarts cleanly
+    // (otherwise `curl -C -` would 416 forever).
+    if let Some(total) = total {
+        let size = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+        if size == total {
+            std::fs::rename(&part, destination)?;
+            return Ok(());
+        }
+        if size > total {
+            let _ = std::fs::remove_file(&part);
+        }
+    }
+    log::info!(
+        "{name}: downloading via curl ({} bytes)",
+        total
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| "unknown size".into())
+    );
+
+    let mut stalls = 0usize;
+    loop {
+        let before = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+        match run_curl_download(url, &part, total, &mut on_progress) {
+            Ok(()) => break,
+            Err(error) => {
+                let after = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+                if after > before {
+                    log::warn!("{name}: curl interrupted at {after} bytes, resuming: {error}");
+                    stalls = 0;
+                } else {
+                    stalls += 1;
+                    log::warn!(
+                        "{name}: curl made no progress ({stalls}/{MAX_STALL_RETRIES}): {error}"
+                    );
+                    if stalls >= MAX_STALL_RETRIES {
+                        // Discard the partial so a future attempt restarts clean
+                        // rather than getting stuck re-resuming a bad file.
+                        let _ = std::fs::remove_file(&part);
+                        return Err(error);
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        }
+    }
+
+    if let Some(total) = total {
+        let got = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+        if got < total {
+            anyhow::bail!("{name}: incomplete after curl ({got}/{total} bytes)");
+        }
+    }
+    std::fs::rename(&part, destination)?;
+    Ok(())
+}
+
+/// Size probe via `curl -r 0-0` (a 1-byte Range request), parsing the total
+/// from the `Content-Range: bytes 0-0/<total>` header. Uses curl rather than
+/// ureq so no part of the download path depends on ureq (which hangs on this
+/// VM's TLS stack). Returns None if the server doesn't report a size.
+fn remote_content_length(url: &str) -> Option<u64> {
+    let mut command = Command::new("curl.exe");
+    command.args([
+        "-sL",
+        "-r",
+        "0-0",
+        "-D",
+        "-",
+        "-o",
+        "NUL",
+        "--connect-timeout",
+        "30",
+        "--max-time",
+        "30",
+        url,
+    ]);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let output = command.output().ok()?;
+    let headers = String::from_utf8_lossy(&output.stdout);
+    for line in headers.lines() {
+        if let Some(rest) = line.to_ascii_lowercase().strip_prefix("content-range:") {
+            if let Some(total) = rest.rsplit('/').next().map(str::trim) {
+                if let Ok(n) = total.parse::<u64>() {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Run one `curl.exe` download to `dest`, resuming from any partial file, while
+/// reporting progress from the growing file size. Returns an error (leaving the
+/// partial in place) if curl exits non-zero.
+fn run_curl_download(
+    url: &str,
+    dest: &Path,
+    total: Option<u64>,
+    on_progress: &mut impl FnMut(u64, Option<u64>),
+) -> Result<()> {
+    let mut command = Command::new("curl.exe");
+    command
+        .arg("-fSL") // fail on HTTP errors, follow redirects, show errors
+        .args(["-C", "-"]) // resume from the existing output file
+        .args(["--retry", "3", "--retry-delay", "1", "--retry-connrefused"])
+        .args(["--connect-timeout", "30"])
+        // Abort (then --retry resumes) if under 1 KB/s for 30s — a real
+        // inactivity timeout, which is what ureq couldn't deliver here.
+        .args(["--speed-limit", "1024", "--speed-time", "30"])
+        .arg("-s") // no progress meter (we watch the file instead)
+        .arg("-o")
+        .arg(dest)
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("failed to launch curl.exe (required for downloads): {e}"))?;
+
+    loop {
+        if let Some(status) = child.try_wait()? {
+            if status.success() {
+                return Ok(());
+            }
+            let mut stderr = String::new();
+            if let Some(mut pipe) = child.stderr.take() {
+                let _ = pipe.read_to_string(&mut stderr);
+            }
+            anyhow::bail!(
+                "curl exited with {}: {}",
+                status
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".into()),
+                stderr.trim()
+            );
+        }
+        let downloaded = std::fs::metadata(dest).map(|m| m.len()).unwrap_or(0);
+        on_progress(downloaded, total);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+}
+
+fn download_nuget_file(
+    source_url: &str,
+    archive_path: &str,
+    destination: &Path,
+    on_progress: impl FnMut(u64, Option<u64>),
+) -> Result<()> {
+    // Download the .nupkg (a zip) resiliently, then extract the one DLL.
+    let package = destination.with_extension("nupkg");
+    download_file_resilient(source_url, &package, on_progress)?;
+
+    log::info!("extracting {archive_path} from package");
+    let file = std::fs::File::open(&package)?;
+    let mut archive = zip::ZipArchive::new(file)?;
+    let mut dll = archive.by_name(archive_path)?;
     let temp_destination = destination.with_extension("tmp");
     {
-        let mut file = std::fs::File::create(&temp_destination)?;
-        std::io::copy(&mut dll, &mut file)?;
+        let mut out = std::fs::File::create(&temp_destination)?;
+        std::io::copy(&mut dll, &mut out)?;
     }
-    std::fs::rename(temp_destination, destination)?;
+    std::fs::rename(&temp_destination, destination)?;
+    let _ = std::fs::remove_file(&package);
+    log::info!("extracted {archive_path}");
     Ok(())
 }
 
@@ -784,7 +1015,7 @@ fn run_decoder(
             "inputs_embeds" => prefill_inputs_embeds_tensor
         })
         .map_err(|error| anyhow::anyhow!("{error}"))?;
-    println!(
+    log::info!(
         "Florence decoder prefill done in {:?}",
         prefill_started_at.elapsed()
     );
@@ -848,7 +1079,7 @@ fn run_decoder(
         decoder_kv = collect_present_key_values(&outputs, DECODER_LAYERS)?;
     }
 
-    println!("Florence decoder produced {} token(s)", generated.len());
+    log::info!("Florence decoder produced {} token(s)", generated.len());
     Ok(generated)
 }
 
@@ -886,7 +1117,7 @@ fn create_session(
         CaptionAcceleration::Auto | CaptionAcceleration::Directml => {
             // `allow_directml` is false for the 4 text/decoder sessions —
             // they intentionally run on CPU regardless of the setting.
-            println!(
+            log::info!(
                 "Florence: using CPU for {} (DirectML disabled for this session type)",
                 path.display()
             );

@@ -87,6 +87,10 @@ pub struct TaggerModelProgress {
     pub total_files: usize,
     pub completed_files: usize,
     pub current_file: Option<String>,
+    // Byte progress for the file currently downloading. None for files whose
+    // size isn't known up front (or between files).
+    pub downloaded_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
     pub done: bool,
 }
 
@@ -200,11 +204,7 @@ pub fn tagger_batch_size(app_data_dir: &Path) -> usize {
     let Ok(value) = std::fs::read_to_string(path) else {
         return 8;
     };
-    value
-        .trim()
-        .parse::<usize>()
-        .unwrap_or(8)
-        .clamp(1, 100)
+    value.trim().parse::<usize>().unwrap_or(8).clamp(1, 100)
 }
 
 pub fn set_tagger_batch_size(app_data_dir: &Path, batch_size: usize) -> Result<usize> {
@@ -254,58 +254,93 @@ pub fn prepare_tagger_model_with_progress(
     let local_dir = model_dir(app_data_dir);
     std::fs::create_dir_all(&local_dir)?;
 
-    // Ensure the shared ONNX runtime DLLs are present. The tagger shares
-    // them with the captioner; install them here so the tagger is fully
-    // functional even on a clean install where the caption model has never
-    // been downloaded.
+    // The tagger shares the ONNX runtime DLLs with the captioner; download
+    // them here so the tagger works even on a clean install where the caption
+    // model has never been fetched (ensure_onnx_runtime only initializes).
+    const DOWNLOAD_FILES: &[&str] = &["model.onnx", "selected_tags.csv"];
     let caption_model_dir = crate::captioner::model_dir(app_data_dir);
     std::fs::create_dir_all(&caption_model_dir)?;
-    crate::captioner::ensure_onnx_runtime(&caption_model_dir)?;
 
-    // Download the two tagger-specific files.
-    const DOWNLOAD_FILES: &[&str] = &["model.onnx", "selected_tags.csv"];
-
-    let api = Api::new()?;
-    let repo = api.repo(Repo::new(WD_TAGGER_MODEL_ID.to_string(), RepoType::Model));
-
-    let mut completed_files = DOWNLOAD_FILES
+    // Unified step count across DLLs and tagger files so the bar is coherent.
+    let dll_count = crate::captioner::missing_onnx_runtime_count(&caption_model_dir);
+    let model_pending = DOWNLOAD_FILES
         .iter()
-        .filter(|file| local_dir.join(file).exists())
+        .filter(|file| !local_dir.join(file).exists())
         .count();
+    let total_files = dll_count + model_pending;
+    let mut completed_files = 0usize;
 
     emit_progress(TaggerModelProgress {
-        total_files: DOWNLOAD_FILES.len(),
+        total_files,
         completed_files,
         current_file: None,
-        done: completed_files == DOWNLOAD_FILES.len(),
+        downloaded_bytes: None,
+        total_bytes: None,
+        done: total_files == 0,
     });
+
+    // ── ONNX runtime DLLs (small, but non-trivial on a slow link) ──
+    {
+        let mut last_emit = Instant::now() - std::time::Duration::from_secs(1);
+        crate::captioner::provision_onnx_runtime_with_progress(
+            &caption_model_dir,
+            |label, downloaded, total| {
+                if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+                    last_emit = Instant::now();
+                    emit_progress(TaggerModelProgress {
+                        total_files,
+                        completed_files,
+                        current_file: Some(format!("ONNX Runtime: {label}")),
+                        downloaded_bytes: Some(downloaded),
+                        total_bytes: total,
+                        done: false,
+                    });
+                }
+            },
+        )?;
+        completed_files += dll_count;
+    }
+    log::info!("Tagger: ONNX runtime DLLs ready; initializing runtime");
+    crate::captioner::ensure_onnx_runtime(&caption_model_dir)?;
+    log::info!("Tagger: runtime initialized; downloading model files");
+
+    // ── Tagger model files (model.onnx is ~446 MB) ──
+    // Download directly from the resolved URL with our resilient downloader
+    // (timeout + resume), rather than hf-hub's download_with_progress, whose
+    // agent has no read timeout and would hang on a stalled connection.
+    let api = Api::new()?;
+    let repo = api.repo(Repo::new(WD_TAGGER_MODEL_ID.to_string(), RepoType::Model));
 
     for file in DOWNLOAD_FILES {
         let destination = local_dir.join(file);
         if destination.exists() {
             continue;
         }
-        emit_progress(TaggerModelProgress {
-            total_files: DOWNLOAD_FILES.len(),
-            completed_files,
-            current_file: Some((*file).to_string()),
-            done: false,
-        });
-        let cached = repo.get(file)?;
-        std::fs::copy(cached, destination)?;
+        let url = repo.url(file);
+        let label = (*file).to_string();
+        let mut last_emit = Instant::now() - std::time::Duration::from_secs(1);
+        crate::captioner::download_file_resilient(&url, &destination, |downloaded, total| {
+            if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+                last_emit = Instant::now();
+                emit_progress(TaggerModelProgress {
+                    total_files,
+                    completed_files,
+                    current_file: Some(label.clone()),
+                    downloaded_bytes: Some(downloaded),
+                    total_bytes: total,
+                    done: false,
+                });
+            }
+        })?;
         completed_files += 1;
-        emit_progress(TaggerModelProgress {
-            total_files: DOWNLOAD_FILES.len(),
-            completed_files,
-            current_file: Some((*file).to_string()),
-            done: completed_files == DOWNLOAD_FILES.len(),
-        });
     }
 
     emit_progress(TaggerModelProgress {
-        total_files: DOWNLOAD_FILES.len(),
+        total_files,
         completed_files,
         current_file: None,
+        downloaded_bytes: None,
+        total_bytes: None,
         done: true,
     });
 
@@ -447,7 +482,7 @@ impl WdTagger {
 
         let labels = load_labels(&labels_path)?;
 
-        println!(
+        log::info!(
             "WD tagger loaded in {:?} ({} labels, input {}x{}, {:?} acceleration)",
             started_at.elapsed(),
             labels.len(),
@@ -485,7 +520,7 @@ impl WdTagger {
             .try_extract_tensor::<f32>()
             .map_err(|error| anyhow::anyhow!("{error}"))?;
 
-        let probs: &[f32] = &probabilities;
+        let probs: &[f32] = probabilities;
 
         if probs.len() != self.labels.len() {
             anyhow::bail!(
@@ -523,7 +558,7 @@ impl WdTagger {
         tags.sort_by(|a, b| b.confidence.total_cmp(&a.confidence));
         tags.truncate(max_tags);
 
-        println!(
+        log::info!(
             "WD tagger: {} tags (threshold={}, rating={}) in {:?} for {}",
             tags.len(),
             self.threshold,
@@ -563,13 +598,13 @@ fn create_tagger_session(path: &Path, acceleration: TaggerAcceleration) -> Resul
 
     let mut builder = match acceleration {
         TaggerAcceleration::Cpu => {
-            println!("WD tagger: using CPU execution provider");
+            log::info!("WD tagger: using CPU execution provider");
             builder
         }
         TaggerAcceleration::Auto => builder
             .with_execution_providers([ep::DirectML::default().build().fail_silently()])
             .unwrap_or_else(|error| {
-                println!("WD tagger: DirectML unavailable, falling back to CPU");
+                log::info!("WD tagger: DirectML unavailable, falling back to CPU");
                 error.recover()
             }),
         TaggerAcceleration::Directml => builder
