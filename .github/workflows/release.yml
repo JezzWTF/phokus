@@ -14,7 +14,33 @@ jobs:
     permissions:
       contents: write
     runs-on: windows-latest
+    env:
+      GITEA_STATUS_TOKEN: ${{ secrets.GITEA_STATUS_TOKEN }}
     steps:
+      - name: Report pending status to Gitea
+        if: env.GITEA_STATUS_TOKEN != ''
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $headers = @{
+            Authorization = "token $env:GITEA_STATUS_TOKEN"
+            Accept = "application/json"
+          }
+          $body = @{
+            state = "pending"
+            context = "github/actions/release"
+            description = "GitHub Actions release is running"
+            target_url = $env:GITHUB_RUN_URL
+          } | ConvertTo-Json
+          Invoke-RestMethod `
+            -Method Post `
+            -Uri "https://git.jezz.wtf/api/v1/repos/JezzWTF/phokus/statuses/$env:GITHUB_SHA" `
+            -Headers $headers `
+            -ContentType "application/json" `
+            -Body $body
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
@@ -55,3 +81,33 @@ jobs:
           # Cargo args after `--`: ship the CPU/DirectML build — default
           # features enable candle-cuda, which runners (and most users) lack.
           args: '-- --no-default-features'
+
+      - name: Report final status to Gitea
+        if: always() && env.GITEA_STATUS_TOKEN != ''
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          $state = switch ($env:JOB_STATUS) {
+            "success" { "success" }
+            "failure" { "failure" }
+            default { "error" }
+          }
+          $headers = @{
+            Authorization = "token $env:GITEA_STATUS_TOKEN"
+            Accept = "application/json"
+          }
+          $body = @{
+            state = $state
+            context = "github/actions/release"
+            description = "GitHub Actions release finished: $env:JOB_STATUS"
+            target_url = $env:GITHUB_RUN_URL
+          } | ConvertTo-Json
+          Invoke-RestMethod `
+            -Method Post `
+            -Uri "https://git.jezz.wtf/api/v1/repos/JezzWTF/phokus/statuses/$env:GITHUB_SHA" `
+            -Headers $headers `
+            -ContentType "application/json" `
+            -Body $body
