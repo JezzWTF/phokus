@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useGalleryStore } from "../store";
+import { PhokusMark } from "./PhokusMark";
 
 // SVG icons for window controls
 function MinimizeIcon() {
@@ -69,12 +70,8 @@ export function TitleBar() {
     >
       {/* App icon + name — left side */}
       <div className="flex items-center gap-2 pl-3 pr-4">
-        <div className="flex h-5 w-5 items-center justify-center rounded-md bg-white/8 overflow-hidden">
-          {/* Phokus logo placeholder — replace with <img src={logo} /> if you have an SVG */}
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <circle cx="6" cy="6" r="4" stroke="#a78bfa" strokeWidth="1.5" />
-            <circle cx="6" cy="6" r="1.5" fill="#a78bfa" />
-          </svg>
+        <div className="flex h-5 w-5 items-center justify-center rounded-md bg-white/8 overflow-hidden text-gray-300">
+          <PhokusMark className="h-4 w-4" />
         </div>
         <span className="text-[11px] font-semibold text-gray-400 tracking-wide">Phokus</span>
       </div>
