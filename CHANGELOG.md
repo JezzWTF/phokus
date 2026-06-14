@@ -5,7 +5,7 @@ All notable changes to Phokus are documented here. The format is based on
 aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (0.x: anything may change between minor versions).
 
-## [0.1.0] — Unreleased
+## [0.1.0] — 2026-06-14
 
 First public release. Windows desktop, distributed as an unsigned NSIS
 installer with a built-in updater.
