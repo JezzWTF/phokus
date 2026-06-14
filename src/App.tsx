@@ -12,6 +12,7 @@ import { TitleBar } from "./components/TitleBar";
 import { SettingsModal } from "./components/SettingsModal";
 import { UpdateToast } from "./components/UpdateToast";
 import { OnboardingOverlay } from "./components/onboarding/OnboardingOverlay";
+import { DemoPanel } from "./components/DemoPanel";
 import { initializeNotifications } from "./notifications";
 
 export default function App() {
@@ -94,6 +95,7 @@ export default function App() {
       <SettingsModal />
       <UpdateToast />
       <OnboardingOverlay />
+      {import.meta.env.DEV && <DemoPanel />}
     </div>
   );
 }
