@@ -40,5 +40,9 @@ dist-ssr
 # locally; ~600 MB, never committed). See RELEASE_PLAN.md "CUDA release variant".
 src-tauri/cuda-redist/
 
-# Keep the CUDA build config overlay tracked despite the *.json rule above.
+# Keep the Tauri configs tracked despite the *.json rule above. tauri.conf.json
+# must also be un-ignored so tauri-action can find it: it globs for the config
+# honoring .gitignore, and an ignored config makes the release build fail with
+# "Failed to resolve Tauri path".
+!src-tauri/tauri.conf.json
 !src-tauri/tauri.cuda.conf.json

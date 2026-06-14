@@ -50,7 +50,7 @@ jobs:
           releaseBody: 'See the assets below to download and install this version.'
           releaseDraft: true
           prerelease: false
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
           # Cargo args after `--`: ship the CPU/DirectML build — default
           # features enable candle-cuda, which runners (and most users) lack.
