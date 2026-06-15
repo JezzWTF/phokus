@@ -97,13 +97,13 @@ function Hero() {
       </div>
       <div className="pointer-events-none absolute -left-24 top-8 -z-10 h-96 w-96 rounded-full bg-amber/[0.06] blur-3xl" />
 
-      <div className="relative mx-auto w-full max-w-7xl px-6 py-20 lg:py-24">
+      <div className="relative mx-auto w-full max-w-7xl px-6 py-16 sm:py-20 lg:py-24">
         <div className="max-w-2xl">
           <p className="mb-6 inline-flex items-center gap-2 rounded-full border border-edge bg-surface/80 px-3 py-1 text-xs font-medium text-muted backdrop-blur">
             <span className="h-1.5 w-1.5 rounded-full bg-amber" />
             Local-first · Windows desktop
           </p>
-          <h1 className="font-display text-5xl font-semibold leading-[1.04] tracking-tight text-ink sm:text-6xl">
+          <h1 className="font-display text-[2.5rem] font-semibold leading-[1.06] tracking-tight text-ink sm:text-6xl sm:leading-[1.04]">
             Your local media library,
             <br />
             made searchable.
@@ -163,7 +163,7 @@ function LocalFirst() {
   return (
     <section id="privacy" className="relative overflow-hidden border-y border-edge bg-surface">
       <EdgeMark side="left" />
-      <div className="relative mx-auto max-w-7xl px-6 py-24 sm:py-28">
+      <div className="relative mx-auto max-w-7xl px-6 py-20 sm:py-28">
         <div className="max-w-2xl">
           <SectionEyebrow label="Local-first" />
           <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
@@ -200,7 +200,7 @@ function SearchSection() {
   return (
     <section id="search" className="relative overflow-hidden">
       <EdgeMark side="right" />
-      <div className="relative mx-auto max-w-7xl px-6 py-24 sm:py-28">
+      <div className="relative mx-auto max-w-7xl px-6 py-20 sm:py-28">
         <div className="max-w-2xl">
           <SectionEyebrow label="Search by meaning" />
           <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
@@ -247,7 +247,7 @@ function EdgeMark({ side }: { side: "left" | "right" }) {
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden="true"
-      className={`pointer-events-none absolute top-1/2 h-[34rem] w-[34rem] -translate-y-1/2 text-ink opacity-[0.05] ${place}`}
+      className={`pointer-events-none absolute top-1/2 hidden h-[34rem] w-[34rem] -translate-y-1/2 text-ink opacity-[0.05] sm:block ${place}`}
     >
       <g
         transform="translate(12 12)"
@@ -273,7 +273,7 @@ function ExploreSection() {
   return (
     <section id="explore" className="relative overflow-hidden border-t border-edge bg-surface">
       <EdgeMark side="left" />
-      <div className="relative mx-auto max-w-7xl px-6 py-24 sm:py-28">
+      <div className="relative mx-auto max-w-7xl px-6 py-20 sm:py-28">
         <div className="grid items-center gap-10 lg:grid-cols-12">
           <div className="lg:col-span-5">
             <SectionEyebrow label="Explore & timeline" />
@@ -310,7 +310,7 @@ function CurateSection() {
   return (
     <section id="curate" className="relative overflow-hidden">
       <EdgeMark side="right" />
-      <div className="relative mx-auto max-w-7xl px-6 py-24 sm:py-28">
+      <div className="relative mx-auto max-w-7xl px-6 py-20 sm:py-28">
         <div className="grid items-center gap-10 lg:grid-cols-12">
           <figure className="order-2 overflow-hidden rounded-xl border border-edge bg-surface shadow-2xl shadow-black/50 lg:order-1 lg:col-span-7">
             <Shot
@@ -347,7 +347,7 @@ function CleanupSection() {
   return (
     <section id="cleanup" className="relative overflow-hidden border-t border-edge bg-surface">
       <EdgeMark side="left" />
-      <div className="relative mx-auto max-w-7xl px-6 py-24 sm:py-28">
+      <div className="relative mx-auto max-w-7xl px-6 py-20 sm:py-28">
         <div className="max-w-2xl">
           <SectionEyebrow label="Clean up safely" />
           <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
@@ -381,7 +381,7 @@ function TechFactsSection() {
     { k: "License & build", v: "MIT, open source. The installer is currently unsigned — see the note below." },
   ];
   return (
-    <section id="tech" className="relative mx-auto max-w-7xl px-6 py-24 sm:py-28">
+    <section id="tech" className="relative mx-auto max-w-7xl px-6 py-20 sm:py-28">
       <div className="max-w-2xl">
         <SectionEyebrow label="The technical facts" />
         <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
@@ -404,9 +404,9 @@ function DownloadSection() {
   return (
     <section id="download" className="relative overflow-hidden border-t border-edge bg-surface">
       <EdgeMark side="right" />
-      <div className="relative mx-auto max-w-3xl px-6 py-24 text-center sm:py-28">
+      <div className="relative mx-auto max-w-3xl px-6 py-20 text-center sm:py-28">
         <PhokusMark className="mx-auto h-12 w-12 text-ink" dotClassName="fill-amber" />
-        <h2 className="mt-6 font-display text-4xl font-semibold tracking-tight text-ink">
+        <h2 className="mt-6 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
           Point Phokus at a folder.
         </h2>
         <p className="mt-4 text-lg leading-relaxed text-muted">
@@ -447,7 +447,7 @@ function Footer() {
           <span className="font-display font-medium text-ink">Phokus</span>
           <span className="text-faint">· local-first media library</span>
         </div>
-        <div className="flex items-center gap-6">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <a href={REPO_URL} className="transition-colors hover:text-ink">GitHub</a>
           <a href="https://git.jezz.wtf/JezzWTF/phokus" className="transition-colors hover:text-ink">Gitea</a>
           <a href={`${REPO_URL}/blob/main/LICENSE`} className="transition-colors hover:text-ink">MIT</a>
