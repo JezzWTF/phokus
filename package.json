@@ -7,9 +7,11 @@
   "scripts": {
     "build:app": "tauri build",
     "build:vite": "tsc && vite build",
+    "build:web": "cd website && tsc && vite build",
     "clean:app": "cd src-tauri && cargo clean",
     "dev:app": "tauri dev",
     "dev:app:cpu": "tauri dev -- --no-default-features",
+    "dev:web": "cd website && pnpm dev",
     "build:app:cpu": "tauri build -- --no-default-features",
     "build:app:cuda": "tauri build --config src-tauri/tauri.cuda.conf.json",
     "dev:vite": "vite",

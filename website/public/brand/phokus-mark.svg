@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Phokus">
+  <title>Phokus</title>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#0e0f14"/>
+  <g transform="translate(128 128)" fill="none" stroke="#e9e9ec" stroke-width="9"
+     stroke-linecap="round" stroke-linejoin="round">
+    <circle r="110"/>
+    <path d="M0,-46 A52,52 0 0 0 39.84,-23 A52,52 0 0 0 39.84,23 A52,52 0 0 0 0,46 A52,52 0 0 0 -39.84,23 A52,52 0 0 0 -39.84,-23 A52,52 0 0 0 0,-46 Z"/>
+    <g transform="rotate(0)"><path d="M0,-46 A110,110 0 0 1 70.71,-84.27"/></g>
+    <g transform="rotate(60)"><path d="M0,-46 A110,110 0 0 1 70.71,-84.27"/></g>
+    <g transform="rotate(120)"><path d="M0,-46 A110,110 0 0 1 70.71,-84.27"/></g>
+    <g transform="rotate(180)"><path d="M0,-46 A110,110 0 0 1 70.71,-84.27"/></g>
+    <g transform="rotate(240)"><path d="M0,-46 A110,110 0 0 1 70.71,-84.27"/></g>
+    <g transform="rotate(300)"><path d="M0,-46 A110,110 0 0 1 70.71,-84.27"/></g>
+  </g>
+</svg>
