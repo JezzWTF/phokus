@@ -3,13 +3,13 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'website/**'
-      - 'docs/**'
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
   pull_request:
-    paths-ignore:
-      - 'website/**'
-      - 'docs/**'
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
   workflow_dispatch:
 
 concurrency:
