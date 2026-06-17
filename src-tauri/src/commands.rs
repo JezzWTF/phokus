@@ -526,7 +526,8 @@ pub async fn find_similar_by_region(
             // Fetch one extra candidate to compensate for the source image that
             // will be removed, so has_more is accurate and results span multiple pages.
             let mut ids =
-                vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 2, 1.0).map(|matches| matches.into_iter().map(|(id, _)| id).collect::<Vec<_>>())
+                vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 2, 1.0)
+                    .map(|matches| matches.into_iter().map(|(id, _)| id).collect::<Vec<_>>())
                     .map_err(|e| e.to_string())?;
             ids.retain(|&id| id != params.image_id);
             ids
@@ -619,7 +620,8 @@ pub async fn semantic_search_images(
         let mut images = db::get_images_by_ids(&conn, &ids).map_err(|e| e.to_string())?;
 
         // In order to keep the ranking order, sort images by matches order since get_images_by_ids might reorder
-        let order_map: std::collections::HashMap<i64, usize> = ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+        let order_map: std::collections::HashMap<i64, usize> =
+            ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
         images.sort_by_key(|img| order_map.get(&img.id).copied().unwrap_or(usize::MAX));
 
         if let Some(folder_id) = params.folder_id {
@@ -639,7 +641,11 @@ pub async fn semantic_search_images(
         if total_valid >= offset + limit || exhausted {
             // we have enough or we exhausted the table
             let has_more = !exhausted && total_valid > offset + limit;
-            let paged_images = images.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
+            let paged_images = images
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .collect::<Vec<_>>();
             return Ok(SemanticSearchPage {
                 images: paged_images,
                 offset,
@@ -650,7 +656,11 @@ pub async fn semantic_search_images(
 
         if batch >= 8192 {
             let has_more = false;
-            let paged_images = images.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
+            let paged_images = images
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .collect::<Vec<_>>();
             return Ok(SemanticSearchPage {
                 images: paged_images,
                 offset,
