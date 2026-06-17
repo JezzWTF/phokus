@@ -1,5 +1,51 @@
-import { useGalleryStore } from "../../store";
+import { AppTheme, useGalleryStore } from "../../store";
 import { FakeProgressBar, formatBytes } from "./fakes";
+
+const THEME_OPTIONS: {
+  value: AppTheme;
+  name: string;
+  colors: {
+    background: string;
+    surface: string;
+    text: string;
+    muted: string;
+    accent: string;
+  };
+}[] = [
+  {
+    value: "phokus",
+    name: "Phokus",
+    colors: {
+      background: "#030712",
+      surface: "#111827",
+      text: "#f9fafb",
+      muted: "#6b7280",
+      accent: "#10b981",
+    },
+  },
+  {
+    value: "conventional-dark",
+    name: "Conventional Dark",
+    colors: {
+      background: "#1f1f1f",
+      surface: "#303030",
+      text: "#a3a3a3",
+      muted: "#666666",
+      accent: "#10b981",
+    },
+  },
+  {
+    value: "subtle-light",
+    name: "Subtle Light",
+    colors: {
+      background: "#e9e7e2",
+      surface: "#dedbd4",
+      text: "#18202c",
+      muted: "#817b72",
+      accent: "#059669",
+    },
+  },
+];
 
 export function FfmpegStatusRow() {
   const ffmpegStatus = useGalleryStore((s) => s.ffmpegStatus);
@@ -10,7 +56,7 @@ export function FfmpegStatusRow() {
   if (ffmpegStatus === "installed") {
     return (
       <div className="flex items-center gap-2.5 py-3">
-        <svg className="h-4 w-4 shrink-0 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+        <svg className="h-4 w-4 shrink-0 text-emerald-400 light-theme:text-emerald-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <div>
@@ -27,14 +73,14 @@ export function FfmpegStatusRow() {
         <div className="flex items-start justify-between gap-6">
           <div className="min-w-0">
             <p className="text-sm text-white">Media engine download failed</p>
-            <p className="mt-1 text-xs leading-relaxed text-amber-300/90">{ffmpegError}</p>
+            <p className="mt-1 text-xs leading-relaxed text-amber-300/90 light-theme:text-amber-700">{ffmpegError}</p>
             <p className="mt-1.5 text-xs leading-relaxed text-gray-500">
               You can keep going — photos work without it. Video thumbnails and metadata will start
               automatically once the download succeeds.
             </p>
           </div>
           <button
-            className="shrink-0 rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+            className="shrink-0 rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
             onClick={() => void retryFfmpegDownload()}
           >
             Retry download
@@ -71,6 +117,9 @@ export function FfmpegStatusRow() {
 }
 
 export function StepWelcome() {
+  const theme = useGalleryStore((s) => s.theme);
+  const setTheme = useGalleryStore((s) => s.setTheme);
+
   return (
     <div>
       <p className="text-sm leading-relaxed text-gray-300">
@@ -83,8 +132,40 @@ export function StepWelcome() {
         from Settings.
       </p>
 
+      <h4 className="mt-7 text-[12px] font-semibold uppercase tracking-[0.08em] text-gray-400">Choose your look</h4>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {THEME_OPTIONS.map((option) => {
+          const selected = option.value === theme;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`rounded-md border p-2 text-left transition-colors ${
+                selected
+                  ? "border-emerald-400/35 bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/40 light-theme:border-emerald-600/50 light-theme:bg-emerald-100 light-theme:text-emerald-700 light-theme:hover:bg-emerald-200"
+                  : "border-white/10 bg-white/[0.055] text-gray-300 hover:bg-white/10 hover:text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
+              }`}
+              onClick={() => setTheme(option.value)}
+            >
+              <span
+                className="block overflow-hidden rounded border border-black/20 p-1.5"
+                style={{ backgroundColor: option.colors.background }}
+              >
+                <span className="mb-1 block h-2 w-8 rounded-sm" style={{ backgroundColor: option.colors.accent }} />
+                <span className="block rounded-sm p-1.5" style={{ backgroundColor: option.colors.surface }}>
+                  <span className="block h-1.5 w-9 rounded-sm" style={{ backgroundColor: option.colors.text }} />
+                  <span className="mt-1 block h-1.5 w-14 rounded-sm" style={{ backgroundColor: option.colors.muted }} />
+                  <span className="mt-1 block h-1.5 w-10 rounded-sm" style={{ backgroundColor: option.colors.muted }} />
+                </span>
+              </span>
+              <span className="mt-2 block text-[11px] font-medium">{option.name}</span>
+            </button>
+          );
+        })}
+      </div>
+
       <h4 className="mt-7 text-[12px] font-semibold uppercase tracking-[0.08em] text-gray-400">First-time setup</h4>
-      <div className="mt-1 divide-y divide-white/[0.05]">
+      <div className="mt-1 divide-y divide-white/[0.05] light-theme:divide-gray-300/70">
         <FfmpegStatusRow />
       </div>
     </div>

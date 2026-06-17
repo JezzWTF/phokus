@@ -49,9 +49,9 @@ export function ThemedDropdown({
         onClick={() => setOpen((currentOpen) => !currentOpen)}
         className={`flex items-center justify-between gap-2 rounded-md border transition-colors ${
           compact
-            ? "border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-medium"
-            : "min-w-40 border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs"
-        } ${open ? "border-white/20 text-white" : "text-gray-400 hover:border-white/15 hover:text-gray-200"}`}
+            ? "border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-medium light-theme:border-gray-700/50 light-theme:bg-gray-900"
+            : "min-w-40 border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs light-theme:border-gray-700/50 light-theme:bg-gray-900"
+        } ${open ? "border-white/20 text-white light-theme:border-gray-700 light-theme:text-white" : "text-gray-400 hover:border-white/15 hover:text-gray-200 light-theme:text-white light-theme:hover:border-gray-700 light-theme:hover:bg-gray-800 light-theme:hover:text-white"}`}
       >
         <span>{current?.label}</span>
         <svg
@@ -68,7 +68,7 @@ export function ThemedDropdown({
         <div
           role="listbox"
           aria-label={ariaLabel}
-          className={`absolute top-full z-50 mt-1.5 min-w-full rounded-xl border border-white/10 bg-gray-950/98 p-1 shadow-2xl shadow-black/30 backdrop-blur-xl ${
+          className={`absolute top-full z-50 mt-1.5 min-w-full rounded-xl border border-white/10 bg-gray-950/98 p-1 shadow-2xl shadow-black/30 backdrop-blur-xl light-theme:border-gray-700/50 ${
             align === "right" ? "right-0" : "left-0"
           }`}
         >
@@ -82,8 +82,8 @@ export function ThemedDropdown({
                 aria-selected={selected}
                 className={`flex w-full items-center justify-between gap-4 whitespace-nowrap rounded-lg px-3 py-2 text-left text-xs transition-colors ${
                   selected
-                    ? "bg-white/[0.08] text-white"
-                    : "text-gray-400 hover:bg-white/[0.055] hover:text-gray-200"
+                    ? "bg-white/[0.08] text-white light-theme:bg-gray-900 light-theme:text-white"
+                    : "text-gray-400 hover:bg-white/[0.055] hover:text-gray-200 light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
                 }`}
                 onClick={() => {
                   onChange(option.value);

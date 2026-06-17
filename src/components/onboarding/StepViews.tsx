@@ -22,7 +22,7 @@ function ExplorePreview() {
     { size: 16, x: 70, y: 44, i: 6 },
   ];
   return (
-    <div className="relative h-[72px] w-32 overflow-hidden rounded-lg border border-white/[0.07] bg-white/[0.02]">
+    <div className="media-dark-surface relative h-[72px] w-32 overflow-hidden rounded-lg border border-white/[0.07] bg-white/[0.02]">
       {blobs.map((blob, idx) => (
         <div
           key={idx}
@@ -36,7 +36,7 @@ function ExplorePreview() {
 
 function TimelinePreview() {
   return (
-    <div className="flex h-[72px] w-32 flex-col justify-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3">
+    <div className="media-dark-surface flex h-[72px] w-32 flex-col justify-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3">
       {[2024, 2023].map((year, row) => (
         <div key={year} className="flex items-center gap-1.5">
           <span className="w-7 text-[9px] tabular-nums text-gray-600">{year}</span>
@@ -51,7 +51,7 @@ function TimelinePreview() {
 
 function DuplicatesPreview() {
   return (
-    <div className="flex h-[72px] w-32 items-center justify-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.02]">
+    <div className="media-dark-surface flex h-[72px] w-32 items-center justify-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.02]">
       <div className="w-10">
         <FakeTile index={3} className="rounded-md" />
       </div>
@@ -69,7 +69,7 @@ export function StepViews() {
       <p className="text-sm leading-relaxed text-gray-300">
         Beyond the main grid, the sidebar switches between three more ways to look at your library:
       </p>
-      <div className="mt-3 divide-y divide-white/[0.05]">
+      <div className="mt-3 divide-y divide-white/[0.05] light-theme:divide-gray-300/70">
         <ViewRow
           title="Explore"
           description="A visual cluster map and tag cloud — browse by theme instead of folder, and jump into any cluster."

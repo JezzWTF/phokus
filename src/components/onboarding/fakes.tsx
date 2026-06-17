@@ -82,7 +82,7 @@ export function FakeTile({
   className?: string;
 }) {
   return (
-    <div className={`group relative aspect-square overflow-hidden rounded-xl bg-white/[0.04] ${className}`}>
+    <div className={`media-dark-surface group relative aspect-square overflow-hidden rounded-xl bg-white/[0.04] ${className}`}>
       {loaded ? (
         <img src={fakeImage(index)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
       ) : (
@@ -116,16 +116,16 @@ export function FakeTile({
 export function FakeStageTag({ label, state }: { label: string; state: "active" | "done" | "waiting" }) {
   const className =
     state === "active"
-      ? "bg-white/5 text-gray-300"
+      ? "bg-gray-900 text-gray-300 light-theme:bg-gray-900 light-theme:text-gray-300"
       : state === "done"
-        ? "bg-emerald-500/10 text-emerald-400"
-        : "bg-white/4 text-gray-600";
+        ? "bg-emerald-500/10 text-emerald-400 light-theme:bg-emerald-100 light-theme:text-emerald-700"
+        : "bg-gray-900/60 text-gray-600 light-theme:bg-gray-800 light-theme:text-gray-500";
   return <span className={`rounded-md px-2 py-0.5 text-[11px] ${className}`}>{label}</span>;
 }
 
 export function FakeProgressBar({ fraction, className = "" }: { fraction: number | null; className?: string }) {
   return (
-    <div className={`h-px overflow-hidden rounded-full bg-white/8 ${className}`}>
+    <div className={`h-px overflow-hidden rounded-full bg-gray-200/60 light-theme:bg-gray-300 ${className}`}>
       {fraction === null ? (
         <div className="h-full w-full animate-pulse bg-blue-500/40" />
       ) : (
@@ -143,7 +143,7 @@ export function ReplayButton({ onClick, label = "Replay" }: { onClick: () => voi
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/10 hover:text-gray-200"
+      className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/10 hover:text-gray-200 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
     >
       <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12a7.5 7.5 0 0012.9 5.3M19.5 12A7.5 7.5 0 006.6 6.7M4.5 6.5v3h3M19.5 17.5v-3h-3" />

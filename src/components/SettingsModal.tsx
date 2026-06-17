@@ -90,7 +90,7 @@ function ScopeButton({ scope, current, onSelect, children }: {
       className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
         active
           ? "border-emerald-400/35 bg-emerald-500/15 text-emerald-200 light-theme:border-emerald-600/50 light-theme:bg-emerald-100 light-theme:text-emerald-700"
-          : "border-transparent text-gray-500 hover:bg-white/[0.06] hover:text-gray-200 light-theme:text-gray-600 light-theme:hover:bg-black/[0.06] light-theme:hover:text-gray-900"
+          : "border-transparent text-gray-500 hover:bg-white/[0.06] hover:text-gray-200 light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
       }`}
       onClick={() => onSelect(scope)}
     >
@@ -112,7 +112,7 @@ function TaggerAccelerationButton({ acceleration, current, onSelect, children }:
       className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
         active
           ? "border-emerald-400/35 bg-emerald-500/15 text-emerald-200 light-theme:border-emerald-600/50 light-theme:bg-emerald-100 light-theme:text-emerald-700"
-          : "border-transparent text-gray-500 hover:bg-white/[0.06] hover:text-gray-200 light-theme:text-gray-600 light-theme:hover:bg-black/[0.06] light-theme:hover:text-gray-900"
+          : "border-transparent text-gray-500 hover:bg-white/[0.06] hover:text-gray-200 light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
       }`}
       onClick={() => onSelect(acceleration)}
     >
@@ -371,7 +371,7 @@ export function SettingsModal() {
                       {taggerReady ? (
                         <>
                           <button
-                            className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-300/70 light-theme:bg-gray-100 light-theme:text-gray-700 light-theme:hover:bg-gray-200 light-theme:hover:text-gray-900"
+                            className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                             onClick={() => void probeTaggerRuntime()}
                             disabled={taggerRuntimeChecking}
                           >
@@ -387,7 +387,7 @@ export function SettingsModal() {
                         </>
                       ) : (
                         <button
-                          className="relative overflow-hidden rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-300/70 light-theme:bg-gray-100 light-theme:text-gray-700 light-theme:hover:bg-gray-200 light-theme:hover:text-gray-900"
+                          className="relative overflow-hidden rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                           onClick={() => void prepareTaggerModel()}
                           disabled={taggerModelPreparing}
                         >
@@ -536,14 +536,14 @@ export function SettingsModal() {
                       </div>
                       <div className="flex gap-2">
                         <button
-                          className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed light-theme:border-gray-300/70 light-theme:bg-gray-100 light-theme:text-gray-700 light-theme:hover:bg-gray-200 light-theme:hover:text-gray-900"
+                          className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                           onClick={() => setTaggingQueueFolderIds(folders.map((folder) => folder.id))}
                           disabled={taggingQueueScope === "all" || folders.length === 0}
                         >
                           Select all
                         </button>
                         <button
-                          className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed light-theme:border-gray-300/70 light-theme:bg-gray-100 light-theme:text-gray-700 light-theme:hover:bg-gray-200 light-theme:hover:text-gray-900"
+                          className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-white/[0.075] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                           onClick={() => setTaggingQueueFolderIds([])}
                           disabled={taggingQueueScope === "all" || taggingQueueFolderIds.length === 0}
                         >
@@ -582,7 +582,7 @@ export function SettingsModal() {
                   <SettingsItem label="Queue tagging jobs" description="Generate missing AI tags for the current target. Results flow back into the library as the background worker finishes.">
                     <div className="flex items-center gap-2">
                       <button
-                        className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-300/70 light-theme:bg-gray-100 light-theme:text-gray-700 light-theme:hover:bg-gray-200 light-theme:hover:text-gray-900"
+                        className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                         onClick={() => runQueueAction("queue")}
                         disabled={!taggerReady || taggerQueueing || taggerClearing || (taggingQueueScope === "selected" && taggingQueueFolderIds.length === 0)}
                       >
@@ -649,7 +649,7 @@ export function SettingsModal() {
                       </button>
                     ) : (
                       <button
-                        className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-300/70 light-theme:bg-gray-100 light-theme:text-gray-700 light-theme:hover:bg-gray-200 light-theme:hover:text-gray-900"
+                        className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                         onClick={() => void checkForUpdates()}
                         disabled={updateStatus === "checking" || updateStatus === "downloading" || updateStatus === "installing"}
                       >
@@ -666,7 +666,7 @@ export function SettingsModal() {
                     description="Replay the guided first-run tour — library setup, the background pipeline, search modes, and AI features."
                   >
                     <button
-                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white light-theme:border-gray-300/70 light-theme:bg-gray-100 light-theme:text-gray-700 light-theme:hover:bg-gray-200 light-theme:hover:text-gray-900"
+                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                       onClick={() => {
                         setSettingsOpen(false);
                         openOnboarding();
@@ -683,7 +683,7 @@ export function SettingsModal() {
                     description="Open the folder in Explorer to inspect or back up the database, thumbnails, and models."
                   >
                     <button
-                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-300/70 light-theme:bg-gray-100 light-theme:text-gray-700 light-theme:hover:bg-gray-200 light-theme:hover:text-gray-900"
+                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                       onClick={() => {
                         setOpeningDataFolder(true);
                         void openAppDataFolder().finally(() => setOpeningDataFolder(false));
@@ -748,7 +748,7 @@ export function SettingsModal() {
                     }
                   >
                     <button
-                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-300/70 light-theme:bg-gray-100 light-theme:text-gray-700 light-theme:hover:bg-gray-200 light-theme:hover:text-gray-900"
+                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                       onClick={() => {
                         setVacuuming(true);
                         setVacuumResult(null);
@@ -809,7 +809,7 @@ export function SettingsModal() {
                     }
                   >
                     <button
-                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-300/70 light-theme:bg-gray-100 light-theme:text-gray-700 light-theme:hover:bg-gray-200 light-theme:hover:text-gray-900"
+                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                       onClick={() => {
                         setCleaningThumbnails(true);
                         cleanupOrphanedThumbnails()

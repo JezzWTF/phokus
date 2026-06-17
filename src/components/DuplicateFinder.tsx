@@ -193,7 +193,7 @@ export function DuplicateFinder() {
             {/* Batch select — only shown when there are groups and nothing is selected yet */}
             {hasResults && selectedCount === 0 && !deleting && (
               <button
-                className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-white/[0.07] hover:text-white"
+                className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-white/[0.07] hover:text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                 onClick={selectKeepFirstAllGroups}
                 title={`Mark ${totalDuplicateImages} duplicate${totalDuplicateImages === 1 ? "" : "s"} for deletion across all groups (keeps first in each)`}
               >
@@ -204,7 +204,7 @@ export function DuplicateFinder() {
               <>
                 <span className="text-[11px] text-white/40">{selectedCount} marked for deletion</span>
                 <button
-                  className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-white/[0.07] hover:text-white disabled:opacity-40"
+                  className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-white/[0.07] hover:text-white disabled:opacity-40 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                   onClick={clearDuplicateSelection}
                   disabled={deleting}
                 >
@@ -220,7 +220,7 @@ export function DuplicateFinder() {
               </>
             ) : null}
             <button
-              className="rounded-lg border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
               onClick={() => { setDeleteResult(null); void scanDuplicates(selectedFolderId); }}
               disabled={duplicateScanning}
             >

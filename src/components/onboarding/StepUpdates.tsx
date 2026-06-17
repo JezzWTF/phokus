@@ -24,9 +24,9 @@ export function StepUpdates() {
         </p>
 
         {/* Mini app-window mockup: the lit mark shown in a real title bar. */}
-        <div className="mt-3 overflow-hidden rounded-lg border border-white/10 bg-gray-950 shadow-lg">
-          <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
-            <div className="relative flex h-6 w-6 items-center justify-center rounded-md bg-white/[0.08] text-gray-300">
+        <div className="mt-3 overflow-hidden rounded-lg border border-white/10 bg-gray-950 shadow-lg light-theme:border-gray-300/70">
+          <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2 light-theme:border-gray-300/70">
+            <div className="relative flex h-6 w-6 items-center justify-center rounded-md bg-gray-900 text-gray-300 light-theme:bg-gray-800">
               <span className="pointer-events-none absolute left-1/2 top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-400/30 blur-[3px]" />
               <span className="pointer-events-none absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-400/55 animate-ping" />
               <PhokusMark className="relative h-[18px] w-[18px]" dotClassName="fill-amber-400" />
@@ -48,16 +48,16 @@ export function StepUpdates() {
 
           {/* Ghosted window body, just enough to read as the app. */}
           <div className="flex h-[72px] bg-gray-900/30">
-            <div className="w-14 shrink-0 border-r border-white/[0.05] p-2.5">
-              <div className="h-1.5 w-full rounded bg-white/[0.07]" />
-              <div className="mt-2 h-1.5 w-3/4 rounded bg-white/[0.04]" />
-              <div className="mt-2 h-1.5 w-3/4 rounded bg-white/[0.04]" />
+            <div className="w-14 shrink-0 border-r border-white/[0.05] p-2.5 light-theme:border-gray-300/70">
+              <div className="h-1.5 w-full rounded bg-gray-800" />
+              <div className="mt-2 h-1.5 w-3/4 rounded bg-gray-900" />
+              <div className="mt-2 h-1.5 w-3/4 rounded bg-gray-900" />
             </div>
             <div className="flex-1 p-2.5">
-              <div className="h-2 w-20 rounded bg-white/[0.06]" />
+              <div className="h-2 w-20 rounded bg-gray-800" />
               <div className="mt-2.5 grid grid-cols-5 gap-1.5">
                 {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="h-7 rounded bg-white/[0.04]" />
+                  <div key={i} className="h-7 rounded bg-gray-900" />
                 ))}
               </div>
             </div>

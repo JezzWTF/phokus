@@ -55,8 +55,8 @@ function SortDropdown({
         onClick={() => setOpen((v) => !v)}
         className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors ${
           open
-            ? "border-white/15 bg-white/8 text-white"
-            : "border-white/8 bg-transparent text-gray-400 hover:border-white/15 hover:text-gray-200"
+            ? "border-white/15 bg-white/8 text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white"
+            : "border-white/8 bg-transparent text-gray-400 hover:border-white/15 hover:text-gray-200 light-theme:border-gray-700/40 light-theme:text-gray-600 light-theme:hover:border-gray-700 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
         }`}
       >
         <span>{current?.label ?? "Sort"}</span>
@@ -68,14 +68,14 @@ function SortDropdown({
         </svg>
       </button>
       {open ? (
-        <div className="absolute right-0 top-full z-30 mt-1.5 min-w-44 rounded-xl border border-white/10 bg-gray-950/98 p-1 shadow-2xl backdrop-blur">
+        <div className="absolute right-0 top-full z-30 mt-1.5 min-w-44 rounded-xl border border-white/10 bg-gray-950/98 p-1 shadow-2xl backdrop-blur light-theme:border-gray-700/50">
           {options.map((option) => (
             <button
               key={option.value}
               className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors ${
                 option.value === value
-                  ? "bg-white/6 text-white"
-                  : "text-gray-400 hover:bg-white/5 hover:text-white"
+                  ? "bg-white/6 text-white light-theme:bg-gray-900 light-theme:text-white"
+                  : "text-gray-400 hover:bg-white/5 hover:text-white light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
               }`}
               onClick={() => { onChange(option.value); setOpen(false); }}
             >
@@ -106,14 +106,14 @@ function FilterPill({
 }) {
   const activeClass =
     variant === "amber"
-      ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
-      : "bg-white/10 text-white";
+      ? "bg-amber-500/15 text-amber-300 border border-amber-500/30 light-theme:bg-amber-100 light-theme:text-amber-700 light-theme:border-amber-500/50"
+      : "bg-white/10 text-white light-theme:bg-gray-900 light-theme:text-white";
   return (
     <button
       className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-150 ${
         active
           ? activeClass
-          : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
+          : "text-gray-500 hover:text-gray-200 hover:bg-white/5 light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
       }`}
       onClick={onClick}
     >
@@ -419,7 +419,7 @@ export function Toolbar() {
         <div className="h-4 w-px bg-white/10 shrink-0" />
 
         {/* Zoom */}
-        <div className="flex items-center rounded-lg border border-white/8 overflow-hidden">
+        <div className="flex items-center rounded-lg border border-white/8 overflow-hidden light-theme:border-gray-700/40">
           {(["compact", "comfortable", "detail"] as const).map((preset, i) => (
             <button
               key={preset}
@@ -427,8 +427,8 @@ export function Toolbar() {
                 i > 0 ? "border-l border-white/8" : ""
               } ${
                 zoomPreset === preset
-                  ? "bg-white/10 text-white"
-                  : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
+                  ? "bg-white/10 text-white light-theme:bg-gray-900 light-theme:text-white"
+                  : "text-gray-500 hover:text-gray-200 hover:bg-white/5 light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
               }`}
               title={`${tileSize}px tiles`}
               onClick={() => setZoomPreset(preset)}

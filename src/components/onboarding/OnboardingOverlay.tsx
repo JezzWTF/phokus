@@ -43,10 +43,10 @@ export function OnboardingOverlay() {
   const isLast = onboardingStep >= STEPS.length - 1;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/65 backdrop-blur-sm">
-      <div className="flex max-h-[min(85vh,760px)] w-[min(90vw,720px)] flex-col rounded-lg border border-white/10 bg-[#07080f] shadow-2xl shadow-black/60">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/65 backdrop-blur-sm light-theme:bg-black/40">
+      <div className="flex max-h-[min(85vh,760px)] w-[min(90vw,720px)] flex-col rounded-lg border border-white/10 bg-gray-950 shadow-2xl shadow-black/60 light-theme:border-gray-300/70">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/[0.07] px-7 py-4">
+        <div className="flex items-center justify-between border-b border-white/[0.07] px-7 py-4 light-theme:border-gray-300/70">
           <div>
             <p className="text-[11px] uppercase tracking-[0.14em] text-gray-600">
               Step {onboardingStep + 1} of {STEPS.length}
@@ -59,7 +59,11 @@ export function OnboardingOverlay() {
                 key={s.id}
                 aria-label={s.title}
                 className={`h-1.5 rounded-full transition-all ${
-                  i === onboardingStep ? "w-5 bg-white/70" : i < onboardingStep ? "w-1.5 bg-white/35" : "w-1.5 bg-white/15"
+                  i === onboardingStep
+                    ? "w-5 bg-white/70 light-theme:bg-gray-700"
+                    : i < onboardingStep
+                      ? "w-1.5 bg-white/35 light-theme:bg-gray-400"
+                      : "w-1.5 bg-white/15 light-theme:bg-gray-300"
                 }`}
                 onClick={() => setOnboardingStep(i)}
               />
@@ -83,23 +87,23 @@ export function OnboardingOverlay() {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-white/[0.07] px-7 py-4">
+        <div className="flex items-center justify-between border-t border-white/[0.07] px-7 py-4 light-theme:border-gray-300/70">
           <button
-            className="rounded-md border border-transparent px-3 py-1.5 text-xs text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-gray-200"
+            className="rounded-md border border-transparent px-3 py-1.5 text-xs text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-gray-200 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
             onClick={completeOnboarding}
           >
             Skip tour
           </button>
           <div className="flex items-center gap-2">
             <button
-              className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+              className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
               onClick={() => setOnboardingStep(onboardingStep - 1)}
               disabled={isFirst}
             >
               Back
             </button>
             <button
-              className="rounded-md border border-emerald-400/35 bg-emerald-500/15 px-4 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25"
+              className="rounded-md border border-emerald-400/35 bg-emerald-500/15 px-4 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25 light-theme:border-emerald-600/50 light-theme:bg-emerald-100 light-theme:text-emerald-700 light-theme:hover:bg-emerald-200"
               onClick={() => (isLast ? completeOnboarding() : setOnboardingStep(onboardingStep + 1))}
             >
               {isLast ? "Finish" : "Next"}

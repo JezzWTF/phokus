@@ -30,7 +30,7 @@ export function StepAddLibrary() {
         added, renamed, or removed. Nothing is moved or copied.
       </p>
 
-      <div className="mt-5 flex items-center justify-between gap-6 border-y border-white/[0.05] py-4">
+      <div className="mt-5 flex items-center justify-between gap-6 border-y border-white/[0.05] py-4 light-theme:border-gray-300/70">
         <div className="min-w-0">
           {folders.length > 0 ? (
             <>
@@ -49,10 +49,10 @@ export function StepAddLibrary() {
               </p>
             </>
           )}
-          {addError ? <p className="mt-1.5 text-xs text-amber-300/90">{addError}</p> : null}
+          {addError ? <p className="mt-1.5 text-xs text-amber-300/90 light-theme:text-amber-700">{addError}</p> : null}
         </div>
         <button
-          className="shrink-0 rounded-md border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+          className="shrink-0 rounded-md border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-emerald-600/50 light-theme:bg-emerald-100 light-theme:text-emerald-700 light-theme:hover:bg-emerald-200"
           onClick={() => void handlePick()}
           disabled={adding}
         >
@@ -64,7 +64,7 @@ export function StepAddLibrary() {
         As indexing runs, the gallery fills in roughly like this — tiles appear immediately and sharpen
         as thumbnails are generated:
       </p>
-      <div className="mt-3 grid grid-cols-6 gap-1.5">
+      <div className="media-dark-surface mt-3 grid grid-cols-6 gap-1.5">
         <FakeTile index={0} />
         <FakeTile index={1} favorite />
         <FakeTile index={2} duration="0:42" />
