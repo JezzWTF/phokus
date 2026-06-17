@@ -267,6 +267,20 @@ pub async fn get_folders(db: State<'_, DbState>) -> Result<Vec<Folder>, String> 
     db::get_folders(&conn).map_err(|e| e.to_string())
 }
 
+#[derive(Deserialize)]
+pub struct ReorderFoldersParams {
+    pub folder_ids: Vec<i64>,
+}
+
+#[tauri::command]
+pub async fn reorder_folders(
+    db: State<'_, DbState>,
+    params: ReorderFoldersParams,
+) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::reorder_folders(&conn, &params.folder_ids).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn get_background_job_progress(
     db: State<'_, DbState>,
@@ -1468,6 +1482,7 @@ fn kmeans_cosine(
 pub struct FailedEmbeddingItem {
     pub image_id: i64,
     pub filename: String,
+    pub path: String,
     pub error: Option<String>,
 }
 
@@ -1480,9 +1495,10 @@ pub async fn get_failed_embedding_images(
     let rows = db::get_failed_embedding_images(&conn, folder_id).map_err(|e| e.to_string())?;
     Ok(rows
         .into_iter()
-        .map(|(image_id, filename, error)| FailedEmbeddingItem {
+        .map(|(image_id, filename, path, error)| FailedEmbeddingItem {
             image_id,
             filename,
+            path,
             error,
         })
         .collect())

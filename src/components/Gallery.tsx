@@ -1,4 +1,5 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ImageRecord, parseSearchValue, tileSizeForZoom, useGalleryStore } from "../store";
 
@@ -119,11 +120,7 @@ export function ImageTile({
   const similarScope = useGalleryStore((state) => state.similarScope);
   const canFindSimilar = image.embedding_status === "ready";
 
-  const src = image.thumbnail_path
-    ? convertFileSrc(image.thumbnail_path)
-    : image.media_kind === "image" && image.path
-      ? convertFileSrc(image.path)
-      : null;
+  const src = image.thumbnail_path ? convertFileSrc(image.thumbnail_path) : null;
 
   return (
     <button
@@ -268,28 +265,61 @@ export function Gallery() {
   const parsedSearch = parseSearchValue(search);
 
   const parentRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; image: ImageRecord } | null>(null);
 
+  useLayoutEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    setContainerWidth(el.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      setContainerWidth(entries[0].contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const tileSize = tileSizeForZoom(zoomPreset);
+  const cols = useMemo(
+    () => Math.max(1, Math.floor((containerWidth - GAP) / (tileSize + GAP))),
+    [containerWidth, tileSize],
+  );
+  const rowCount = Math.ceil(images.length / cols);
+
+  const estimateSize = useCallback(() => tileSize + GAP, [tileSize]);
+
+  const virtualizer = useVirtualizer({
+    count: rowCount,
+    getScrollElement: () => parentRef.current,
+    estimateSize,
+    overscan: 3,
+    paddingStart: GAP,
+  });
+
+  useEffect(() => {
+    virtualizer.measure();
+  }, [cols, virtualizer]);
+
+  useEffect(() => {
+    parentRef.current?.scrollTo({ top: 0, left: 0 });
+  }, [galleryScrollResetKey]);
+
   const handleScroll = useCallback(() => {
-    const element = parentRef.current;
-    if (!element) return;
-    if (element.scrollTop < 24) return;
-    const nearBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 600;
+    const el = parentRef.current;
+    if (!el) return;
+    if (el.scrollTop < 24) return;
+    const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 600;
     if (nearBottom && !loadingImages && images.length < totalImages) {
       void loadMoreImages();
     }
   }, [images.length, loadMoreImages, loadingImages, totalImages]);
 
   useEffect(() => {
-    const element = parentRef.current;
-    if (!element) return;
-    element.addEventListener("scroll", handleScroll, { passive: true });
-    return () => element.removeEventListener("scroll", handleScroll);
+    const el = parentRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
   }, [handleScroll]);
-
-  useEffect(() => {
-    parentRef.current?.scrollTo({ top: 0, left: 0 });
-  }, [galleryScrollResetKey]);
 
   useEffect(() => {
     const close = (event: PointerEvent) => {
@@ -308,7 +338,7 @@ export function Gallery() {
   }, []);
 
   return (
-    <div ref={parentRef} className="relative flex-1 overflow-y-auto overflow-x-hidden min-h-0 bg-[#07080f]">
+    <div ref={parentRef} className="relative flex-1 overflow-y-auto overflow-x-hidden min-h-0 bg-gray-950">
       {images.length === 0 && loadingImages ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
           <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8 min-w-72">
@@ -365,25 +395,41 @@ export function Gallery() {
           </div>
         </div>
       ) : (
-        <div
-          className="grid content-start"
-          style={{
-            padding: GAP,
-            gap: GAP,
-            gridTemplateColumns: `repeat(auto-fill, minmax(${tileSizeForZoom(zoomPreset)}px, 1fr))`,
-          }}
-        >
-          {images.map((image) => (
-            <ImageTile
-              key={image.id}
-              image={image}
-              onClick={() => openImage(image)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                setContextMenu({ x: event.clientX, y: event.clientY, image });
-              }}
-            />
-          ))}
+        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const startIndex = virtualRow.index * cols;
+            const rowImages = images.slice(startIndex, startIndex + cols);
+            return (
+              <div
+                key={virtualRow.key}
+                style={{
+                  position: "absolute",
+                  top: virtualRow.start,
+                  width: "100%",
+                  height: virtualRow.size,
+                  display: "grid",
+                  gridTemplateColumns: `repeat(${cols}, ${tileSize}px)`,
+                  gap: GAP,
+                  paddingLeft: GAP,
+                  paddingRight: GAP,
+                  paddingBottom: GAP,
+                  boxSizing: "border-box",
+                }}
+              >
+                {rowImages.map((image) => (
+                  <ImageTile
+                    key={image.id}
+                    image={image}
+                    onClick={() => openImage(image)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setContextMenu({ x: event.clientX, y: event.clientY, image });
+                    }}
+                  />
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
 

@@ -31,6 +31,7 @@ pub struct Folder {
     pub image_count: i64,
     pub indexed_at: Option<String>,
     pub scan_error: Option<String>,
+    pub sort_order: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -322,6 +323,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // on databases that predate Phase 1.
     conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_images_taken_at ON images(taken_at);")?;
     ensure_column(conn, "folders", "scan_error", "TEXT")?;
+    ensure_column(conn, "folders", "sort_order", "INTEGER NOT NULL DEFAULT 0")?;
+    conn.execute("UPDATE folders SET sort_order = id WHERE sort_order = 0", [])?;
 
     vector::migrate(conn)?;
     Ok(())
@@ -329,7 +332,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 
 pub fn insert_folder(conn: &Connection, path: &str, name: &str) -> Result<i64> {
     conn.execute(
-        "INSERT OR IGNORE INTO folders (path, name) VALUES (?1, ?2)",
+        "INSERT OR IGNORE INTO folders (path, name, sort_order)
+         VALUES (?1, ?2, COALESCE((SELECT MAX(sort_order) + 1 FROM folders), 1))",
         params![path, name],
     )?;
     let id: i64 = conn.query_row(
@@ -814,6 +818,7 @@ pub fn get_pending_embedding_jobs(
          FROM embedding_jobs j
          JOIN images i ON i.id = j.image_id
          WHERE status = 'pending'
+           AND NOT (i.media_kind = 'video' AND i.thumbnail_path IS NULL)
            {}
          ORDER BY j.updated_at, j.image_id
          LIMIT ?1",
@@ -1224,7 +1229,12 @@ pub fn has_claimable_embedding_jobs(
     conn: &Connection,
     excluded_folder_ids: &std::collections::HashSet<i64>,
 ) -> Result<bool> {
-    has_claimable_jobs(conn, "embedding_jobs", "", excluded_folder_ids)
+    has_claimable_jobs(
+        conn,
+        "embedding_jobs",
+        "AND NOT (i.media_kind = 'video' AND i.thumbnail_path IS NULL)",
+        excluded_folder_ids,
+    )
 }
 
 pub fn claim_thumbnail_jobs(
@@ -1507,7 +1517,9 @@ pub fn get_images_by_ids(conn: &Connection, image_ids: &[i64]) -> Result<Vec<Ima
 
 pub fn get_folders(conn: &Connection) -> Result<Vec<Folder>> {
     let mut stmt = conn.prepare(
-        "SELECT id, path, name, image_count, indexed_at, scan_error FROM folders ORDER BY name",
+        "SELECT id, path, name, image_count, indexed_at, scan_error, sort_order
+         FROM folders
+         ORDER BY sort_order, id",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(Folder {
@@ -1517,9 +1529,45 @@ pub fn get_folders(conn: &Connection) -> Result<Vec<Folder>> {
             image_count: row.get(3)?,
             indexed_at: row.get(4)?,
             scan_error: row.get(5)?,
+            sort_order: row.get(6)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub fn reorder_folders(conn: &Connection, folder_ids: &[i64]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for (index, folder_id) in folder_ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE folders SET sort_order = ?2 WHERE id = ?1",
+            params![folder_id, index as i64 + 1],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn repair_deferred_embedding_jobs(conn: &Connection) -> Result<usize> {
+    let pattern = "No thumbnail available yet for%";
+    let repaired = conn.execute(
+        "UPDATE embedding_jobs
+         SET status = 'pending', last_error = NULL, updated_at = datetime('now')
+         WHERE status = 'failed'
+           AND last_error LIKE ?1
+           AND image_id IN (
+               SELECT id FROM images WHERE media_kind = 'video'
+           )",
+        [pattern],
+    )?;
+    conn.execute(
+        "UPDATE images
+         SET embedding_status = 'pending', embedding_error = NULL
+         WHERE embedding_status = 'failed'
+           AND embedding_error LIKE ?1
+           AND media_kind = 'video'",
+        [pattern],
+    )?;
+    Ok(repaired)
 }
 
 pub fn rename_folder(conn: &Connection, folder_id: i64, new_name: &str) -> Result<()> {
@@ -1876,12 +1924,14 @@ pub fn get_explore_tags(
     Ok(rows)
 }
 
+type FailedEmbeddingRow = (i64, String, String, Option<String>);
+
 pub fn get_failed_embedding_images(
     conn: &Connection,
     folder_id: i64,
-) -> Result<Vec<(i64, String, Option<String>)>> {
+) -> Result<Vec<FailedEmbeddingRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, filename, embedding_error
+        "SELECT id, filename, path, embedding_error
          FROM images
          WHERE folder_id = ?1 AND embedding_status = 'failed'
          ORDER BY filename",
@@ -1890,7 +1940,8 @@ pub fn get_failed_embedding_images(
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
-            row.get::<_, Option<String>>(2)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
         ))
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

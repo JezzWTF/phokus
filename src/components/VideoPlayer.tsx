@@ -282,7 +282,7 @@ export function VideoPlayer({ src }: { src: string }) {
   return (
     <div
       ref={containerRef}
-      className={`relative flex h-full w-full items-center justify-center bg-black ${controlsVisible ? "" : "cursor-none"}`}
+      className={`media-dark-surface relative flex h-full w-full items-center justify-center bg-black ${controlsVisible ? "" : "cursor-none"}`}
       onPointerMove={showControls}
       onClick={(event) => event.stopPropagation()}
     >

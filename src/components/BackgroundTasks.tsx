@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useGalleryStore, WorkerKey } from "../store";
 
 const WORKER_FOR_STAGE: Record<string, WorkerKey> = {
@@ -33,6 +34,7 @@ interface Task {
 interface FailedEmbeddingItem {
   image_id: number;
   filename: string;
+  path: string;
   error: string | null;
 }
 
@@ -504,12 +506,21 @@ export function BackgroundTasks() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
                             d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
                         </svg>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="text-[10px] text-amber-400/80 truncate font-medium">{item.filename}</p>
                           {item.error && (
                             <p className="text-[9px] text-gray-600 truncate">{item.error}</p>
                           )}
                         </div>
+                        <button
+                          className="shrink-0 text-gray-700 hover:text-gray-300 transition-colors"
+                          title="Reveal in Explorer"
+                          onClick={() => void revealItemInDir(item.path)}
+                        >
+                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                          </svg>
+                        </button>
                       </div>
                     ))}
                   </div>

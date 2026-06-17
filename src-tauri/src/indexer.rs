@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
 const IMAGE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp", "avif", "heic", "heif",
+    "jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp", "avif",
 ];
 
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "m4v", "webm"];
@@ -550,6 +550,9 @@ fn build_record(
     let filename = path.file_name()?.to_string_lossy().to_string();
     let metadata = std::fs::metadata(path).ok()?;
     let file_size = metadata.len() as i64;
+    if file_size == 0 {
+        return None;
+    }
     let modified_at = metadata.modified().ok().map(|time| {
         let date_time: chrono::DateTime<chrono::Utc> = time.into();
         date_time.to_rfc3339()
@@ -869,14 +872,14 @@ fn process_embedding_batch(
     let embedder = embedder.as_ref().expect("embedder should be initialized");
 
     let infer_started_at = Instant::now();
-    // Resolve the source path for each job. Videos without a thumbnail produce an Err
-    // here — those jobs are marked failed immediately without going to the embedder.
+    // Resolve each source path. Video jobs without thumbnails are not claimable, so an
+    // error here represents a real race or missing thumbnail rather than normal deferral.
     let source_results: Vec<Result<PathBuf>> = jobs
         .iter()
         .map(|job| embedding_source_path(&job.path, job.thumbnail_path.as_deref(), &job.media_kind))
         .collect();
 
-    // Separate jobs with a valid source from those that fail early (e.g. video with no thumbnail).
+    // Separate jobs with a valid source from genuine early failures.
     let mut embeddable_indices: Vec<usize> = Vec::new();
     let mut embeddable_paths: Vec<PathBuf> = Vec::new();
     // image_id -> early error message for jobs that cannot be embedded yet
@@ -1372,7 +1375,6 @@ fn mime_for_ext(ext: &str) -> &'static str {
         "webp" => "image/webp",
         "tiff" | "tif" => "image/tiff",
         "avif" => "image/avif",
-        "heic" | "heif" => "image/heif",
         "mp4" | "m4v" => "video/mp4",
         "mov" => "video/quicktime",
         "webm" => "video/webm",

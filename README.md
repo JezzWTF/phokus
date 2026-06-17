@@ -34,7 +34,7 @@ A local-first desktop media library for browsing, filtering, and curating image 
 | Images | Videos |
 |--------|--------|
 | jpg, jpeg, png, gif, bmp | mp4, mov, m4v |
-| tiff, tif, webp, avif, heic, heif | webm |
+| tiff, tif, webp, avif | webm |
 
 ## Installation
 

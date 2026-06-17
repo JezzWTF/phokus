@@ -1,12 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Reorder, useDragControls } from "framer-motion";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useGalleryStore, Folder, IndexProgress } from "../store";
+import { ThemedDropdown } from "./ThemedDropdown";
 
 interface ContextMenuState {
   folderId: number;
   x: number;
   y: number;
 }
+
+type LibrarySort = "az" | "za" | "custom";
+const LIBRARY_SORT_KEY = "phokus-library-sort";
 
 function FolderContextMenu({
   menu,
@@ -82,11 +87,22 @@ function FolderItem({
   folder,
   selected,
   progress,
+  customOrdering,
+  dragging,
+  onDragStart,
+  onDragEnd,
+  onKeyboardMove,
 }: {
   folder: Folder;
   selected: boolean;
   progress: IndexProgress | undefined;
+  customOrdering: boolean;
+  dragging: boolean;
+  onDragStart: (pointerY: number) => void;
+  onDragEnd: () => void;
+  onKeyboardMove: (direction: -1 | 1) => void;
 }) {
+  const dragControls = useDragControls();
   const { selectFolder, removeFolder, reindexFolder, renameFolder, updateFolderPath, toggleMutedFolder } = useGalleryStore();
   const mutedFolderIds = useGalleryStore((state) => state.mutedFolderIds);
   const setAllWorkersPaused = useGalleryStore((state) => state.setAllWorkersPaused);
@@ -141,16 +157,57 @@ function FolderItem({
   };
 
   return (
-    <>
+    <Reorder.Item
+      as="div"
+      value={folder.id}
+      drag={customOrdering ? "y" : false}
+      dragControls={dragControls}
+      dragListener={false}
+      dragElastic={0.08}
+      onDragEnd={onDragEnd}
+      layout
+      transition={{ layout: { type: "spring", stiffness: 520, damping: 38, mass: 0.55 } }}
+      className={`relative z-0 ${dragging ? "z-20" : ""}`}
+      style={{ position: "relative" }}
+    >
       <div
         className={`group relative flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150 ${
           selected
             ? "bg-white/8 text-white"
             : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
-        }`}
+        } ${dragging ? "scale-[1.02] bg-white/[0.11] text-white shadow-xl shadow-black/25 ring-1 ring-white/15" : ""}`}
         onClick={() => !renaming && selectFolder(folder.id)}
         onContextMenu={handleContextMenu}
       >
+        {customOrdering ? (
+          <button
+            type="button"
+            aria-label={`Reorder ${folder.name}`}
+            title={`Drag to reorder ${folder.name}`}
+            className={`-ml-1 flex h-7 w-5 shrink-0 touch-none items-center justify-center rounded-md transition-colors ${
+              dragging
+                ? "cursor-grabbing bg-white/10 text-gray-300"
+                : "cursor-grab text-gray-700 hover:bg-white/[0.06] hover:text-gray-400"
+            }`}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              onDragStart(event.clientY);
+              dragControls.start(event);
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+              event.preventDefault();
+              event.stopPropagation();
+              onKeyboardMove(event.key === "ArrowUp" ? -1 : 1);
+            }}
+          >
+            <svg className="h-3 w-3" viewBox="0 0 12 12" fill="currentColor">
+              <circle cx="3" cy="3" r="1" /><circle cx="9" cy="3" r="1" />
+              <circle cx="3" cy="9" r="1" /><circle cx="9" cy="9" r="1" />
+            </svg>
+          </button>
+        ) : null}
         {isMissing ? (
           <span className="shrink-0 text-amber-400">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -278,7 +335,7 @@ function FolderItem({
           onRemove={() => setConfirmingRemoval(true)}
         />
       )}
-    </>
+    </Reorder.Item>
   );
 }
 
@@ -290,6 +347,103 @@ export function Sidebar() {
   const selectFolder = useGalleryStore((state) => state.selectFolder);
   const activeView = useGalleryStore((state) => state.activeView);
   const setView = useGalleryStore((state) => state.setView);
+  const reorderFolders = useGalleryStore((state) => state.reorderFolders);
+  const [librarySort, setLibrarySortState] = useState<LibrarySort>(() => {
+    const saved = window.localStorage.getItem(LIBRARY_SORT_KEY);
+    return saved === "za" || saved === "custom" ? saved : "az";
+  });
+  const [customFolders, setCustomFolders] = useState(folders);
+  const [draggedFolderId, setDraggedFolderId] = useState<number | null>(null);
+  const folderListRef = useRef<HTMLDivElement>(null);
+  const customFoldersRef = useRef(folders);
+  const pointerYRef = useRef(0);
+  const autoScrollFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (draggedFolderId !== null) return;
+    setCustomFolders(folders);
+    customFoldersRef.current = folders;
+  }, [folders, draggedFolderId]);
+
+  useEffect(() => {
+    if (draggedFolderId === null) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      pointerYRef.current = event.clientY;
+    };
+
+    const autoScroll = () => {
+      const list = folderListRef.current;
+      if (list) {
+        const rect = list.getBoundingClientRect();
+        const edgeSize = Math.min(64, rect.height * 0.2);
+        const topDistance = pointerYRef.current - rect.top;
+        const bottomDistance = rect.bottom - pointerYRef.current;
+        let velocity = 0;
+
+        if (topDistance < edgeSize) {
+          velocity = -Math.pow((edgeSize - Math.max(0, topDistance)) / edgeSize, 1.6) * 14;
+        } else if (bottomDistance < edgeSize) {
+          velocity = Math.pow((edgeSize - Math.max(0, bottomDistance)) / edgeSize, 1.6) * 14;
+        }
+
+        if (velocity !== 0) list.scrollTop += velocity;
+      }
+      autoScrollFrameRef.current = requestAnimationFrame(autoScroll);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    autoScrollFrameRef.current = requestAnimationFrame(autoScroll);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      if (autoScrollFrameRef.current !== null) cancelAnimationFrame(autoScrollFrameRef.current);
+      autoScrollFrameRef.current = null;
+    };
+  }, [draggedFolderId]);
+
+  const displayedFolders = useMemo(() => {
+    if (librarySort === "custom") return customFolders;
+    return [...folders].sort((a, b) => {
+      const result = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+      return librarySort === "az" ? result : -result;
+    });
+  }, [customFolders, folders, librarySort]);
+
+  const setLibrarySort = (sort: LibrarySort) => {
+    window.localStorage.setItem(LIBRARY_SORT_KEY, sort);
+    setLibrarySortState(sort);
+  };
+
+  const handleReorder = (orderedIds: number[]) => {
+    const byId = new Map(customFoldersRef.current.map((folder) => [folder.id, folder]));
+    const next = orderedIds
+      .map((id) => byId.get(id))
+      .filter((folder): folder is Folder => folder !== undefined);
+    customFoldersRef.current = next;
+    setCustomFolders(next);
+  };
+
+  const finishReorder = () => {
+    const nextIds = customFoldersRef.current.map((folder) => folder.id);
+    setDraggedFolderId(null);
+    const currentIds = folders.map((folder) => folder.id);
+    if (nextIds.some((id, index) => id !== currentIds[index])) {
+      void reorderFolders(nextIds);
+    }
+  };
+
+  const moveFolderByKeyboard = (folderId: number, direction: -1 | 1) => {
+    const current = customFoldersRef.current;
+    const currentIndex = current.findIndex((folder) => folder.id === folderId);
+    const nextIndex = currentIndex + direction;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= current.length) return;
+
+    const next = [...current];
+    [next[currentIndex], next[nextIndex]] = [next[nextIndex], next[currentIndex]];
+    customFoldersRef.current = next;
+    setCustomFolders(next);
+    void reorderFolders(next.map((folder) => folder.id));
+  };
 
   const handleAddFolder = async () => {
     const selected = await open({ directory: true, multiple: false, title: "Select Media Folder" });
@@ -387,28 +541,55 @@ export function Sidebar() {
 
       {/* Section label */}
       {folders.length > 0 && (
-        <div className="px-5 pt-3 pb-1">
+        <div className="flex items-center justify-between gap-2 px-5 pt-3 pb-1">
           <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-gray-600">Libraries</span>
+          <ThemedDropdown
+            value={librarySort}
+            onChange={(value) => setLibrarySort(value as LibrarySort)}
+            ariaLabel="Library order"
+            compact
+            options={[
+              { value: "az", label: "A-Z" },
+              { value: "za", label: "Z-A" },
+              { value: "custom", label: "Custom" },
+            ]}
+          />
         </div>
       )}
 
       {/* Folder list */}
-      <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-px min-h-0">
+      <Reorder.Group
+        ref={folderListRef}
+        as="div"
+        axis="y"
+        values={displayedFolders.map((folder) => folder.id)}
+        onReorder={librarySort === "custom" ? handleReorder : () => {}}
+        layoutScroll
+        className="flex-1 overflow-y-auto px-2 pb-2 space-y-px min-h-0"
+      >
         {folders.length === 0 ? (
           <p className="text-gray-700 text-xs px-3 py-6 text-center leading-relaxed">
             Add a folder to get started
           </p>
         ) : (
-          folders.map((folder) => (
+          displayedFolders.map((folder) => (
             <FolderItem
               key={folder.id}
               folder={folder}
               selected={selectedFolderId === folder.id}
               progress={indexingProgress[folder.id]}
+              customOrdering={librarySort === "custom"}
+              dragging={draggedFolderId === folder.id}
+              onDragStart={(pointerY) => {
+                pointerYRef.current = pointerY;
+                setDraggedFolderId(folder.id);
+              }}
+              onDragEnd={finishReorder}
+              onKeyboardMove={(direction) => moveFolderByKeyboard(folder.id, direction)}
             />
           ))
         )}
-      </div>
+      </Reorder.Group>
     </aside>
   );
 }

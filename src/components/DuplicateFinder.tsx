@@ -165,7 +165,7 @@ export function DuplicateFinder() {
     : null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#07080f]">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-gray-950">
       {/* Header */}
       <div className="shrink-0 border-b border-white/[0.05] px-6 py-4">
         <div className="flex items-center justify-between gap-4">
