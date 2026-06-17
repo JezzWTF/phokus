@@ -23,6 +23,13 @@ pub struct ImagesPage {
 }
 
 #[derive(Serialize)]
+pub struct SemanticSearchPage {
+    pub images: Vec<ImageRecord>,
+    pub offset: usize,
+    pub limit: usize,
+    pub has_more: bool,
+}
+
 pub struct SimilarImagesPage {
     pub images: Vec<ImageRecord>,
     pub offset: usize,
@@ -135,6 +142,8 @@ pub struct GenerateCaptionParams {
 
 #[derive(Deserialize)]
 pub struct SemanticSearchParams {
+    pub offset: Option<usize>,
+    pub threshold: Option<f32>,
     pub query: String,
     pub folder_id: Option<i64>,
     pub media_kind: Option<String>,
@@ -517,7 +526,7 @@ pub async fn find_similar_by_region(
             // Fetch one extra candidate to compensate for the source image that
             // will be removed, so has_more is accurate and results span multiple pages.
             let mut ids =
-                vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 2)
+                vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 2, 1.0).map(|matches| matches.into_iter().map(|(id, _)| id).collect::<Vec<_>>())
                     .map_err(|e| e.to_string())?;
             ids.retain(|&id| id != params.image_id);
             ids
@@ -584,33 +593,34 @@ pub async fn retry_failed_embeddings(
 pub async fn semantic_search_images(
     db: State<'_, DbState>,
     params: SemanticSearchParams,
-) -> Result<Vec<ImageRecord>, String> {
-    let embedding = embedder::embed_text_query(&params.query).map_err(|e| e.to_string())?;
+) -> Result<SemanticSearchPage, String> {
+    let mut query = params.query.trim().to_string();
+    if !query.to_lowercase().starts_with("a photo of ") {
+        query = format!("a photo of {}", query);
+    }
+    let embedding = embedder::embed_text_query(&query).map_err(|e| e.to_string())?;
 
     let conn = db.get().map_err(|e| e.to_string())?;
     let limit = params.limit.unwrap_or(64);
+    let offset = params.offset.unwrap_or(0);
+    let threshold = params.threshold.unwrap_or(0.28);
+    let knbn = (offset + limit).max(limit).saturating_add(32); // fetch slightly more to be safe
 
-    let has_filters = params.folder_id.is_some()
-        || params.media_kind.is_some()
-        || params.favorites_only.unwrap_or(false)
-        || params.rating_min.is_some_and(|r| r > 0);
-
-    if !has_filters {
-        // No post-query filtering — a single fetch of exactly `limit` results is optimal.
-        let ids = vector::search_image_ids_by_embedding(&conn, &embedding, limit)
-            .map_err(|e| e.to_string())?;
-        return db::get_images_by_ids(&conn, &ids).map_err(|e| e.to_string());
-    }
-
-    // Post-query filters are active. Progressively double the fetch batch until we
-    // collect enough results or exhaust the vector table, so we never over-fetch
-    // more than necessary while still filling the requested page.
-    let mut batch = limit;
+    // Use loop to fetch in batches like before but filter by threshold and apply offset.
+    let mut batch = knbn;
     loop {
-        let ids = vector::search_image_ids_by_embedding(&conn, &embedding, batch)
+        let matches = vector::search_image_ids_by_embedding(&conn, &embedding, batch, threshold)
             .map_err(|e| e.to_string())?;
-        let exhausted = ids.len() < batch;
+
+        let exhausted = matches.len() < batch;
+
+        // Extract IDs and fetch images
+        let ids = matches.iter().map(|(id, _)| *id).collect::<Vec<_>>();
         let mut images = db::get_images_by_ids(&conn, &ids).map_err(|e| e.to_string())?;
+
+        // In order to keep the ranking order, sort images by matches order since get_images_by_ids might reorder
+        let order_map: std::collections::HashMap<i64, usize> = ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+        images.sort_by_key(|img| order_map.get(&img.id).copied().unwrap_or(usize::MAX));
 
         if let Some(folder_id) = params.folder_id {
             images.retain(|image| image.folder_id == folder_id);
@@ -625,14 +635,28 @@ pub async fn semantic_search_images(
             images.retain(|image| image.rating >= rating_min);
         }
 
-        if images.len() >= limit || exhausted {
-            images.truncate(limit);
-            return Ok(images);
+        let total_valid = images.len();
+        if total_valid >= offset + limit || exhausted {
+            // we have enough or we exhausted the table
+            let has_more = !exhausted && total_valid > offset + limit;
+            let paged_images = images.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
+            return Ok(SemanticSearchPage {
+                images: paged_images,
+                offset,
+                limit,
+                has_more,
+            });
         }
-        // If we are already at the fetch cap, another iteration would fetch the
-        // exact same IDs — break out rather than looping forever.
+
         if batch >= 8192 {
-            return Ok(images);
+            let has_more = false;
+            let paged_images = images.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
+            return Ok(SemanticSearchPage {
+                images: paged_images,
+                offset,
+                limit,
+                has_more,
+            });
         }
         batch = (batch * 2).min(8192);
     }

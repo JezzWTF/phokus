@@ -298,7 +298,8 @@ pub fn search_image_ids_by_embedding(
     conn: &Connection,
     embedding: &[f32],
     limit: usize,
-) -> Result<Vec<i64>> {
+    threshold: f32,
+) -> Result<Vec<(i64, f32)>> {
     if embedding.len() != CLIP_VECTOR_DIM {
         return Err(anyhow!(
             "expected {}-dimensional embedding, got {}",
@@ -309,21 +310,23 @@ pub fn search_image_ids_by_embedding(
 
     let packed = pack_f32(embedding);
     let mut stmt = conn.prepare(
-        "SELECT image_id
+        "SELECT image_id, distance
          FROM image_vec
          WHERE embedding MATCH vec_f32(?1)
            AND k = ?2",
     )?;
-    let rows = stmt.query_map((&packed, limit as i64), |row| row.get::<_, i64>(0))?;
+    let rows = stmt.query_map((&packed, limit as i64), |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, f32>(1)?))
+    })?;
 
-    let mut ids = Vec::new();
+    let mut matches = Vec::new();
     for row in rows {
-        ids.push(row?);
-        if ids.len() >= limit {
-            break;
+        let (id, distance) = row?;
+        if distance <= threshold {
+            matches.push((id, distance));
         }
     }
-    Ok(ids)
+    Ok(matches)
 }
 
 /// Brute-force cosine search scoped to a single folder, ordered by ascending distance.

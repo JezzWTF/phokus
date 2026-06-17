@@ -196,6 +196,13 @@ export interface SimilarImagesPage {
   has_more: boolean;
 }
 
+export interface SemanticSearchPage {
+  images: ImageRecord[];
+  offset: number;
+  limit: number;
+  has_more: boolean;
+}
+
 export interface CaptionModelStatus {
   model_id: string;
   model_name: string;
@@ -295,6 +302,7 @@ interface GalleryState {
   folders: Folder[];
   selectedFolderId: number | null;
   images: ImageRecord[];
+  searchQuery: ParsedSearch | null;
   totalImages: number;
   loadedCount: number;
   loadingImages: boolean;
@@ -680,6 +688,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   folders: [],
   selectedFolderId: null,
   images: [],
+  searchQuery: null,
   totalImages: 0,
   loadedCount: 0,
   loadingImages: false,
@@ -990,6 +999,40 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     const { loadedCount, totalImages, loadingImages, collectionTitle, similarSourceImageId, similarHasMore, similarFolderId, similarCrop } = get();
     if (loadingImages || loadedCount >= totalImages) return;
     if (collectionTitle === "Explore Cluster") return;
+    if (collectionTitle && collectionTitle.startsWith("Semantic search:")) {
+      if (!similarHasMore) return;
+      const parsedSearch = get().searchQuery;
+      if (parsedSearch?.mode !== "semantic" || !parsedSearch.query) return;
+      const requestToken = ++galleryRequestToken;
+      set({ loadingImages: true });
+      try {
+        const result = await invoke<SemanticSearchPage>("semantic_search_images", {
+          params: {
+            query: parsedSearch.query,
+            folder_id: get().selectedFolderId,
+            media_kind: get().mediaFilter === "all" ? null : get().mediaFilter,
+            favorites_only: get().favoritesOnly,
+            rating_min: get().minimumRating > 0 ? get().minimumRating : null,
+            limit: PAGE_SIZE,
+            offset: loadedCount,
+            threshold: 0.28,
+          },
+        });
+        if (requestToken !== galleryRequestToken) return;
+        const newImages = [...get().images, ...result.images];
+        set({
+          images: newImages,
+          loadedCount: newImages.length,
+          totalImages: result.has_more ? newImages.length + 1 : newImages.length,
+          similarHasMore: result.has_more,
+          loadingImages: false,
+        });
+      } catch (error) {
+        set({ loadingImages: false, imageLoadError: String(error) });
+      }
+      return;
+    }
+
     if (collectionTitle === "Similar Images" && similarSourceImageId !== null) {
       if (!similarHasMore) return;
       await get().loadSimilarImages(similarSourceImageId, similarFolderId, false, get().similarSourceFolderId ?? null);
