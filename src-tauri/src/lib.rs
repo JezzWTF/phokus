@@ -162,6 +162,7 @@ pub fn run() {
             commands::get_explore_tags,
             commands::get_images_by_ids,
             commands::get_failed_embedding_images,
+            commands::get_failed_tagging_images,
             commands::get_tagger_model_status,
             commands::get_tagger_acceleration,
             commands::set_tagger_acceleration,

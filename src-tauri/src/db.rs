@@ -324,7 +324,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_images_taken_at ON images(taken_at);")?;
     ensure_column(conn, "folders", "scan_error", "TEXT")?;
     ensure_column(conn, "folders", "sort_order", "INTEGER NOT NULL DEFAULT 0")?;
-    conn.execute("UPDATE folders SET sort_order = id WHERE sort_order = 0", [])?;
+    conn.execute(
+        "UPDATE folders SET sort_order = id WHERE sort_order = 0",
+        [],
+    )?;
 
     vector::migrate(conn)?;
     Ok(())
@@ -1629,6 +1632,7 @@ pub fn get_images(
     favorites_only: bool,
     rating_min: i64,
     embedding_failed_only: bool,
+    tagging_failed_only: bool,
     sort: &str,
     offset: i64,
     limit: i64,
@@ -1652,6 +1656,7 @@ pub fn get_images(
     let search_pattern = search.map(|value| format!("%{value}%"));
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
+    let tagging_failed_flag = i64::from(tagging_failed_only);
     let sql = format!(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, taken_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
@@ -1665,8 +1670,9 @@ pub fn get_images(
            AND (?4 = 0 OR favorite = 1)
            AND rating >= ?5
            AND (?6 = 0 OR embedding_status = 'failed')
+           AND (?7 = 0 OR ai_tagger_error IS NOT NULL)
          ORDER BY {order}
-         LIMIT ?7 OFFSET ?8"
+         LIMIT ?8 OFFSET ?9"
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(
@@ -1677,6 +1683,7 @@ pub fn get_images(
             favorites_flag,
             rating_min,
             embedding_failed_flag,
+            tagging_failed_flag,
             limit,
             offset
         ],
@@ -1693,11 +1700,13 @@ pub fn count_images(
     favorites_only: bool,
     rating_min: i64,
     embedding_failed_only: bool,
+    tagging_failed_only: bool,
 ) -> Result<i64> {
     let search_pattern = search.map(|value| format!("%{value}%"));
 
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
+    let tagging_failed_flag = i64::from(tagging_failed_only);
     let count = conn.query_row(
         "SELECT COUNT(*) FROM images
          WHERE (?1 IS NULL OR folder_id = ?1)
@@ -1705,14 +1714,16 @@ pub fn count_images(
            AND (?3 IS NULL OR media_kind = ?3)
            AND (?4 = 0 OR favorite = 1)
            AND rating >= ?5
-           AND (?6 = 0 OR embedding_status = 'failed')",
+           AND (?6 = 0 OR embedding_status = 'failed')
+           AND (?7 = 0 OR ai_tagger_error IS NOT NULL)",
         params![
             folder_id,
             search_pattern,
             media_kind,
             favorites_flag,
             rating_min,
-            embedding_failed_flag
+            embedding_failed_flag,
+            tagging_failed_flag
         ],
         |row| row.get(0),
     )?;
@@ -1935,6 +1946,30 @@ pub fn get_failed_embedding_images(
          FROM images
          WHERE folder_id = ?1 AND embedding_status = 'failed'
          ORDER BY filename",
+    )?;
+    let rows = stmt.query_map([folder_id], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+        ))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+type FailedTaggingRow = (i64, String, String, Option<String>);
+
+pub fn get_failed_tagging_images(
+    conn: &Connection,
+    folder_id: i64,
+) -> Result<Vec<FailedTaggingRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT i.id, i.filename, i.path, COALESCE(j.last_error, i.ai_tagger_error)
+         FROM images i
+         LEFT JOIN tagging_jobs j ON j.image_id = i.id AND j.status = 'failed'
+         WHERE i.folder_id = ?1 AND i.ai_tagger_error IS NOT NULL
+         ORDER BY i.filename",
     )?;
     let rows = stmt.query_map([folder_id], |row| {
         Ok((

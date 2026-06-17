@@ -309,6 +309,7 @@ interface GalleryState {
   favoritesOnly: boolean;
   minimumRating: number;
   failedEmbeddingsOnly: boolean;
+  failedTaggingOnly: boolean;
   zoomPreset: ZoomPreset;
   selectedImage: ImageRecord | null;
   collectionTitle: string | null;
@@ -403,6 +404,8 @@ interface GalleryState {
   setFavoritesOnly: (favoritesOnly: boolean) => void;
   setMinimumRating: (minimumRating: number) => void;
   setFailedEmbeddingsOnly: (failedEmbeddingsOnly: boolean) => void;
+  setFailedTaggingOnly: (failedTaggingOnly: boolean) => void;
+  showFailedTagging: (folderId: number) => void;
   setZoomPreset: (zoomPreset: ZoomPreset) => void;
   openImage: (image: ImageRecord) => void;
   closeImage: () => void;
@@ -593,6 +596,7 @@ function matchesFilters(
   favoritesOnly: boolean,
   minimumRating: number,
   failedEmbeddingsOnly: boolean,
+  failedTaggingOnly: boolean,
   search: string,
 ): boolean {
   const matchesFolder = selectedFolderId === null || image.folder_id === selectedFolderId;
@@ -600,7 +604,8 @@ function matchesFilters(
   const matchesFavorite = !favoritesOnly || image.favorite;
   const matchesRating = image.rating >= minimumRating;
   const matchesFailedEmbedding = !failedEmbeddingsOnly || image.embedding_status === "failed";
-  return matchesFolder && matchesMedia && matchesFavorite && matchesRating && matchesFailedEmbedding && matchesSearch(image, search);
+  const matchesFailedTagging = !failedTaggingOnly || image.ai_tagger_error !== null;
+  return matchesFolder && matchesMedia && matchesFavorite && matchesRating && matchesFailedEmbedding && matchesFailedTagging && matchesSearch(image, search);
 }
 
 function compareNullableNumber(a: number | null, b: number | null): number {
@@ -710,6 +715,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   favoritesOnly: false,
   minimumRating: 0,
   failedEmbeddingsOnly: false,
+  failedTaggingOnly: false,
   zoomPreset: "comfortable",
   selectedImage: null,
   collectionTitle: null,
@@ -879,7 +885,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   selectFolder: (folderId) => {
-    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, activeView: "gallery", failedEmbeddingsOnly: false, imageLoadError: null });
+    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, activeView: "gallery", failedEmbeddingsOnly: false, failedTaggingOnly: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
@@ -912,7 +918,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   loadImages: async (reset = false) => {
-    const { selectedFolderId, search, sort, loadedCount, mediaFilter, favoritesOnly, minimumRating, failedEmbeddingsOnly, activeView } = get();
+    const { selectedFolderId, search, sort, loadedCount, mediaFilter, favoritesOnly, minimumRating, failedEmbeddingsOnly, failedTaggingOnly, activeView } = get();
     const parsedSearch = parseSearchValue(search);
     const requestToken = ++galleryRequestToken;
     set({ loadingImages: true, imageLoadError: null });
@@ -999,6 +1005,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           favorites_only: favoritesOnly,
           rating_min: minimumRating > 0 ? minimumRating : null,
           embedding_failed_only: failedEmbeddingsOnly,
+          tagging_failed_only: failedTaggingOnly,
           sort,
           offset,
           limit: activeView === "timeline" ? TIMELINE_PAGE_SIZE : PAGE_SIZE,
@@ -1108,7 +1115,35 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   setFailedEmbeddingsOnly: (failedEmbeddingsOnly) => {
-    set({ failedEmbeddingsOnly, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
+    set({ failedEmbeddingsOnly, failedTaggingOnly: failedEmbeddingsOnly ? false : get().failedTaggingOnly, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
+    void get().loadImages(true);
+  },
+
+  setFailedTaggingOnly: (failedTaggingOnly) => {
+    set({ failedTaggingOnly, failedEmbeddingsOnly: failedTaggingOnly ? false : get().failedEmbeddingsOnly, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
+    void get().loadImages(true);
+  },
+
+  showFailedTagging: (folderId) => {
+    set({
+      selectedFolderId: folderId,
+      activeView: "gallery",
+      search: "",
+      mediaFilter: "all",
+      favoritesOnly: false,
+      minimumRating: 0,
+      failedEmbeddingsOnly: false,
+      failedTaggingOnly: true,
+      images: [],
+      loadedCount: 0,
+      collectionTitle: null,
+      similarSourceImageId: null,
+      similarSourceFolderId: null,
+      similarHasMore: false,
+      similarFolderId: null,
+      similarCrop: null,
+      imageLoadError: null,
+    });
     void get().loadImages(true);
   },
 
@@ -2205,6 +2240,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
             state.favoritesOnly,
             state.minimumRating,
             state.failedEmbeddingsOnly,
+            state.failedTaggingOnly,
             state.search,
           ),
         );
@@ -2244,6 +2280,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
             state.favoritesOnly,
             state.minimumRating,
             state.failedEmbeddingsOnly,
+            state.failedTaggingOnly,
             state.search,
           ),
         );

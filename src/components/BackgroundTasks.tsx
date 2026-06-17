@@ -31,11 +31,37 @@ interface Task {
   snapshot: string;
 }
 
-interface FailedEmbeddingItem {
+interface FailedWorkerItem {
   image_id: number;
   filename: string;
   path: string;
   error: string | null;
+}
+
+function FailedWorkerItemRow({ item }: { item: FailedWorkerItem }) {
+  return (
+    <div className="flex min-w-0 items-start gap-1.5">
+      <svg className="mt-px h-2.5 w-2.5 shrink-0 text-amber-500 light-theme:text-amber-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+          d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+      </svg>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[10px] font-medium text-amber-400/80 light-theme:text-amber-700">{item.filename}</p>
+        {item.error && (
+          <p className="truncate text-[9px] text-gray-600">{item.error}</p>
+        )}
+      </div>
+      <button
+        className="shrink-0 text-gray-700 transition-colors hover:text-gray-300 light-theme:text-gray-600 light-theme:hover:text-gray-100"
+        title="Reveal in Explorer"
+        onClick={() => void revealItemInDir(item.path)}
+      >
+        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+        </svg>
+      </button>
+    </div>
+  );
 }
 
 export function BackgroundTasks() {
@@ -44,11 +70,13 @@ export function BackgroundTasks() {
   const mediaJobProgress = useGalleryStore((state) => state.mediaJobProgress);
   const retryFailedEmbeddings = useGalleryStore((state) => state.retryFailedEmbeddings);
   const queueTaggingJobs = useGalleryStore((state) => state.queueTaggingJobs);
+  const showFailedTagging = useGalleryStore((state) => state.showFailedTagging);
   const duplicateScanning = useGalleryStore((state) => state.duplicateScanning);
   const duplicateScanProgress = useGalleryStore((state) => state.duplicateScanProgress);
   const [expanded, setExpanded] = useState(false);
   const [dismissed, setDismissed] = useState<Record<number, string>>({});
-  const [failedItems, setFailedItems] = useState<Record<number, FailedEmbeddingItem[]>>({});
+  const [failedEmbeddingItems, setFailedEmbeddingItems] = useState<Record<number, FailedWorkerItem[]>>({});
+  const [failedTaggingItems, setFailedTaggingItems] = useState<Record<number, FailedWorkerItem[]>>({});
 
   const workerPaused = useGalleryStore((state) => state.workerPaused);
   const loadWorkerStates = useGalleryStore((state) => state.loadWorkerStates);
@@ -58,27 +86,43 @@ export function BackgroundTasks() {
     void loadWorkerStates();
   }, [folders, loadWorkerStates]);
 
-  // Fetch failed embedding filenames whenever the expanded panel opens or failure counts change.
-  const failedCounts = useMemo(
+  // Fetch failed filenames whenever the expanded panel opens or failure counts change.
+  const failedEmbeddingCounts = useMemo(
     () =>
       Object.fromEntries(
         Object.entries(mediaJobProgress).map(([id, p]) => [id, p?.embedding_failed ?? 0]),
       ),
     [mediaJobProgress],
   );
+  const failedTaggingCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(mediaJobProgress).map(([id, p]) => [id, p?.tagging_failed ?? 0]),
+      ),
+    [mediaJobProgress],
+  );
 
   useEffect(() => {
     if (!expanded) return;
-    for (const [folderId, count] of Object.entries(failedCounts)) {
+    for (const [folderId, count] of Object.entries(failedEmbeddingCounts)) {
       if (count > 0) {
-        invoke<FailedEmbeddingItem[]>("get_failed_embedding_images", {
+        invoke<FailedWorkerItem[]>("get_failed_embedding_images", {
           folderId: Number(folderId),
         })
-          .then((items) => setFailedItems((prev) => ({ ...prev, [folderId]: items })))
+          .then((items) => setFailedEmbeddingItems((prev) => ({ ...prev, [folderId]: items })))
           .catch(() => undefined);
       }
     }
-  }, [expanded, failedCounts]);
+    for (const [folderId, count] of Object.entries(failedTaggingCounts)) {
+      if (count > 0) {
+        invoke<FailedWorkerItem[]>("get_failed_tagging_images", {
+          folderId: Number(folderId),
+        })
+          .then((items) => setFailedTaggingItems((prev) => ({ ...prev, [folderId]: items })))
+          .catch(() => undefined);
+      }
+    }
+  }, [expanded, failedEmbeddingCounts, failedTaggingCounts]);
 
   const isWorkerPaused = (folderId: number, worker: WorkerKey) => {
     return workerPaused[folderId]?.[worker] ?? false;
@@ -304,14 +348,14 @@ export function BackgroundTasks() {
                 key={stage.label}
                 className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] shrink-0 ${
                   stage.failed
-                    ? "bg-amber-500/10 text-amber-400"
+                    ? "bg-amber-500/10 text-amber-400 light-theme:border light-theme:border-amber-500/40 light-theme:bg-amber-100 light-theme:text-amber-700"
                     : isPaused
                       ? "bg-white/4 text-gray-600"
                       : "bg-white/5 text-gray-400"
                 }`}
               >
                 <span>{stage.label}</span>
-                <span className={`tabular-nums ${stage.failed ? "text-amber-500" : isPaused ? "text-gray-700" : "text-gray-600"}`}>
+                <span className={`tabular-nums ${stage.failed ? "text-amber-500 light-theme:text-amber-700" : isPaused ? "text-gray-700" : "text-gray-600"}`}>
                   {stage.detail}
                 </span>
                 {workerKey && (
@@ -357,14 +401,27 @@ export function BackgroundTasks() {
           </span>
         )}
 
-        {/* Retry (failed embeddings only) */}
-        {primary.hasFailedEmbeddings && primary.pendingMediaWork === 0 && (
-          <button
-            className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-300 hover:bg-amber-500/20 transition-colors shrink-0"
-            onClick={(e) => { e.stopPropagation(); void retryFailedEmbeddings(primary.id); }}
-          >
-            Retry
-          </button>
+        {primary.pendingMediaWork === 0 && (primary.hasFailedEmbeddings || primary.hasFailedTagging) && (
+          <div className="flex shrink-0 items-center gap-1.5">
+            {primary.hasFailedTagging ? (
+              <button
+                className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-300 transition-colors hover:bg-amber-500/20 light-theme:border-amber-500/50 light-theme:bg-amber-100 light-theme:text-amber-700 light-theme:hover:bg-amber-200"
+                onClick={(e) => { e.stopPropagation(); showFailedTagging(primary.id); }}
+              >
+                Locate
+              </button>
+            ) : null}
+            <button
+              className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-300 transition-colors hover:bg-amber-500/20 light-theme:border-amber-500/50 light-theme:bg-amber-100 light-theme:text-amber-700 light-theme:hover:bg-amber-200"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (primary.hasFailedEmbeddings) void retryFailedEmbeddings(primary.id);
+                if (primary.hasFailedTagging) void queueTaggingJobs(primary.id);
+              }}
+            >
+              Retry
+            </button>
+          </div>
         )}
 
         {/* Expand chevron (only when multiple tasks) */}
@@ -416,7 +473,7 @@ export function BackgroundTasks() {
                           key={stage.label}
                           className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] shrink-0 ${
                             stage.failed
-                              ? "bg-amber-500/10 text-amber-400"
+                              ? "bg-amber-500/10 text-amber-400 light-theme:border light-theme:border-amber-500/40 light-theme:bg-amber-100 light-theme:text-amber-700"
                               : isPaused
                                 ? "bg-white/4 text-gray-600"
                                 : "bg-white/5 text-gray-500"
@@ -428,7 +485,7 @@ export function BackgroundTasks() {
                             </svg>
                           )}
                           <span>{stage.label}</span>
-                          <span className={`tabular-nums ${stage.failed ? "text-amber-500" : "text-gray-600"}`}>
+                          <span className={`tabular-nums ${stage.failed ? "text-amber-500 light-theme:text-amber-700" : "text-gray-600"}`}>
                             {stage.detail}
                           </span>
                           {workerKey && (
@@ -467,15 +524,25 @@ export function BackgroundTasks() {
                   </div>
 
                   {taskHasFailed && (
-                    <button
-                      className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300 hover:bg-amber-500/20 transition-colors shrink-0"
-                      onClick={() => {
-                        if (task.hasFailedEmbeddings) void retryFailedEmbeddings(task.id);
-                        if (task.hasFailedTagging) void queueTaggingJobs(task.id);
-                      }}
-                    >
-                      Retry
-                    </button>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {task.hasFailedTagging ? (
+                        <button
+                          className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300 transition-colors hover:bg-amber-500/20 light-theme:border-amber-500/50 light-theme:bg-amber-100 light-theme:text-amber-700 light-theme:hover:bg-amber-200"
+                          onClick={() => showFailedTagging(task.id)}
+                        >
+                          Locate
+                        </button>
+                      ) : null}
+                      <button
+                        className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300 transition-colors hover:bg-amber-500/20 light-theme:border-amber-500/50 light-theme:bg-amber-100 light-theme:text-amber-700 light-theme:hover:bg-amber-200"
+                        onClick={() => {
+                          if (task.hasFailedEmbeddings) void retryFailedEmbeddings(task.id);
+                          if (task.hasFailedTagging) void queueTaggingJobs(task.id);
+                        }}
+                      >
+                        Retry
+                      </button>
+                    </div>
                   )}
 
                   {task.id >= 0 && (
@@ -497,31 +564,18 @@ export function BackgroundTasks() {
                   </p>
                 )}
 
-                {/* Failed embedding file list */}
-                {taskHasFailed && failedItems[task.id] && failedItems[task.id].length > 0 && (
+                {/* Failed worker file lists */}
+                {taskHasFailed && failedEmbeddingItems[task.id] && failedEmbeddingItems[task.id].length > 0 && (
                   <div className="mt-2 pl-[calc(7rem+0.75rem)] space-y-0.5">
-                    {failedItems[task.id].map((item) => (
-                      <div key={item.image_id} className="flex items-start gap-1.5 min-w-0">
-                        <svg className="h-2.5 w-2.5 text-amber-500 shrink-0 mt-px" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-                            d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                        </svg>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[10px] text-amber-400/80 truncate font-medium">{item.filename}</p>
-                          {item.error && (
-                            <p className="text-[9px] text-gray-600 truncate">{item.error}</p>
-                          )}
-                        </div>
-                        <button
-                          className="shrink-0 text-gray-700 hover:text-gray-300 transition-colors"
-                          title="Reveal in Explorer"
-                          onClick={() => void revealItemInDir(item.path)}
-                        >
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-                          </svg>
-                        </button>
-                      </div>
+                    {failedEmbeddingItems[task.id].map((item) => (
+                      <FailedWorkerItemRow key={item.image_id} item={item} />
+                    ))}
+                  </div>
+                )}
+                {taskHasFailed && failedTaggingItems[task.id] && failedTaggingItems[task.id].length > 0 && (
+                  <div className="mt-2 pl-[calc(7rem+0.75rem)] space-y-0.5">
+                    {failedTaggingItems[task.id].map((item) => (
+                      <FailedWorkerItemRow key={item.image_id} item={item} />
                     ))}
                   </div>
                 )}

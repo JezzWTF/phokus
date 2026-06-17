@@ -88,7 +88,7 @@ export function TitleBar() {
               aria-label={`Update available — click to update to Phokus v${updateVersion}`}
               className="relative flex h-5 w-5 items-center justify-center rounded-md bg-white/8 overflow-hidden text-gray-300 transition-colors hover:bg-white/12"
             >
-              <span className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-400/60 animate-ping" />
+              <span className="pointer-events-none absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-400/60 animate-ping" />
               <PhokusMark className="relative h-4 w-4" dotClassName="fill-amber-400" />
             </button>
             {/* Custom tooltip — fades in ~100ms instead of the native ~500ms delay. */}
