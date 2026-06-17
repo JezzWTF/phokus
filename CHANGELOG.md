@@ -5,6 +5,26 @@ All notable changes to Phokus are documented here. The format is based on
 aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (0.x: anything may change between minor versions).
 
+## [Unreleased]
+
+### Added
+
+- Failed AI-tagging jobs can now be located from the background worker prompt,
+  including a gallery filter for images with failed tags and an expanded list
+  of failed filenames/errors.
+- A new theme system adds Phokus, Subtle Light, and Conventional Dark chrome
+  options across the app.
+- First-run onboarding now includes an inline theme picker so new users can
+  choose their preferred app chrome before continuing the tour.
+
+### Changed
+
+- Polished the new theme surfaces before release, including readable
+  subtle-light secondary buttons, failed-worker action buttons, and onboarding
+  controls.
+- Onboarding preview media keeps the dark gallery/media surface regardless of
+  the active chrome theme.
+
 ## [0.1.0] — 2026-06-14
 
 First public release. Windows desktop, distributed as an unsigned NSIS
