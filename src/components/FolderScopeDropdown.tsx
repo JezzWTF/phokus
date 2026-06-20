@@ -33,10 +33,10 @@ export function FolderScopeDropdown() {
   };
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="feature-scope-dropdown relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`flex max-w-56 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+        className={`feature-scope-trigger flex max-w-56 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors ${
           open
             ? "border-white/15 bg-white/8 text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white"
             : "border-white/8 bg-transparent text-gray-400 hover:border-white/15 hover:text-gray-200 light-theme:border-gray-700/40 light-theme:text-gray-600 light-theme:hover:border-gray-700 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
@@ -55,9 +55,9 @@ export function FolderScopeDropdown() {
         </svg>
       </button>
       {open ? (
-        <div className="absolute right-0 top-full z-30 mt-1.5 max-h-80 min-w-52 overflow-y-auto rounded-xl border border-white/10 bg-gray-950/98 p-1 shadow-2xl backdrop-blur light-theme:border-gray-700/50">
+        <div className="feature-scope-menu absolute right-0 top-full z-30 mt-1.5 max-h-80 min-w-52 overflow-y-auto rounded-xl border border-white/10 bg-gray-950/98 p-1 shadow-2xl backdrop-blur light-theme:border-gray-700/50">
           <button
-            className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+            className={`feature-scope-option flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
               selectedFolderId === null ? "bg-white/6 text-white light-theme:bg-gray-900 light-theme:text-white" : "text-gray-400 hover:bg-white/5 hover:text-white light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
             }`}
             onClick={() => select(null)}
@@ -74,7 +74,7 @@ export function FolderScopeDropdown() {
             return (
               <button
                 key={folder.id}
-                className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                className={`feature-scope-option flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
                   active ? "bg-white/6 text-white light-theme:bg-gray-900 light-theme:text-white" : "text-gray-400 hover:bg-white/5 hover:text-white light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
                 }`}
                 onClick={() => select(folder.id)}
