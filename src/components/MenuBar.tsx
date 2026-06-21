@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { MediaFilter, ZoomPreset, useGalleryStore } from "../store";
 
 type MenuKey = "library" | "view" | "filter";
@@ -72,7 +71,7 @@ const FILTER_OPTIONS: { value: MediaFilter; label: string }[] = [
 export function MenuBar() {
   const [openMenu, setOpenMenu] = useState<MenuKey | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const addFolder = useGalleryStore((state) => state.addFolder);
+  const setFolderPickerOpen = useGalleryStore((state) => state.setFolderPickerOpen);
   const reindexFolder = useGalleryStore((state) => state.reindexFolder);
   const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
   const zoomPreset = useGalleryStore((state) => state.zoomPreset);
@@ -93,11 +92,8 @@ export function MenuBar() {
     return () => window.removeEventListener("pointerdown", handlePointerDown);
   }, []);
 
-  const handleAddFolder = async () => {
-    const selected = await open({ directory: true, multiple: false, title: "Select Media Folder" });
-    if (selected && typeof selected === "string") {
-      await addFolder(selected);
-    }
+  const handleAddFolder = () => {
+    setFolderPickerOpen(true);
     setOpenMenu(null);
   };
 

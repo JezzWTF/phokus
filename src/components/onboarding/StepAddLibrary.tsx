@@ -1,26 +1,12 @@
-import { useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { useGalleryStore } from "../../store";
 import { FakeTile } from "./fakes";
 
 export function StepAddLibrary() {
   const folders = useGalleryStore((s) => s.folders);
-  const addFolder = useGalleryStore((s) => s.addFolder);
-  const [adding, setAdding] = useState(false);
-  const [addError, setAddError] = useState<string | null>(null);
+  const setFolderPickerOpen = useGalleryStore((s) => s.setFolderPickerOpen);
 
-  const handlePick = async () => {
-    setAddError(null);
-    const selected = await open({ directory: true, multiple: false, title: "Select Media Folder" });
-    if (typeof selected !== "string") return;
-    setAdding(true);
-    try {
-      await addFolder(selected);
-    } catch (error) {
-      setAddError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setAdding(false);
-    }
+  const handlePick = () => {
+    setFolderPickerOpen(true);
   };
 
   return (
@@ -49,14 +35,12 @@ export function StepAddLibrary() {
               </p>
             </>
           )}
-          {addError ? <p className="mt-1.5 text-xs text-amber-300/90 light-theme:text-amber-700">{addError}</p> : null}
         </div>
         <button
           className="shrink-0 rounded-md border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-emerald-600/50 light-theme:bg-emerald-100 light-theme:text-emerald-700 light-theme:hover:bg-emerald-200"
-          onClick={() => void handlePick()}
-          disabled={adding}
+          onClick={handlePick}
         >
-          {adding ? "Adding..." : folders.length > 0 ? "Add another folder" : "Choose a folder"}
+          {folders.length > 0 ? "Add another folder" : "Choose a folder"}
         </button>
       </div>
 

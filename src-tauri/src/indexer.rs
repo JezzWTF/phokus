@@ -1288,7 +1288,7 @@ fn max_worker_fetch_size(active_folders: &HashSet<i64>) -> usize {
         .unwrap_or(StorageProfile::Balanced.worker_fetch_size())
 }
 
-fn with_db_write_lock<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
+pub fn with_db_write_lock<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
     let lock = DB_WRITE_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().unwrap();
     operation()

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { DuplicateGroup, useGalleryStore } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
@@ -129,6 +130,17 @@ export function DuplicateFinder() {
 
   const [deleting, setDeleting] = useState(false);
   const [deleteResult, setDeleteResult] = useState<string | null>(null);
+
+  // Virtualize the group list so a large result set (e.g. thousands of pairs)
+  // only mounts the on-screen cards. Group cards vary in height (number of
+  // copies wraps across rows), so heights are measured dynamically.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: duplicateGroups.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 220,
+    overscan: 4,
+  });
 
   const selectedCount = duplicateSelectedIds.size;
   const hasResults = duplicateGroups.length > 0;
@@ -277,11 +289,29 @@ export function DuplicateFinder() {
           <p className="text-sm text-white/25">No duplicate files found.</p>
         </div>
       ) : (
-        <div className="overflow-y-auto px-6 py-5">
-          <div className="space-y-4">
-            {duplicateGroups.map((group) => (
-              <DuplicateGroupCard key={group.file_hash} group={group} />
-            ))}
+        <div ref={scrollRef} className="overflow-y-auto px-6 py-5">
+          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+            {virtualizer.getVirtualItems().map((virtualItem) => {
+              const group = duplicateGroups[virtualItem.index];
+              if (!group) return null;
+              return (
+                <div
+                  key={group.file_hash}
+                  data-index={virtualItem.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualItem.start}px)`,
+                    paddingBottom: 16,
+                  }}
+                >
+                  <DuplicateGroupCard group={group} />
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

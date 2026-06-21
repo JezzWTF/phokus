@@ -12,6 +12,8 @@ import { notifyTaskComplete } from "./notifications";
 const notificationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const NOTIFICATION_DEBOUNCE_MS = 6000;
 const THEME_KEY = "phokus-theme";
+const LIGHTBOX_AUTOPLAY_KEY = "phokus.lightboxAutoplay";
+const LIGHTBOX_AUTO_MUTE_KEY = "phokus.lightboxAutoMute";
 
 export interface Folder {
   id: number;
@@ -22,6 +24,23 @@ export interface Folder {
   scan_error: string | null;
   sort_order: number;
 }
+
+export interface DirEntry {
+  name: string;
+  path: string;
+  has_children: boolean;
+}
+
+export interface DirListing {
+  current: string | null;
+  parent: string | null;
+  entries: DirEntry[];
+}
+
+export type FolderAddResult =
+  | { status: "added"; data: Folder }
+  | { status: "skipped"; data: string }
+  | { status: "error"; data: string };
 
 export type MediaKind = "image" | "video";
 export type MediaFilter = "all" | MediaKind;
@@ -341,11 +360,14 @@ interface GalleryState {
   captionDetail: CaptionDetail;
   aiCaptionsEnabled: boolean;
   settingsOpen: boolean;
+  folderPickerOpen: boolean;
   taggingQueueScope: TaggingQueueScope;
   taggingQueueFolderIds: number[];
   mutedFolderIds: number[];
   notificationsPaused: boolean;
   theme: AppTheme;
+  lightboxAutoplay: boolean;
+  lightboxAutoMute: boolean;
   // Per-folder background-worker pause flags, shared by the BackgroundTasks
   // bar and the sidebar folder context menu.
   workerPaused: Record<number, Record<WorkerKey, boolean>>;
@@ -386,6 +408,8 @@ interface GalleryState {
   loadFolders: () => Promise<void>;
   loadBackgroundJobProgress: () => Promise<void>;
   addFolder: (path: string) => Promise<void>;
+  addFolders: (paths: string[]) => Promise<FolderAddResult[]>;
+  listDirectories: (path: string | null) => Promise<DirListing>;
   removeFolder: (folderId: number) => Promise<void>;
   reindexFolder: (folderId: number) => Promise<void>;
   renameFolder: (folderId: number, newName: string) => Promise<void>;
@@ -435,6 +459,7 @@ interface GalleryState {
   setCaptionDetail: (detail: CaptionDetail) => Promise<void>;
   setAiCaptionsEnabled: (enabled: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  setFolderPickerOpen: (open: boolean) => void;
   loadTaggingQueueScope: () => Promise<void>;
   setTaggingQueueScope: (scope: TaggingQueueScope) => void;
   loadTaggingQueueFolderIds: () => Promise<void>;
@@ -445,6 +470,8 @@ interface GalleryState {
   loadNotificationsPaused: () => Promise<void>;
   setNotificationsPaused: (paused: boolean) => void;
   setTheme: (theme: AppTheme) => void;
+  setLightboxAutoplay: (enabled: boolean) => void;
+  setLightboxAutoMute: (enabled: boolean) => void;
   loadWorkerStates: () => Promise<void>;
   setWorkerPaused: (folderId: number, worker: WorkerKey, paused: boolean) => void;
   setAllWorkersPaused: (folderId: number, paused: boolean) => void;
@@ -461,6 +488,7 @@ interface GalleryState {
   openAppDataFolder: () => Promise<void>;
   getDatabaseInfo: () => Promise<DatabaseInfo>;
   vacuumDatabase: () => Promise<VacuumResult>;
+  rebuildSemanticIndex: () => Promise<number>;
   getOrphanedThumbnailsInfo: () => Promise<OrphanedThumbnailsInfo>;
   cleanupOrphanedThumbnails: () => Promise<CleanupOrphanedThumbnailsResult>;
   retryFailedEmbeddings: (folderId: number) => Promise<void>;
@@ -513,6 +541,12 @@ let exploreTagRequestToken = 0;
 function initialAiCaptionsEnabled(): boolean {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(AI_CAPTIONS_ENABLED_KEY) === "true";
+}
+
+function initialBoolSetting(key: string, fallback: boolean): boolean {
+  if (typeof window === "undefined") return fallback;
+  const stored = window.localStorage.getItem(key);
+  return stored === null ? fallback : stored === "true";
 }
 
 function initialTheme(): AppTheme {
@@ -760,11 +794,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   captionDetail: "paragraph",
   aiCaptionsEnabled: initialAiCaptionsEnabled(),
   settingsOpen: false,
+  folderPickerOpen: false,
   taggingQueueScope: "all",
   taggingQueueFolderIds: [],
   mutedFolderIds: [],
   notificationsPaused: false,
   theme: initialTheme(),
+  lightboxAutoplay: initialBoolSetting(LIGHTBOX_AUTOPLAY_KEY, true),
+  lightboxAutoMute: initialBoolSetting(LIGHTBOX_AUTO_MUTE_KEY, false),
   workerPaused: {},
 
   appVersion: null,
@@ -832,6 +869,16 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     await loadFolders();
     await loadBackgroundJobProgress();
   },
+
+  addFolders: async (paths) => {
+    const { loadFolders, loadBackgroundJobProgress } = get();
+    const results = await invoke<FolderAddResult[]>("add_folders", { paths });
+    await loadFolders();
+    await loadBackgroundJobProgress();
+    return results;
+  },
+
+  listDirectories: (path) => invoke<DirListing>("list_directories", { path }),
 
   removeFolder: async (folderId) => {
     const { selectedFolderId, loadFolders, loadImages, loadBackgroundJobProgress } = get();
@@ -1565,6 +1612,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setFolderPickerOpen: (folderPickerOpen) => set({ folderPickerOpen }),
 
   loadTaggingQueueScope: async () => {
     try {
@@ -1647,6 +1695,16 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     window.localStorage.setItem(THEME_KEY, theme);
     document.documentElement.dataset.theme = theme;
     set({ theme });
+  },
+
+  setLightboxAutoplay: (enabled) => {
+    window.localStorage.setItem(LIGHTBOX_AUTOPLAY_KEY, String(enabled));
+    set({ lightboxAutoplay: enabled });
+  },
+
+  setLightboxAutoMute: (enabled) => {
+    window.localStorage.setItem(LIGHTBOX_AUTO_MUTE_KEY, String(enabled));
+    set({ lightboxAutoMute: enabled });
   },
 
   loadWorkerStates: async () => {
@@ -1833,6 +1891,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   getDatabaseInfo: () => invoke<DatabaseInfo>("get_database_info"),
 
   vacuumDatabase: () => invoke<VacuumResult>("vacuum_database"),
+
+  rebuildSemanticIndex: () => invoke<number>("rebuild_semantic_index"),
 
   getOrphanedThumbnailsInfo: () => invoke<OrphanedThumbnailsInfo>("get_orphaned_thumbnails_info"),
 

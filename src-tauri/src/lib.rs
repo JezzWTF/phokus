@@ -128,6 +128,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::add_folder,
+            commands::add_folders,
+            commands::list_directories,
             commands::get_folders,
             commands::reorder_folders,
             commands::get_background_job_progress,
@@ -192,6 +194,7 @@ pub fn run() {
             commands::open_app_data_folder,
             commands::get_database_info,
             commands::vacuum_database,
+            commands::rebuild_semantic_index,
             commands::get_orphaned_thumbnails_info,
             commands::cleanup_orphaned_thumbnails,
             commands::get_muted_folder_ids,

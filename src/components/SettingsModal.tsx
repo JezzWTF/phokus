@@ -6,8 +6,8 @@ import { ThemedDropdown } from "./ThemedDropdown";
 type SettingsSection = "workspace" | "general";
 
 const SECTIONS: { id: SettingsSection; label: string; detail: string }[] = [
-  { id: "workspace", label: "AI Workspace", detail: "Tagging models and queue targets" },
   { id: "general", label: "General", detail: "App data and diagnostics" },
+  { id: "workspace", label: "AI Workspace", detail: "Tagging models and queue targets" },
 ];
 
 function formatBytesShort(bytes: number): string {
@@ -122,7 +122,7 @@ function TaggerAccelerationButton({ acceleration, current, onSelect, children }:
 }
 
 export function SettingsModal() {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("workspace");
+  const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [taggerQueueStatus, setTaggerQueueStatus] = useState<string | null>(null);
   const [taggerQueueing, setTaggerQueueing] = useState(false);
   const [taggerClearing, setTaggerClearing] = useState(false);
@@ -138,6 +138,8 @@ export function SettingsModal() {
   const [dbInfo, setDbInfo] = useState<DatabaseInfo | null>(null);
   const [vacuuming, setVacuuming] = useState(false);
   const [vacuumResult, setVacuumResult] = useState<VacuumResult | null>(null);
+  const [rebuildingIndex, setRebuildingIndex] = useState(false);
+  const [rebuildIndexResult, setRebuildIndexResult] = useState<string | null>(null);
   const [thumbnailInfo, setThumbnailInfo] = useState<OrphanedThumbnailsInfo | null>(null);
   const [cleaningThumbnails, setCleaningThumbnails] = useState(false);
   const [thumbnailCleanupResult, setThumbnailCleanupResult] = useState<CleanupOrphanedThumbnailsResult | null>(null);
@@ -184,6 +186,7 @@ export function SettingsModal() {
   const setNotificationsPaused = useGalleryStore((state) => state.setNotificationsPaused);
   const getDatabaseInfo = useGalleryStore((state) => state.getDatabaseInfo);
   const vacuumDatabase = useGalleryStore((state) => state.vacuumDatabase);
+  const rebuildSemanticIndex = useGalleryStore((state) => state.rebuildSemanticIndex);
   const getOrphanedThumbnailsInfo = useGalleryStore((state) => state.getOrphanedThumbnailsInfo);
   const cleanupOrphanedThumbnails = useGalleryStore((state) => state.cleanupOrphanedThumbnails);
   const appVersion = useGalleryStore((state) => state.appVersion);
@@ -195,6 +198,10 @@ export function SettingsModal() {
   const openOnboarding = useGalleryStore((state) => state.openOnboarding);
   const theme = useGalleryStore((state) => state.theme);
   const setTheme = useGalleryStore((state) => state.setTheme);
+  const lightboxAutoplay = useGalleryStore((state) => state.lightboxAutoplay);
+  const setLightboxAutoplay = useGalleryStore((state) => state.setLightboxAutoplay);
+  const lightboxAutoMute = useGalleryStore((state) => state.lightboxAutoMute);
+  const setLightboxAutoMute = useGalleryStore((state) => state.setLightboxAutoMute);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -618,6 +625,35 @@ export function SettingsModal() {
                   </SettingsItem>
                 </SettingsGroup>
 
+                <SettingsGroup title="Video playback">
+                  <SettingsItem
+                    label="Autoplay in lightbox"
+                    description="Start playing videos automatically when opened in the lightbox."
+                  >
+                    <button
+                      role="switch"
+                      aria-checked={lightboxAutoplay}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${lightboxAutoplay ? "bg-sky-500" : "bg-white/15"}`}
+                      onClick={() => setLightboxAutoplay(!lightboxAutoplay)}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${lightboxAutoplay ? "translate-x-4" : "translate-x-0"}`} />
+                    </button>
+                  </SettingsItem>
+                  <SettingsItem
+                    label="Start muted"
+                    description="Open videos with their audio muted — unmute from the player controls."
+                  >
+                    <button
+                      role="switch"
+                      aria-checked={lightboxAutoMute}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${lightboxAutoMute ? "bg-sky-500" : "bg-white/15"}`}
+                      onClick={() => setLightboxAutoMute(!lightboxAutoMute)}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${lightboxAutoMute ? "translate-x-4" : "translate-x-0"}`} />
+                    </button>
+                  </SettingsItem>
+                </SettingsGroup>
+
                 <SettingsGroup title="Updates">
                   <SettingsItem
                     label={
@@ -763,6 +799,42 @@ export function SettingsModal() {
                       disabled={vacuuming || (dbInfo !== null && dbInfo.reclaimable_mb < 0.5)}
                     >
                       {vacuuming ? "Compacting..." : "Compact now"}
+                    </button>
+                  </SettingsItem>
+
+                  <SettingsItem
+                    label="Rebuild semantic index"
+                    description={
+                      <>
+                        <span>
+                          Recreates the visual-embedding index and re-embeds every image in the
+                          background. Use this if semantic or similar-image search reports a
+                          dimension-mismatch error (for example after experimenting with a
+                          different embedding model).
+                        </span>
+                        {rebuildIndexResult !== null ? (
+                          <span className="mt-2 block text-gray-600">{rebuildIndexResult}</span>
+                        ) : null}
+                      </>
+                    }
+                  >
+                    <button
+                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
+                      onClick={() => {
+                        setRebuildingIndex(true);
+                        setRebuildIndexResult(null);
+                        void rebuildSemanticIndex()
+                          .then((count) =>
+                            setRebuildIndexResult(
+                              `Re-queued ${count.toLocaleString()} image${count === 1 ? "" : "s"} for embedding.`,
+                            ),
+                          )
+                          .catch((error) => setRebuildIndexResult(String(error)))
+                          .finally(() => setRebuildingIndex(false));
+                      }}
+                      disabled={rebuildingIndex}
+                    >
+                      {rebuildingIndex ? "Rebuilding…" : "Rebuild index"}
                     </button>
                   </SettingsItem>
 

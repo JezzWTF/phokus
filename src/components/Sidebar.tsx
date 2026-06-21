@@ -342,7 +342,7 @@ function FolderItem({
 export function Sidebar() {
   const folders = useGalleryStore((state) => state.folders);
   const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
-  const addFolder = useGalleryStore((state) => state.addFolder);
+  const setFolderPickerOpen = useGalleryStore((state) => state.setFolderPickerOpen);
   const indexingProgress = useGalleryStore((state) => state.indexingProgress);
   const selectFolder = useGalleryStore((state) => state.selectFolder);
   const activeView = useGalleryStore((state) => state.activeView);
@@ -459,11 +459,8 @@ export function Sidebar() {
     }, 400);
   };
 
-  const handleAddFolder = async () => {
-    const selected = await open({ directory: true, multiple: false, title: "Select Media Folder" });
-    if (selected && typeof selected === "string") {
-      await addFolder(selected);
-    }
+  const handleAddFolder = () => {
+    setFolderPickerOpen(true);
   };
 
   return (

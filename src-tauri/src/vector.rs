@@ -36,6 +36,18 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Drop and recreate the vector tables at the current `CLIP_VECTOR_DIM`. Used by
+/// the "Rebuild semantic index" maintenance action when stored vectors no longer
+/// match the active model's dimension (e.g. after switching embedding models),
+/// so the columns are rebuilt to the right size before embeddings regenerate.
+pub fn rebuild_tables(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS image_vec;
+         DROP TABLE IF EXISTS caption_vec;",
+    )?;
+    migrate(conn)
+}
+
 #[allow(dead_code)]
 pub fn delete_embedding(conn: &Connection, image_id: i64) -> Result<()> {
     conn.execute("DELETE FROM image_vec WHERE image_id = ?1", [image_id])?;
