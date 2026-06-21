@@ -496,6 +496,41 @@ pub fn repair_embedding_consistency(conn: &Connection) -> Result<(usize, usize)>
     Ok((orphaned_vectors, missing_vector_ids.len()))
 }
 
+/// Full semantic-index rebuild: recreate the vector tables at the current model
+/// dimension and re-queue every image for embedding. Used by the maintenance
+/// action when the index is stale or its dimension no longer matches the model
+/// (which otherwise surfaces as a "dimension mismatch" search error). Returns the
+/// number of images re-queued.
+pub fn reset_all_embeddings(conn: &Connection) -> Result<usize> {
+    // Recreate the vector tables at the current model dimension first (DDL, kept
+    // out of the transaction below). The caller holds the DB write lock, so the
+    // embedding worker can't interleave a write between this and the queue reset.
+    vector::rebuild_tables(conn)?;
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "UPDATE images
+         SET embedding_status = 'pending',
+             embedding_model = NULL,
+             embedding_updated_at = NULL,
+             embedding_error = NULL",
+        [],
+    )?;
+    tx.execute("DELETE FROM embedding_jobs", [])?;
+    let queued = tx.execute(
+        "INSERT INTO embedding_jobs (image_id, status, attempts, last_error, created_at, updated_at)
+         SELECT id, 'pending', 0, NULL, datetime('now'), datetime('now')
+         FROM images",
+        [],
+    )?;
+    tx.execute(
+        "INSERT INTO app_kv (key, value) VALUES ('embedding_revision', 1)
+         ON CONFLICT(key) DO UPDATE SET value = value + 1",
+        [],
+    )?;
+    tx.commit()?;
+    Ok(queued)
+}
+
 pub fn retry_failed_embedding_jobs(conn: &Connection, folder_id: i64) -> Result<usize> {
     // Only re-queue images that are actually embeddable right now.
     // Videos without a thumbnail would just fail again immediately, so skip them —

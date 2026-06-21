@@ -1987,6 +1987,14 @@ pub async fn vacuum_database(
     })
 }
 
+#[tauri::command]
+pub async fn rebuild_semantic_index(db: State<'_, DbState>) -> Result<usize, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    // Serialize against the embedding worker (which writes under the same lock)
+    // so the rebuild can't interleave with an in-flight embedding batch.
+    indexer::with_db_write_lock(|| db::reset_all_embeddings(&conn)).map_err(|e| e.to_string())
+}
+
 #[derive(serde::Serialize)]
 pub struct OrphanedThumbnailsInfo {
     pub count: u64,

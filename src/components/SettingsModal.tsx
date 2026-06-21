@@ -138,6 +138,8 @@ export function SettingsModal() {
   const [dbInfo, setDbInfo] = useState<DatabaseInfo | null>(null);
   const [vacuuming, setVacuuming] = useState(false);
   const [vacuumResult, setVacuumResult] = useState<VacuumResult | null>(null);
+  const [rebuildingIndex, setRebuildingIndex] = useState(false);
+  const [rebuildIndexResult, setRebuildIndexResult] = useState<string | null>(null);
   const [thumbnailInfo, setThumbnailInfo] = useState<OrphanedThumbnailsInfo | null>(null);
   const [cleaningThumbnails, setCleaningThumbnails] = useState(false);
   const [thumbnailCleanupResult, setThumbnailCleanupResult] = useState<CleanupOrphanedThumbnailsResult | null>(null);
@@ -184,6 +186,7 @@ export function SettingsModal() {
   const setNotificationsPaused = useGalleryStore((state) => state.setNotificationsPaused);
   const getDatabaseInfo = useGalleryStore((state) => state.getDatabaseInfo);
   const vacuumDatabase = useGalleryStore((state) => state.vacuumDatabase);
+  const rebuildSemanticIndex = useGalleryStore((state) => state.rebuildSemanticIndex);
   const getOrphanedThumbnailsInfo = useGalleryStore((state) => state.getOrphanedThumbnailsInfo);
   const cleanupOrphanedThumbnails = useGalleryStore((state) => state.cleanupOrphanedThumbnails);
   const appVersion = useGalleryStore((state) => state.appVersion);
@@ -796,6 +799,42 @@ export function SettingsModal() {
                       disabled={vacuuming || (dbInfo !== null && dbInfo.reclaimable_mb < 0.5)}
                     >
                       {vacuuming ? "Compacting..." : "Compact now"}
+                    </button>
+                  </SettingsItem>
+
+                  <SettingsItem
+                    label="Rebuild semantic index"
+                    description={
+                      <>
+                        <span>
+                          Recreates the visual-embedding index and re-embeds every image in the
+                          background. Use this if semantic or similar-image search reports a
+                          dimension-mismatch error (for example after experimenting with a
+                          different embedding model).
+                        </span>
+                        {rebuildIndexResult !== null ? (
+                          <span className="mt-2 block text-gray-600">{rebuildIndexResult}</span>
+                        ) : null}
+                      </>
+                    }
+                  >
+                    <button
+                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
+                      onClick={() => {
+                        setRebuildingIndex(true);
+                        setRebuildIndexResult(null);
+                        void rebuildSemanticIndex()
+                          .then((count) =>
+                            setRebuildIndexResult(
+                              `Re-queued ${count.toLocaleString()} image${count === 1 ? "" : "s"} for embedding.`,
+                            ),
+                          )
+                          .catch((error) => setRebuildIndexResult(String(error)))
+                          .finally(() => setRebuildingIndex(false));
+                      }}
+                      disabled={rebuildingIndex}
+                    >
+                      {rebuildingIndex ? "Rebuilding…" : "Rebuild index"}
                     </button>
                   </SettingsItem>
 

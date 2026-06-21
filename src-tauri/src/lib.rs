@@ -192,6 +192,7 @@ pub fn run() {
             commands::open_app_data_folder,
             commands::get_database_info,
             commands::vacuum_database,
+            commands::rebuild_semantic_index,
             commands::get_orphaned_thumbnails_info,
             commands::cleanup_orphaned_thumbnails,
             commands::get_muted_folder_ids,

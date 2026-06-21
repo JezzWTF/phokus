@@ -467,6 +467,7 @@ interface GalleryState {
   openAppDataFolder: () => Promise<void>;
   getDatabaseInfo: () => Promise<DatabaseInfo>;
   vacuumDatabase: () => Promise<VacuumResult>;
+  rebuildSemanticIndex: () => Promise<number>;
   getOrphanedThumbnailsInfo: () => Promise<OrphanedThumbnailsInfo>;
   cleanupOrphanedThumbnails: () => Promise<CleanupOrphanedThumbnailsResult>;
   retryFailedEmbeddings: (folderId: number) => Promise<void>;
@@ -1857,6 +1858,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   getDatabaseInfo: () => invoke<DatabaseInfo>("get_database_info"),
 
   vacuumDatabase: () => invoke<VacuumResult>("vacuum_database"),
+
+  rebuildSemanticIndex: () => invoke<number>("rebuild_semantic_index"),
 
   getOrphanedThumbnailsInfo: () => invoke<OrphanedThumbnailsInfo>("get_orphaned_thumbnails_info"),
 
