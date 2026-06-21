@@ -45,9 +45,10 @@ pub static TAGGER_SESSION_DIRTY: AtomicBool = AtomicBool::new(false);
 // Settings types
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TaggerAcceleration {
+    #[default]
     Auto,
     Cpu,
     Directml,
@@ -60,12 +61,6 @@ impl TaggerAcceleration {
             Self::Cpu => "cpu",
             Self::Directml => "directml",
         }
-    }
-}
-
-impl Default for TaggerAcceleration {
-    fn default() -> Self {
-        Self::Auto
     }
 }
 

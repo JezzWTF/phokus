@@ -885,7 +885,7 @@ fn process_embedding_batch(
     // image_id -> early error message for jobs that cannot be embedded yet
     let mut pre_failed: HashMap<i64, String> = HashMap::new();
 
-    for (i, (job, result)) in jobs.iter().zip(source_results.into_iter()).enumerate() {
+    for (i, (job, result)) in jobs.iter().zip(source_results).enumerate() {
         match result {
             Ok(path) => {
                 embeddable_indices.push(i);
@@ -907,16 +907,13 @@ fn process_embedding_batch(
 
         match embedder.embed_images(&embeddable_paths) {
             Ok(embeddings) => {
-                for (job, embedding) in embeddable_jobs.iter().zip(embeddings.into_iter()) {
+                for (job, embedding) in embeddable_jobs.iter().zip(embeddings) {
                     embed_results.insert(job.image_id, Ok(embedding));
                 }
             }
             Err(batch_error) => {
                 log::error!("Embedding batch fallback to per-image mode: {batch_error}");
-                for (job, source_path) in embeddable_jobs
-                    .into_iter()
-                    .zip(embeddable_paths.into_iter())
-                {
+                for (job, source_path) in embeddable_jobs.into_iter().zip(embeddable_paths) {
                     embed_results.insert(job.image_id, embedder.embed_image(&source_path));
                 }
             }

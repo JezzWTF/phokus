@@ -437,7 +437,7 @@ fn list_roots() -> Vec<DirEntry> {
             })
         })
         .collect();
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    entries.sort_by_key(|entry| entry.name.to_lowercase());
     entries
 }
 
@@ -468,7 +468,7 @@ fn list_child_directories(path: &Path) -> Result<Vec<DirEntry>, String> {
         });
     }
 
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    entries.sort_by_key(|entry| entry.name.to_lowercase());
     Ok(entries)
 }
 
@@ -1352,7 +1352,7 @@ pub async fn find_duplicates(
                         }
                     };
                     let done = stat_counter.fetch_add(1, Ordering::Relaxed) + 1;
-                    if done % 100 == 0 || done == total {
+                    if done.is_multiple_of(100) || done == total {
                         let _ = app_hash.emit(
                             "duplicate_scan_progress",
                             DuplicateScanProgress {
@@ -1413,7 +1413,7 @@ pub async fn find_duplicates(
                         hash_skipped.fetch_add(1, Ordering::Relaxed);
                     }
                     let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
-                    if done % 100 == 0 || done == c_total {
+                    if done.is_multiple_of(100) || done == c_total {
                         let _ = app_hash.emit(
                             "duplicate_scan_progress",
                             DuplicateScanProgress {
@@ -1502,7 +1502,7 @@ pub async fn find_duplicates(
                                 confirm_skipped.fetch_add(1, Ordering::Relaxed);
                             }
                             let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
-                            if done % 100 == 0 || done == confirming_total {
+                            if done.is_multiple_of(100) || done == confirming_total {
                                 let _ = app_confirm.emit(
                                     "duplicate_scan_progress",
                                     DuplicateScanProgress {
@@ -1555,7 +1555,7 @@ pub async fn find_duplicates(
         .collect();
 
     // Largest duplicates first — wastes the most space
-    groups.sort_by(|a, b| b.file_size.cmp(&a.file_size));
+    groups.sort_by_key(|group| std::cmp::Reverse(group.file_size));
 
     // Persist results so they survive restart — best-effort, ignore errors.
     let folder_scope = match folder_id {

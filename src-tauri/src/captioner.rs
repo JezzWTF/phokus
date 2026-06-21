@@ -78,9 +78,10 @@ static ORT_RUNTIME_INIT: Mutex<bool> = Mutex::new(false);
 /// knows to drop its cached `FlorenceCaptioner` and reload with the new EP.
 pub static CAPTION_SESSION_DIRTY: AtomicBool = AtomicBool::new(false);
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CaptionAcceleration {
+    #[default]
     Auto,
     Cpu,
     Directml,
@@ -96,17 +97,12 @@ impl CaptionAcceleration {
     }
 }
 
-impl Default for CaptionAcceleration {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CaptionDetail {
     Short,
     Detailed,
+    #[default]
     Paragraph,
 }
 
@@ -133,12 +129,6 @@ impl CaptionDetail {
             Self::Detailed => 56,
             Self::Paragraph => 96,
         }
-    }
-}
-
-impl Default for CaptionDetail {
-    fn default() -> Self {
-        Self::Paragraph
     }
 }
 
