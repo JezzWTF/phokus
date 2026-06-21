@@ -358,6 +358,14 @@ export function Sidebar() {
   const customFoldersRef = useRef(folders);
   const pointerYRef = useRef(0);
   const autoScrollFrameRef = useRef<number | null>(null);
+  const keyboardPersistRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (keyboardPersistRef.current) clearTimeout(keyboardPersistRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (draggedFolderId !== null) return;
@@ -442,7 +450,13 @@ export function Sidebar() {
     [next[currentIndex], next[nextIndex]] = [next[nextIndex], next[currentIndex]];
     customFoldersRef.current = next;
     setCustomFolders(next);
-    void reorderFolders(next.map((folder) => folder.id));
+    // Debounce the DB write so a held arrow key doesn't fire one per keystroke;
+    // the local order updates immediately, only the persist waits to settle.
+    if (keyboardPersistRef.current) clearTimeout(keyboardPersistRef.current);
+    keyboardPersistRef.current = setTimeout(() => {
+      keyboardPersistRef.current = null;
+      void reorderFolders(customFoldersRef.current.map((folder) => folder.id));
+    }, 400);
   };
 
   const handleAddFolder = async () => {
