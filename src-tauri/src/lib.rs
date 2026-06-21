@@ -128,6 +128,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::add_folder,
+            commands::add_folders,
+            commands::list_directories,
             commands::get_folders,
             commands::reorder_folders,
             commands::get_background_job_progress,

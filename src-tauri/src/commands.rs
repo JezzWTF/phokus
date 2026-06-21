@@ -9,7 +9,8 @@ use crate::indexer::{self, WatcherHandle};
 use crate::tagger::{self, TaggerAcceleration, TaggerModelStatus, TaggerRuntimeProbe};
 use crate::vector;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub type DbState = DbPool;
@@ -215,17 +216,61 @@ pub struct GetImagesByIdsParams {
     pub image_ids: Vec<i64>,
 }
 
-#[tauri::command]
-pub async fn add_folder(
+#[derive(Serialize)]
+#[serde(tag = "status", content = "data", rename_all = "camelCase")]
+pub enum FolderAddResult {
+    Added(Folder),
+    Skipped(String),
+    Error(String),
+}
+
+enum AddOutcome {
+    Added(Folder),
+    Skipped(Folder),
+}
+
+fn paths_match(left: &str, right: &str) -> bool {
+    let left_path = PathBuf::from(left);
+    let right_path = PathBuf::from(right);
+    if let (Ok(left_canonical), Ok(right_canonical)) =
+        (left_path.canonicalize(), right_path.canonicalize())
+    {
+        return left_canonical == right_canonical;
+    }
+
+    #[cfg(windows)]
+    {
+        left.trim_end_matches(['\\', '/'])
+            .eq_ignore_ascii_case(right.trim_end_matches(['\\', '/']))
+    }
+
+    #[cfg(not(windows))]
+    {
+        left.trim_end_matches('/').eq(right.trim_end_matches('/'))
+    }
+}
+
+fn add_one_folder(
     app: AppHandle,
-    db: State<'_, DbState>,
-    watcher: State<'_, WatcherHandle>,
+    db: DbPool,
+    watcher: WatcherHandle,
     path: String,
-) -> Result<Folder, String> {
+) -> Result<AddOutcome, String> {
     let folder_path = PathBuf::from(&path);
 
     if !folder_path.exists() || !folder_path.is_dir() {
         return Err("Path is not a valid directory".into());
+    }
+
+    {
+        let conn = db.get().map_err(|e| e.to_string())?;
+        if let Some(folder) = db::get_folders(&conn)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|folder| paths_match(&folder.path, &path))
+        {
+            return Ok(AddOutcome::Skipped(folder));
+        }
     }
 
     // Let the webview load media from this folder via the asset protocol.
@@ -257,15 +302,186 @@ pub async fn add_folder(
         .ok_or("Folder not found after insert")?;
 
     watcher.add_folder(folder_path.clone(), folder_id);
-    indexer::index_folder(app, db.inner().clone(), folder_id, folder_path);
+    indexer::index_folder(app, db, folder_id, folder_path);
 
-    Ok(folder)
+    Ok(AddOutcome::Added(folder))
+}
+
+#[tauri::command]
+pub async fn add_folder(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    watcher: State<'_, WatcherHandle>,
+    path: String,
+) -> Result<Folder, String> {
+    match add_one_folder(app, db.inner().clone(), watcher.inner().clone(), path)? {
+        AddOutcome::Added(folder) => Ok(folder),
+        AddOutcome::Skipped(folder) => Ok(folder),
+    }
+}
+
+#[tauri::command]
+pub async fn add_folders(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    watcher: State<'_, WatcherHandle>,
+    paths: Vec<String>,
+) -> Result<Vec<FolderAddResult>, String> {
+    Ok(paths
+        .into_iter()
+        .map(|path| {
+            match add_one_folder(app.clone(), db.inner().clone(), watcher.inner().clone(), path) {
+                Ok(AddOutcome::Added(folder)) => FolderAddResult::Added(folder),
+                Ok(AddOutcome::Skipped(folder)) => FolderAddResult::Skipped(folder.path),
+                Err(error) => FolderAddResult::Error(error),
+            }
+        })
+        .collect())
 }
 
 #[tauri::command]
 pub async fn get_folders(db: State<'_, DbState>) -> Result<Vec<Folder>, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     db::get_folders(&conn).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+pub struct DirListing {
+    pub current: Option<String>,
+    pub parent: Option<String>,
+    pub entries: Vec<DirEntry>,
+}
+
+#[derive(Serialize)]
+pub struct DirEntry {
+    pub name: String,
+    pub path: String,
+    pub has_children: bool,
+}
+
+fn path_to_string(path: &Path) -> String {
+    path.to_string_lossy().to_string()
+}
+
+fn directory_has_children(path: &Path) -> bool {
+    std::fs::read_dir(path)
+        .map(|mut entries| entries.any(|entry| {
+            entry
+                .ok()
+                .and_then(|entry| entry.file_type().ok())
+                .map(|file_type| file_type.is_dir())
+                .unwrap_or(false)
+        }))
+        .unwrap_or(false)
+}
+
+fn common_root_candidates() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    #[cfg(windows)]
+    {
+        for letter in b'A'..=b'Z' {
+            let drive = format!("{}:\\", letter as char);
+            let path = PathBuf::from(&drive);
+            if path.exists() {
+                roots.push(path);
+            }
+        }
+
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            let home = PathBuf::from(profile);
+            roots.push(home.clone());
+            for child in ["Pictures", "Videos", "Desktop", "Downloads"] {
+                roots.push(home.join(child));
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            roots.push(PathBuf::from(home));
+        }
+        roots.push(PathBuf::from("/"));
+    }
+
+    roots
+}
+
+fn list_roots() -> Vec<DirEntry> {
+    let mut seen = HashSet::new();
+    let mut entries: Vec<DirEntry> = common_root_candidates()
+        .into_iter()
+        .filter(|path| path.exists() && path.is_dir())
+        .filter_map(|path| {
+            let path_string = path_to_string(&path);
+            if !seen.insert(path_string.clone()) {
+                return None;
+            }
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| path_string.clone());
+            Some(DirEntry {
+                name,
+                path: path_string,
+                has_children: directory_has_children(&path),
+            })
+        })
+        .collect();
+    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    entries
+}
+
+fn list_child_directories(path: &Path) -> Result<Vec<DirEntry>, String> {
+    let mut entries = Vec::new();
+    let read_dir = std::fs::read_dir(path).map_err(|e| e.to_string())?;
+
+    for entry in read_dir.flatten() {
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let child_path = entry.path();
+        let is_dir = entry.file_type().map(|file_type| file_type.is_dir()).unwrap_or(false);
+        if !is_dir {
+            continue;
+        }
+
+        entries.push(DirEntry {
+            name,
+            path: path_to_string(&child_path),
+            has_children: directory_has_children(&child_path),
+        });
+    }
+
+    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(entries)
+}
+
+#[tauri::command]
+pub async fn list_directories(path: Option<String>) -> Result<DirListing, String> {
+    let trimmed = path.as_deref().map(str::trim).unwrap_or("");
+    if trimmed.is_empty() {
+        return Ok(DirListing {
+            current: None,
+            parent: None,
+            entries: list_roots(),
+        });
+    }
+
+    let current_path = PathBuf::from(trimmed);
+    let parent = current_path.parent().map(path_to_string);
+    let entries = list_child_directories(&current_path)?;
+
+    Ok(DirListing {
+        current: Some(path_to_string(&current_path)),
+        parent,
+        entries,
+    })
 }
 
 #[derive(Deserialize)]

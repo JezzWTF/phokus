@@ -25,6 +25,23 @@ export interface Folder {
   sort_order: number;
 }
 
+export interface DirEntry {
+  name: string;
+  path: string;
+  has_children: boolean;
+}
+
+export interface DirListing {
+  current: string | null;
+  parent: string | null;
+  entries: DirEntry[];
+}
+
+export type FolderAddResult =
+  | { status: "added"; data: Folder }
+  | { status: "skipped"; data: string }
+  | { status: "error"; data: string };
+
 export type MediaKind = "image" | "video";
 export type MediaFilter = "all" | MediaKind;
 export type ZoomPreset = "compact" | "comfortable" | "detail";
@@ -343,6 +360,7 @@ interface GalleryState {
   captionDetail: CaptionDetail;
   aiCaptionsEnabled: boolean;
   settingsOpen: boolean;
+  folderPickerOpen: boolean;
   taggingQueueScope: TaggingQueueScope;
   taggingQueueFolderIds: number[];
   mutedFolderIds: number[];
@@ -390,6 +408,8 @@ interface GalleryState {
   loadFolders: () => Promise<void>;
   loadBackgroundJobProgress: () => Promise<void>;
   addFolder: (path: string) => Promise<void>;
+  addFolders: (paths: string[]) => Promise<FolderAddResult[]>;
+  listDirectories: (path: string | null) => Promise<DirListing>;
   removeFolder: (folderId: number) => Promise<void>;
   reindexFolder: (folderId: number) => Promise<void>;
   renameFolder: (folderId: number, newName: string) => Promise<void>;
@@ -439,6 +459,7 @@ interface GalleryState {
   setCaptionDetail: (detail: CaptionDetail) => Promise<void>;
   setAiCaptionsEnabled: (enabled: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  setFolderPickerOpen: (open: boolean) => void;
   loadTaggingQueueScope: () => Promise<void>;
   setTaggingQueueScope: (scope: TaggingQueueScope) => void;
   loadTaggingQueueFolderIds: () => Promise<void>;
@@ -773,6 +794,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   captionDetail: "paragraph",
   aiCaptionsEnabled: initialAiCaptionsEnabled(),
   settingsOpen: false,
+  folderPickerOpen: false,
   taggingQueueScope: "all",
   taggingQueueFolderIds: [],
   mutedFolderIds: [],
@@ -847,6 +869,16 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     await loadFolders();
     await loadBackgroundJobProgress();
   },
+
+  addFolders: async (paths) => {
+    const { loadFolders, loadBackgroundJobProgress } = get();
+    const results = await invoke<FolderAddResult[]>("add_folders", { paths });
+    await loadFolders();
+    await loadBackgroundJobProgress();
+    return results;
+  },
+
+  listDirectories: (path) => invoke<DirListing>("list_directories", { path }),
 
   removeFolder: async (folderId) => {
     const { selectedFolderId, loadFolders, loadImages, loadBackgroundJobProgress } = get();
@@ -1580,6 +1612,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setFolderPickerOpen: (folderPickerOpen) => set({ folderPickerOpen }),
 
   loadTaggingQueueScope: async () => {
     try {

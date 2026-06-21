@@ -10,6 +10,7 @@ import { DuplicateFinder } from "./components/DuplicateFinder";
 import { Timeline } from "./components/Timeline";
 import { TitleBar } from "./components/TitleBar";
 import { SettingsModal } from "./components/SettingsModal";
+import { FolderPickerModal } from "./components/FolderPickerModal";
 import { UpdateToast } from "./components/UpdateToast";
 import { OnboardingOverlay } from "./components/onboarding/OnboardingOverlay";
 import { DemoPanel } from "./components/DemoPanel";
@@ -93,6 +94,7 @@ export default function App() {
 
       <Lightbox />
       <SettingsModal />
+      <FolderPickerModal />
       <UpdateToast />
       <OnboardingOverlay />
       {import.meta.env.DEV && <DemoPanel />}
