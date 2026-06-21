@@ -14,6 +14,11 @@ interface TimelineGroup {
   images: ImageRecord[];
 }
 
+// One virtualized row: either a month header or a row of up to `cols` tiles.
+type TimelineRow =
+  | { type: "header"; group: TimelineGroup }
+  | { type: "tiles"; images: ImageRecord[] };
+
 interface ScrubberMonth {
   monthNum: number;
   label: string;
@@ -123,27 +128,46 @@ export function Timeline() {
     [containerWidth, tileSize],
   );
 
+  // Flatten the month groups into a single list of fixed-height rows — one
+  // header row per group, then one tile-row per `cols` images. This lets the
+  // virtualizer render only the on-screen rows, exactly like the Gallery.
+  // Previously each *group* was one virtual item that rendered ALL of its
+  // images, so scrolling into a busy month mounted thousands of tiles at once.
+  const { rows, rowToGroupIndex, groupFirstRow } = useMemo(() => {
+    const rows: TimelineRow[] = [];
+    const rowToGroupIndex: number[] = [];
+    const groupFirstRow: number[] = [];
+    groups.forEach((group, groupIndex) => {
+      groupFirstRow[groupIndex] = rows.length;
+      rows.push({ type: "header", group });
+      rowToGroupIndex.push(groupIndex);
+      for (let i = 0; i < group.images.length; i += cols) {
+        rows.push({ type: "tiles", images: group.images.slice(i, i + cols) });
+        rowToGroupIndex.push(groupIndex);
+      }
+    });
+    return { rows, rowToGroupIndex, groupFirstRow };
+  }, [groups, cols]);
+
   const estimateSize = useCallback(
-    (index: number): number => {
-      const group = groups[index];
-      if (!group) return HEADER_HEIGHT;
-      const rowCount = Math.ceil(group.images.length / cols);
-      return HEADER_HEIGHT + rowCount * (tileSize + GAP);
-    },
-    [groups, cols, tileSize],
+    (index: number): number =>
+      rows[index]?.type === "header" ? HEADER_HEIGHT : tileSize + GAP,
+    [rows, tileSize],
   );
 
   const virtualizer = useVirtualizer({
-    count: groups.length,
+    count: rows.length,
     getScrollElement: () => parentRef.current,
     estimateSize,
-    overscan: 2,
+    overscan: 6,
+    paddingStart: GAP,
   });
 
-  const groupsRef = useRef(groups);
-  groupsRef.current = groups;
-  const estimateSizeRef = useRef(estimateSize);
-  estimateSizeRef.current = estimateSize;
+  // Refs so the scroll handler can read the latest mappings without re-binding.
+  const rowToGroupIndexRef = useRef(rowToGroupIndex);
+  rowToGroupIndexRef.current = rowToGroupIndex;
+  const groupFirstRowRef = useRef(groupFirstRow);
+  groupFirstRowRef.current = groupFirstRow;
 
   useEffect(() => {
     virtualizer.measure();
@@ -153,28 +177,24 @@ export function Timeline() {
     const el = parentRef.current;
     if (!el) return;
 
+    // Active month = the group owning the first row still visible at the top.
     const scrollTop = el.scrollTop;
-    const g = groupsRef.current;
-    const es = estimateSizeRef.current;
-    let cumHeight = 0;
-    let newActive = 0;
-    for (let i = 0; i < g.length; i++) {
-      const h = es(i);
-      if (cumHeight + h > scrollTop + HEADER_HEIGHT / 2) {
-        newActive = i;
+    const items = virtualizer.getVirtualItems();
+    let activeRow = items.length > 0 ? items[0].index : 0;
+    for (const item of items) {
+      if (item.start + item.size > scrollTop + HEADER_HEIGHT / 2) {
+        activeRow = item.index;
         break;
       }
-      cumHeight += h;
-      newActive = i;
     }
-    setActiveGroupIndex(newActive);
+    setActiveGroupIndex(rowToGroupIndexRef.current[activeRow] ?? 0);
 
-    if (el.scrollTop < 24) return;
-    const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 600;
+    if (scrollTop < 24) return;
+    const nearBottom = scrollTop + el.clientHeight >= el.scrollHeight - 600;
     if (nearBottom && !loadingImages && images.length < totalImages) {
       void loadMoreImages();
     }
-  }, [images.length, loadMoreImages, loadingImages, totalImages]);
+  }, [virtualizer, images.length, loadMoreImages, loadingImages, totalImages]);
 
   useEffect(() => {
     const el = parentRef.current;
@@ -200,8 +220,9 @@ export function Timeline() {
   }, []);
 
   const scrollToGroup = useCallback(
-    (index: number) => {
-      virtualizer.scrollToIndex(index, { align: "start" });
+    (groupIndex: number) => {
+      const row = groupFirstRowRef.current[groupIndex] ?? 0;
+      virtualizer.scrollToIndex(row, { align: "start" });
     },
     [virtualizer],
   );
@@ -250,8 +271,8 @@ export function Timeline() {
         ) : (
           <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
             {virtualizer.getVirtualItems().map((virtualItem) => {
-              const group = groups[virtualItem.index];
-              if (!group) return null;
+              const row = rows[virtualItem.index];
+              if (!row) return null;
               return (
                 <div
                   key={virtualItem.key}
@@ -262,41 +283,44 @@ export function Timeline() {
                     height: virtualItem.size,
                   }}
                 >
-                  <div
-                    className="flex items-center gap-3 px-4"
-                    style={{ height: HEADER_HEIGHT }}
-                  >
-                    <span className="text-sm font-semibold text-white/80 shrink-0">
-                      {group.label}
-                    </span>
-                    <span className="text-xs text-white/25 shrink-0 tabular-nums">
-                      {group.images.length}
-                    </span>
-                    <div className="flex-1 h-px bg-white/[0.06]" />
-                  </div>
-
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: `repeat(${cols}, ${tileSize}px)`,
-                      gap: GAP,
-                      paddingLeft: GAP,
-                      paddingRight: GAP,
-                      paddingBottom: GAP,
-                    }}
-                  >
-                    {group.images.map((image) => (
-                      <ImageTile
-                        key={image.id}
-                        image={image}
-                        onClick={() => openImage(image)}
-                        onContextMenu={(event) => {
-                          event.preventDefault();
-                          setContextMenu({ x: event.clientX, y: event.clientY, image });
-                        }}
-                      />
-                    ))}
-                  </div>
+                  {row.type === "header" ? (
+                    <div
+                      className="flex items-center gap-3 px-4"
+                      style={{ height: HEADER_HEIGHT }}
+                    >
+                      <span className="text-sm font-semibold text-white/80 shrink-0">
+                        {row.group.label}
+                      </span>
+                      <span className="text-xs text-white/25 shrink-0 tabular-nums">
+                        {row.group.images.length}
+                      </span>
+                      <div className="flex-1 h-px bg-white/[0.06]" />
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: `repeat(${cols}, ${tileSize}px)`,
+                        gap: GAP,
+                        paddingLeft: GAP,
+                        paddingRight: GAP,
+                        paddingBottom: GAP,
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      {row.images.map((image) => (
+                        <ImageTile
+                          key={image.id}
+                          image={image}
+                          onClick={() => openImage(image)}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            setContextMenu({ x: event.clientX, y: event.clientY, image });
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
