@@ -43,6 +43,28 @@ html[data-theme="subtle-light"] {
   --color-gray-300: #403b35;
   --color-gray-200: #302c28;
   --color-gray-100: #24211e;
+  /* Pastel accent shades are tuned for dark UIs and wash out on the light
+     chrome (e.g. "Update check failed" in amber). Darken the ones used as
+     coloured text/icons so they stay readable. Media surfaces reset these to
+     the bright originals below, so on-photo overlays keep their signal colours.
+     Remapping the variable (not the utility) also covers opacity variants such
+     as text-amber-300/90. */
+  --color-amber-200: #b45309;
+  --color-amber-300: #b45309;
+  --color-amber-400: #b45309;
+  --color-red-200: #b91c1c;
+  --color-red-300: #b91c1c;
+  --color-red-400: #b91c1c;
+  --color-rose-300: #be123c;
+  --color-rose-400: #be123c;
+  --color-emerald-200: #047857;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #047857;
+  --color-sky-300: #0369a1;
+  --color-blue-300: #1d4ed8;
+  --color-blue-400: #1d4ed8;
+  --color-violet-300: #6d28d9;
+  --color-violet-400: #6d28d9;
   background: #e9e7e2;
 }
 
@@ -59,6 +81,25 @@ html[data-theme="subtle-light"] .media-dark-surface {
   --color-gray-300: #d1d5db;
   --color-gray-200: #e5e7eb;
   --color-gray-100: #f3f4f6;
+  /* Restore the bright accent originals the light theme darkened, so coloured
+     overlays on photos/video (ratings, failed badges, the lightbox region tool)
+     keep their signal colours instead of going dark-on-dark. */
+  --color-amber-200: oklch(92.4% 0.12 95.746);
+  --color-amber-300: oklch(87.9% 0.169 91.605);
+  --color-amber-400: oklch(82.8% 0.189 84.429);
+  --color-red-200: oklch(88.5% 0.062 18.334);
+  --color-red-300: oklch(80.8% 0.114 19.571);
+  --color-red-400: oklch(70.4% 0.191 22.216);
+  --color-rose-300: oklch(81% 0.117 11.638);
+  --color-rose-400: oklch(71.2% 0.194 13.428);
+  --color-emerald-200: oklch(90.5% 0.093 164.15);
+  --color-emerald-300: oklch(84.5% 0.143 164.978);
+  --color-emerald-400: oklch(76.5% 0.177 163.223);
+  --color-sky-300: oklch(82.8% 0.111 230.318);
+  --color-blue-300: oklch(80.9% 0.105 251.813);
+  --color-blue-400: oklch(70.7% 0.165 254.624);
+  --color-violet-300: oklch(81.1% 0.111 293.571);
+  --color-violet-400: oklch(70.2% 0.183 293.541);
 }
 
 /* The lightbox keeps its dark canvas + backdrop (via .media-dark-surface on the
