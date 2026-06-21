@@ -12,6 +12,8 @@ import { notifyTaskComplete } from "./notifications";
 const notificationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const NOTIFICATION_DEBOUNCE_MS = 6000;
 const THEME_KEY = "phokus-theme";
+const LIGHTBOX_AUTOPLAY_KEY = "phokus.lightboxAutoplay";
+const LIGHTBOX_AUTO_MUTE_KEY = "phokus.lightboxAutoMute";
 
 export interface Folder {
   id: number;
@@ -346,6 +348,8 @@ interface GalleryState {
   mutedFolderIds: number[];
   notificationsPaused: boolean;
   theme: AppTheme;
+  lightboxAutoplay: boolean;
+  lightboxAutoMute: boolean;
   // Per-folder background-worker pause flags, shared by the BackgroundTasks
   // bar and the sidebar folder context menu.
   workerPaused: Record<number, Record<WorkerKey, boolean>>;
@@ -445,6 +449,8 @@ interface GalleryState {
   loadNotificationsPaused: () => Promise<void>;
   setNotificationsPaused: (paused: boolean) => void;
   setTheme: (theme: AppTheme) => void;
+  setLightboxAutoplay: (enabled: boolean) => void;
+  setLightboxAutoMute: (enabled: boolean) => void;
   loadWorkerStates: () => Promise<void>;
   setWorkerPaused: (folderId: number, worker: WorkerKey, paused: boolean) => void;
   setAllWorkersPaused: (folderId: number, paused: boolean) => void;
@@ -513,6 +519,12 @@ let exploreTagRequestToken = 0;
 function initialAiCaptionsEnabled(): boolean {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(AI_CAPTIONS_ENABLED_KEY) === "true";
+}
+
+function initialBoolSetting(key: string, fallback: boolean): boolean {
+  if (typeof window === "undefined") return fallback;
+  const stored = window.localStorage.getItem(key);
+  return stored === null ? fallback : stored === "true";
 }
 
 function initialTheme(): AppTheme {
@@ -765,6 +777,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   mutedFolderIds: [],
   notificationsPaused: false,
   theme: initialTheme(),
+  lightboxAutoplay: initialBoolSetting(LIGHTBOX_AUTOPLAY_KEY, true),
+  lightboxAutoMute: initialBoolSetting(LIGHTBOX_AUTO_MUTE_KEY, false),
   workerPaused: {},
 
   appVersion: null,
@@ -1647,6 +1661,16 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     window.localStorage.setItem(THEME_KEY, theme);
     document.documentElement.dataset.theme = theme;
     set({ theme });
+  },
+
+  setLightboxAutoplay: (enabled) => {
+    window.localStorage.setItem(LIGHTBOX_AUTOPLAY_KEY, String(enabled));
+    set({ lightboxAutoplay: enabled });
+  },
+
+  setLightboxAutoMute: (enabled) => {
+    window.localStorage.setItem(LIGHTBOX_AUTO_MUTE_KEY, String(enabled));
+    set({ lightboxAutoMute: enabled });
   },
 
   loadWorkerStates: async () => {

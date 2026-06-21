@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useGalleryStore } from "../store";
 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 const CONTROLS_HIDE_DELAY_MS = 2500;
@@ -57,7 +58,9 @@ export function VideoPlayer({ src }: { src: string }) {
   const [duration, setDuration] = useState(0);
   const [buffered, setBuffered] = useState<BufferedRange[]>([]);
   const [volume, setVolume] = useState(persistedVolume);
-  const [muted, setMuted] = useState(persistedMuted);
+  const [muted, setMuted] = useState(
+    () => useGalleryStore.getState().lightboxAutoMute || persistedMuted,
+  );
   const [playbackRate, setPlaybackRate] = useState(1);
   const [loop, setLoop] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -89,11 +92,16 @@ export function VideoPlayer({ src }: { src: string }) {
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    // Read playback prefs fresh for each opened video — not reactive, so a
+    // settings change applies to the next video rather than the current one.
+    const { lightboxAutoplay, lightboxAutoMute } = useGalleryStore.getState();
+    const startMuted = lightboxAutoMute || persistedMuted;
     video.volume = persistedVolume;
-    video.muted = persistedMuted;
-    // Autoplay; if the webview blocks it the catch leaves us paused with
-    // controls visible, which is a fine fallback.
-    video.play().catch(() => {});
+    video.muted = startMuted;
+    setMuted(startMuted);
+    // Autoplay when enabled; if the webview blocks it the catch leaves us paused
+    // with controls visible, which is a fine fallback.
+    if (lightboxAutoplay) video.play().catch(() => {});
   }, [src]);
 
   const readBuffered = useCallback(() => {

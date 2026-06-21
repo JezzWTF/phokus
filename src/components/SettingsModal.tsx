@@ -6,8 +6,8 @@ import { ThemedDropdown } from "./ThemedDropdown";
 type SettingsSection = "workspace" | "general";
 
 const SECTIONS: { id: SettingsSection; label: string; detail: string }[] = [
-  { id: "workspace", label: "AI Workspace", detail: "Tagging models and queue targets" },
   { id: "general", label: "General", detail: "App data and diagnostics" },
+  { id: "workspace", label: "AI Workspace", detail: "Tagging models and queue targets" },
 ];
 
 function formatBytesShort(bytes: number): string {
@@ -122,7 +122,7 @@ function TaggerAccelerationButton({ acceleration, current, onSelect, children }:
 }
 
 export function SettingsModal() {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("workspace");
+  const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [taggerQueueStatus, setTaggerQueueStatus] = useState<string | null>(null);
   const [taggerQueueing, setTaggerQueueing] = useState(false);
   const [taggerClearing, setTaggerClearing] = useState(false);
@@ -195,6 +195,10 @@ export function SettingsModal() {
   const openOnboarding = useGalleryStore((state) => state.openOnboarding);
   const theme = useGalleryStore((state) => state.theme);
   const setTheme = useGalleryStore((state) => state.setTheme);
+  const lightboxAutoplay = useGalleryStore((state) => state.lightboxAutoplay);
+  const setLightboxAutoplay = useGalleryStore((state) => state.setLightboxAutoplay);
+  const lightboxAutoMute = useGalleryStore((state) => state.lightboxAutoMute);
+  const setLightboxAutoMute = useGalleryStore((state) => state.setLightboxAutoMute);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -615,6 +619,35 @@ export function SettingsModal() {
                         { value: "conventional-dark", label: "Conventional Dark" },
                       ]}
                     />
+                  </SettingsItem>
+                </SettingsGroup>
+
+                <SettingsGroup title="Video playback">
+                  <SettingsItem
+                    label="Autoplay in lightbox"
+                    description="Start playing videos automatically when opened in the lightbox."
+                  >
+                    <button
+                      role="switch"
+                      aria-checked={lightboxAutoplay}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${lightboxAutoplay ? "bg-sky-500" : "bg-white/15"}`}
+                      onClick={() => setLightboxAutoplay(!lightboxAutoplay)}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${lightboxAutoplay ? "translate-x-4" : "translate-x-0"}`} />
+                    </button>
+                  </SettingsItem>
+                  <SettingsItem
+                    label="Start muted"
+                    description="Open videos with their audio muted — unmute from the player controls."
+                  >
+                    <button
+                      role="switch"
+                      aria-checked={lightboxAutoMute}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${lightboxAutoMute ? "bg-sky-500" : "bg-white/15"}`}
+                      onClick={() => setLightboxAutoMute(!lightboxAutoMute)}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${lightboxAutoMute ? "translate-x-4" : "translate-x-0"}`} />
+                    </button>
                   </SettingsItem>
                 </SettingsGroup>
 
