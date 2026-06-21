@@ -682,11 +682,24 @@ function replaceImage(images: ImageRecord[], updatedImage: ImageRecord, sort: So
 function replaceExistingImages(
   currentImages: ImageRecord[],
   updatedImages: ImageRecord[],
-  sort: SortOrder,
 ): ImageRecord[] {
+  // Replace matched records in place WITHOUT re-sorting. `media-updated` carries
+  // thumbnail/metadata fills that don't move an item in the list (Timeline
+  // re-buckets by taken_at separately), and it fires constantly while the
+  // background workers run. Re-sorting here meant an O(n log n) pass on every
+  // batch — fine for the ~200-item gallery window, but a UI-freezing churn in
+  // Timeline view where `images` can hold the entire library (TIMELINE_PAGE_SIZE).
+  // Returning the same array reference when nothing matched also avoids a wasted
+  // re-render. Relative order for just-updated items is corrected on next load.
   const updatesByPath = new Map(updatedImages.map((image) => [image.path, image]));
-  const nextImages = currentImages.map((image) => updatesByPath.get(image.path) ?? image);
-  return nextImages.sort((a, b) => compareImages(a, b, sort));
+  let changed = false;
+  const nextImages = currentImages.map((image) => {
+    const update = updatesByPath.get(image.path);
+    if (!update) return image;
+    changed = true;
+    return update;
+  });
+  return changed ? nextImages : currentImages;
 }
 
 export function tileSizeForZoom(zoomPreset: ZoomPreset): number {
@@ -2295,7 +2308,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         }
 
         return {
-          images: replaceExistingImages(state.images, visibleImages, state.sort),
+          images: replaceExistingImages(state.images, visibleImages),
           selectedImage,
         };
       });
