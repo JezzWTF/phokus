@@ -45,7 +45,9 @@ if (!/^## \[Unreleased\]/m.test(changelog)) {
   );
 }
 
-const unreleasedMatch = changelog.match(/^## \[Unreleased\][\s\S]*?(?=^## \[|\z)/m);
+// JS regex has no \z anchor, so match to the next version heading or true
+// end-of-input ($ with nothing following — \n-tolerant under the m flag).
+const unreleasedMatch = changelog.match(/^## \[Unreleased\][\s\S]*?(?=^## \[|$(?![\s\S]))/m);
 if (!unreleasedMatch) {
   throw new Error("Could not find or create an Unreleased section.");
 }
@@ -55,7 +57,7 @@ const lineEnding = changelog.includes("\r\n") ? "\r\n" : "\n";
 const bullet = `- ${message}`;
 
 let nextUnreleased;
-const sectionRegex = new RegExp(`(^### ${section}\\s*)([\\s\\S]*?)(?=^### |\\z)`, "m");
+const sectionRegex = new RegExp(`(^### ${section}\\s*)([\\s\\S]*?)(?=^### |$(?![\\s\\S]))`, "m");
 const sectionMatch = unreleased.match(sectionRegex);
 
 if (sectionMatch) {
