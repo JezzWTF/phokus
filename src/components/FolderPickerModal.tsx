@@ -36,7 +36,7 @@ function buildBreadcrumbs(path: string | null): { label: string; path: string | 
   const parts = normalized.split(/[\\/]+/).filter(Boolean);
   let current = separator === "/" ? "" : "";
   return [
-    { label: "Home", path: null },
+    { label: "/", path: null },
     ...parts.map((part) => {
       current = `${current}/${part}`;
       return { label: part, path: current };
@@ -117,7 +117,7 @@ function FolderRow({
         type="button"
         className="rounded-md p-1 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white light-theme:hover:bg-gray-900 light-theme:hover:text-white"
         onClick={onNavigate}
-        title={entry.has_children ? "Open folder" : "Open folder"}
+        title={entry.has_children ? "Open folder" : "No subfolders"}
       >
         <svg className={`h-4 w-4 ${entry.has_children ? "" : "opacity-45"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -300,6 +300,7 @@ export function FolderPickerModal() {
       const failed = addResults.filter((result) => result.status === "error");
       setResults(addResults);
       if (failed.length > 0) {
+        setStagedPaths(stagedPaths.filter((_, i) => addResults[i]?.status === "error"));
         setError(failed.map((failure) => failure.data).join("; "));
         return;
       }
