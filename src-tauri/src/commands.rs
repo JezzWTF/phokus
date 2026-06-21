@@ -330,7 +330,12 @@ pub async fn add_folders(
     Ok(paths
         .into_iter()
         .map(|path| {
-            match add_one_folder(app.clone(), db.inner().clone(), watcher.inner().clone(), path) {
+            match add_one_folder(
+                app.clone(),
+                db.inner().clone(),
+                watcher.inner().clone(),
+                path,
+            ) {
                 Ok(AddOutcome::Added(folder)) => FolderAddResult::Added(folder),
                 Ok(AddOutcome::Skipped(folder)) => FolderAddResult::Skipped(folder.path),
                 Err(error) => FolderAddResult::Error(error),
@@ -365,13 +370,15 @@ fn path_to_string(path: &Path) -> String {
 
 fn directory_has_children(path: &Path) -> bool {
     std::fs::read_dir(path)
-        .map(|mut entries| entries.any(|entry| {
-            entry
-                .ok()
-                .and_then(|entry| entry.file_type().ok())
-                .map(|file_type| file_type.is_dir())
-                .unwrap_or(false)
-        }))
+        .map(|mut entries| {
+            entries.any(|entry| {
+                entry
+                    .ok()
+                    .and_then(|entry| entry.file_type().ok())
+                    .map(|file_type| file_type.is_dir())
+                    .unwrap_or(false)
+            })
+        })
         .unwrap_or(false)
 }
 
@@ -446,7 +453,10 @@ fn list_child_directories(path: &Path) -> Result<Vec<DirEntry>, String> {
         }
 
         let child_path = entry.path();
-        let is_dir = entry.file_type().map(|file_type| file_type.is_dir()).unwrap_or(false);
+        let is_dir = entry
+            .file_type()
+            .map(|file_type| file_type.is_dir())
+            .unwrap_or(false);
         if !is_dir {
             continue;
         }

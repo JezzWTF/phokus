@@ -1727,6 +1727,7 @@ pub fn get_images(
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn count_images(
     conn: &Connection,
     folder_id: Option<i64>,
