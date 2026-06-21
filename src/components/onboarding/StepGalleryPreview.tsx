@@ -37,14 +37,14 @@ export function StepGalleryPreview() {
         carry your favorites, star ratings, and video durations; hover for filename and quick actions.
       </p>
 
-      <div className="mt-5 grid grid-cols-4 gap-1.5">
+      <div className="media-dark-surface mt-5 grid grid-cols-4 gap-1.5">
         {TILE_PROPS.map((props, i) => (
           <FakeTile key={i} index={i} loaded={i < revealed} {...props} />
         ))}
       </div>
 
       <div className="mt-6 flex items-start justify-between gap-4">
-        <div className="divide-y divide-white/[0.05] text-xs leading-relaxed text-gray-500">
+        <div className="divide-y divide-white/[0.05] text-xs leading-relaxed text-gray-500 light-theme:divide-gray-300/70">
           <p className="pb-2.5">
             <span className="text-gray-300">Click any tile</span> to open the lightbox — keyboard navigation,
             zoom, inline tag editing, ratings, and a full video player.

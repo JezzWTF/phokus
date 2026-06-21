@@ -64,12 +64,12 @@ export function StepSearchDemo() {
   return (
     <div>
       <p className="text-sm leading-relaxed text-gray-300">
-        One search bar, three modes — picked by prefix. No prefix searches filenames, <code className="rounded bg-white/[0.07] px-1 py-0.5 text-[11px] text-gray-200">/s</code> searches
-        by meaning, <code className="rounded bg-white/[0.07] px-1 py-0.5 text-[11px] text-gray-200">/t</code> searches tags.
+        One search bar, three modes — picked by prefix. No prefix searches filenames, <code className="rounded bg-gray-900 px-1 py-0.5 text-[11px] text-gray-200 light-theme:bg-gray-800 light-theme:text-gray-100">/s</code> searches
+        by meaning, <code className="rounded bg-gray-900 px-1 py-0.5 text-[11px] text-gray-200 light-theme:bg-gray-800 light-theme:text-gray-100">/t</code> searches tags.
       </p>
 
       {/* Mock search bar */}
-      <div className="mt-5 flex items-center gap-2.5 rounded-lg border border-white/10 bg-white/[0.04] px-3.5 py-2.5">
+      <div className="mt-5 flex items-center gap-2.5 rounded-lg border border-white/10 bg-gray-900/50 px-3.5 py-2.5 light-theme:border-gray-300/70 light-theme:bg-gray-900">
         <svg className="h-4 w-4 shrink-0 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
         </svg>
@@ -77,7 +77,7 @@ export function StepSearchDemo() {
           {demo.query.slice(0, typed)}
           {!finished ? <span className="animate-pulse text-gray-500">|</span> : null}
         </span>
-        <span className="ml-auto shrink-0 rounded-md border border-sky-400/25 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300">
+        <span className="ml-auto shrink-0 rounded-md border border-sky-400/25 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300 light-theme:border-sky-600/40 light-theme:bg-sky-100 light-theme:text-sky-700">
           {demo.mode}
         </span>
       </div>
@@ -90,7 +90,7 @@ export function StepSearchDemo() {
           demo's visible state. */}
       <div
         key={demoIndex}
-        className={`mt-3 flex flex-wrap justify-center gap-1.5 transition-opacity duration-300 ${fullyTyped ? "opacity-100" : "opacity-0"}`}
+        className={`media-dark-surface mt-3 flex flex-wrap justify-center gap-1.5 transition-opacity duration-300 ${fullyTyped ? "opacity-100" : "opacity-0"}`}
       >
         {demo.results.map((src, i) => (
           <div key={i} className="aspect-square w-36 overflow-hidden rounded-xl bg-white/[0.04]">

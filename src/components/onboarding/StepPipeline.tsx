@@ -49,7 +49,7 @@ export function StepPipeline() {
       </p>
 
       {/* Fake BackgroundTasks slim bar */}
-      <div className="mt-3 rounded-lg border border-white/[0.07] bg-white/[0.02] px-4 py-3">
+      <div className="mt-3 rounded-lg border border-white/[0.07] bg-gray-900/30 px-4 py-3 light-theme:border-gray-300/70 light-theme:bg-gray-900">
         <div className="flex items-center gap-3">
           <span className="relative flex h-1.5 w-1.5 shrink-0">
             {!finished ? (
@@ -57,7 +57,7 @@ export function StepPipeline() {
             ) : null}
             <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${finished ? "bg-emerald-400" : "bg-blue-400"}`} />
           </span>
-          <span className="text-[13px] font-medium text-white/60">Holiday Photos</span>
+          <span className="text-[13px] font-medium text-white/60 light-theme:text-gray-500">Holiday Photos</span>
           <div className="flex items-center gap-1.5">
             {STAGES.map((stage, i) => (
               <FakeStageTag
@@ -72,7 +72,7 @@ export function StepPipeline() {
       </div>
 
       <div className="mt-6 flex items-start justify-between gap-4">
-        <div className="divide-y divide-white/[0.05] text-xs leading-relaxed text-gray-500">
+        <div className="divide-y divide-white/[0.05] text-xs leading-relaxed text-gray-500 light-theme:divide-gray-300/70">
           <p className="pb-2.5">
             <span className="text-gray-300">It's all interruptible.</span> Close the app whenever you like —
             the queue picks up where it left off next launch.

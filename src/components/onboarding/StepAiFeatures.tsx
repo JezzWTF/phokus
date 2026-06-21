@@ -37,18 +37,18 @@ export function StepAiFeatures() {
       </p>
 
       <h4 className="mt-6 text-[12px] font-semibold uppercase tracking-[0.08em] text-gray-400">AI tagging — optional</h4>
-      <div className="mt-1 divide-y divide-white/[0.05]">
+      <div className="mt-1 divide-y divide-white/[0.05] light-theme:divide-gray-300/70">
         <div className="py-4">
           <div className="flex items-start justify-between gap-6">
             <div className="min-w-0">
               <p className="text-sm text-white">Automatic tags for every image</p>
               <p className="mt-1 text-xs leading-relaxed text-gray-500">
                 The WD tagger model (~1.3 GB download) labels images so you can search with{" "}
-                <code className="rounded bg-white/[0.07] px-1 py-0.5 text-[11px] text-gray-200">/t</code> — tags look like:
+                <code className="rounded bg-gray-900 px-1 py-0.5 text-[11px] text-gray-200 light-theme:bg-gray-800 light-theme:text-gray-100">/t</code> — tags look like:
               </p>
               <span className="mt-2 flex flex-wrap gap-1.5">
                 {FAKE_TAGS.map((tag) => (
-                  <span key={tag} className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[11px] text-gray-400">
+                  <span key={tag} className="rounded-md border border-white/10 bg-gray-900/50 px-2 py-0.5 text-[11px] text-gray-400 light-theme:border-gray-300/70 light-theme:bg-gray-900 light-theme:text-gray-600">
                     {tag}
                   </span>
                 ))}
@@ -56,12 +56,12 @@ export function StepAiFeatures() {
             </div>
             <div className="shrink-0">
               {taggerReady ? (
-                <span className="inline-flex rounded-md border border-emerald-400/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
+                <span className="inline-flex rounded-md border border-emerald-400/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300 light-theme:border-emerald-600/40 light-theme:bg-emerald-100 light-theme:text-emerald-700">
                   Installed
                 </span>
               ) : (
                 <button
-                  className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                  className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                   onClick={() => void prepareTaggerModel()}
                   disabled={taggerModelPreparing}
                 >
@@ -84,7 +84,7 @@ export function StepAiFeatures() {
             </div>
           ) : null}
           {!taggerModelPreparing && taggerModelError ? (
-            <p className="mt-2 text-xs leading-relaxed text-amber-300/90">
+            <p className="mt-2 text-xs leading-relaxed text-amber-300/90 light-theme:text-amber-700">
               Download failed: {taggerModelError}
             </p>
           ) : null}
@@ -92,11 +92,11 @@ export function StepAiFeatures() {
       </div>
 
       <h4 className="mt-6 text-[12px] font-semibold uppercase tracking-[0.08em] text-gray-400">Semantic search & similarity — built in</h4>
-      <div className="mt-1 divide-y divide-white/[0.05]">
+      <div className="mt-1 divide-y divide-white/[0.05] light-theme:divide-gray-300/70">
         <div className="py-4">
           <p className="text-sm text-white">Search by meaning, find look-alikes</p>
           <p className="mt-1 text-xs leading-relaxed text-gray-500">
-            Powers <code className="rounded bg-white/[0.07] px-1 py-0.5 text-[11px] text-gray-200">/s</code> search,
+            Powers <code className="rounded bg-gray-900 px-1 py-0.5 text-[11px] text-gray-200 light-theme:bg-gray-800 light-theme:text-gray-100">/s</code> search,
             "find similar", and the Explore view, so it's part of the standard pipeline: the CLIP model
             (~580 MB) downloads automatically the first time embeddings run. Nothing to do — you'll see it
             in the background-tasks bar.

@@ -38,6 +38,7 @@ pub struct GetImagesParams {
     pub favorites_only: Option<bool>,
     pub rating_min: Option<i64>,
     pub embedding_failed_only: Option<bool>,
+    pub tagging_failed_only: Option<bool>,
     pub sort: Option<String>,
     pub offset: Option<i64>,
     pub limit: Option<i64>,
@@ -267,6 +268,20 @@ pub async fn get_folders(db: State<'_, DbState>) -> Result<Vec<Folder>, String> 
     db::get_folders(&conn).map_err(|e| e.to_string())
 }
 
+#[derive(Deserialize)]
+pub struct ReorderFoldersParams {
+    pub folder_ids: Vec<i64>,
+}
+
+#[tauri::command]
+pub async fn reorder_folders(
+    db: State<'_, DbState>,
+    params: ReorderFoldersParams,
+) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::reorder_folders(&conn, &params.folder_ids).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn get_background_job_progress(
     db: State<'_, DbState>,
@@ -315,6 +330,7 @@ pub async fn get_images(
     let favorites_only = params.favorites_only.unwrap_or(false);
     let rating_min = params.rating_min.unwrap_or(0);
     let embedding_failed_only = params.embedding_failed_only.unwrap_or(false);
+    let tagging_failed_only = params.tagging_failed_only.unwrap_or(false);
 
     let total = db::count_images(
         &conn,
@@ -324,6 +340,7 @@ pub async fn get_images(
         favorites_only,
         rating_min,
         embedding_failed_only,
+        tagging_failed_only,
     )
     .map_err(|e| e.to_string())?;
 
@@ -335,6 +352,7 @@ pub async fn get_images(
         favorites_only,
         rating_min,
         embedding_failed_only,
+        tagging_failed_only,
         sort,
         offset,
         limit,
@@ -578,6 +596,34 @@ pub async fn retry_failed_embeddings(
 ) -> Result<usize, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     db::retry_failed_embedding_jobs(&conn, params.folder_id).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+pub struct FailedImageItem {
+    pub image_id: i64,
+    pub filename: String,
+    pub path: String,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_failed_tagging_images(
+    db: State<'_, DbState>,
+    folder_id: i64,
+) -> Result<Vec<FailedImageItem>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::get_failed_tagging_images(&conn, folder_id)
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(image_id, filename, path, error)| FailedImageItem {
+                    image_id,
+                    filename,
+                    path,
+                    error,
+                })
+                .collect()
+        })
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1468,6 +1514,7 @@ fn kmeans_cosine(
 pub struct FailedEmbeddingItem {
     pub image_id: i64,
     pub filename: String,
+    pub path: String,
     pub error: Option<String>,
 }
 
@@ -1480,9 +1527,10 @@ pub async fn get_failed_embedding_images(
     let rows = db::get_failed_embedding_images(&conn, folder_id).map_err(|e| e.to_string())?;
     Ok(rows
         .into_iter()
-        .map(|(image_id, filename, error)| FailedEmbeddingItem {
+        .map(|(image_id, filename, path, error)| FailedEmbeddingItem {
             image_id,
             filename,
+            path,
             error,
         })
         .collect())

@@ -11,6 +11,7 @@ import { notifyTaskComplete } from "./notifications";
 // Keyed as `${folderId}:embedding` or `${folderId}:tagging`.
 const notificationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const NOTIFICATION_DEBOUNCE_MS = 6000;
+const THEME_KEY = "phokus-theme";
 
 export interface Folder {
   id: number;
@@ -19,6 +20,7 @@ export interface Folder {
   image_count: number;
   indexed_at: string | null;
   scan_error: string | null;
+  sort_order: number;
 }
 
 export type MediaKind = "image" | "video";
@@ -33,6 +35,7 @@ export type AiRating = "general" | "sensitive" | "questionable" | "explicit";
 export type TaggingQueueScope = "all" | "selected";
 export type SimilarScope = "all_media" | "current_folder";
 export type ExploreMode = "visual" | "tags";
+export type AppTheme = "phokus" | "subtle-light" | "conventional-dark";
 
 export interface ImageRecord {
   id: number;
@@ -306,6 +309,7 @@ interface GalleryState {
   favoritesOnly: boolean;
   minimumRating: number;
   failedEmbeddingsOnly: boolean;
+  failedTaggingOnly: boolean;
   zoomPreset: ZoomPreset;
   selectedImage: ImageRecord | null;
   collectionTitle: string | null;
@@ -341,6 +345,7 @@ interface GalleryState {
   taggingQueueFolderIds: number[];
   mutedFolderIds: number[];
   notificationsPaused: boolean;
+  theme: AppTheme;
   // Per-folder background-worker pause flags, shared by the BackgroundTasks
   // bar and the sidebar folder context menu.
   workerPaused: Record<number, Record<WorkerKey, boolean>>;
@@ -385,6 +390,7 @@ interface GalleryState {
   reindexFolder: (folderId: number) => Promise<void>;
   renameFolder: (folderId: number, newName: string) => Promise<void>;
   updateFolderPath: (folderId: number, newPath: string) => Promise<void>;
+  reorderFolders: (folderIds: number[]) => Promise<void>;
   selectFolder: (folderId: number | null) => void;
   setViewFolderScope: (folderId: number | null) => void;
   loadImages: (reset?: boolean) => Promise<void>;
@@ -398,6 +404,8 @@ interface GalleryState {
   setFavoritesOnly: (favoritesOnly: boolean) => void;
   setMinimumRating: (minimumRating: number) => void;
   setFailedEmbeddingsOnly: (failedEmbeddingsOnly: boolean) => void;
+  setFailedTaggingOnly: (failedTaggingOnly: boolean) => void;
+  showFailedTagging: (folderId: number) => void;
   setZoomPreset: (zoomPreset: ZoomPreset) => void;
   openImage: (image: ImageRecord) => void;
   closeImage: () => void;
@@ -436,6 +444,7 @@ interface GalleryState {
   toggleMutedFolder: (folderId: number) => void;
   loadNotificationsPaused: () => Promise<void>;
   setNotificationsPaused: (paused: boolean) => void;
+  setTheme: (theme: AppTheme) => void;
   loadWorkerStates: () => Promise<void>;
   setWorkerPaused: (folderId: number, worker: WorkerKey, paused: boolean) => void;
   setAllWorkersPaused: (folderId: number, paused: boolean) => void;
@@ -487,6 +496,10 @@ interface GalleryState {
 }
 
 const PAGE_SIZE = 200;
+// Timeline loads its full filtered set in one indexed taken_at query so the
+// scrubber can span the entire library and jump to any month. Rendering is
+// virtualized, so the cost is one query + records in memory — fine at this scale.
+const TIMELINE_PAGE_SIZE = 100000;
 const AI_CAPTIONS_ENABLED_KEY = "phokus.aiCaptionsEnabled";
 const SIMILAR_DISTANCE_THRESHOLD = 0.24;
 
@@ -500,6 +513,15 @@ let exploreTagRequestToken = 0;
 function initialAiCaptionsEnabled(): boolean {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(AI_CAPTIONS_ENABLED_KEY) === "true";
+}
+
+function initialTheme(): AppTheme {
+  if (typeof window === "undefined") return "phokus";
+  const saved = window.localStorage.getItem(THEME_KEY);
+  const theme: AppTheme =
+    saved === "subtle-light" || saved === "conventional-dark" ? saved : "phokus";
+  document.documentElement.dataset.theme = theme;
+  return theme;
 }
 
 function mergeIntoVisibleWindow(
@@ -574,6 +596,7 @@ function matchesFilters(
   favoritesOnly: boolean,
   minimumRating: number,
   failedEmbeddingsOnly: boolean,
+  failedTaggingOnly: boolean,
   search: string,
 ): boolean {
   const matchesFolder = selectedFolderId === null || image.folder_id === selectedFolderId;
@@ -581,7 +604,8 @@ function matchesFilters(
   const matchesFavorite = !favoritesOnly || image.favorite;
   const matchesRating = image.rating >= minimumRating;
   const matchesFailedEmbedding = !failedEmbeddingsOnly || image.embedding_status === "failed";
-  return matchesFolder && matchesMedia && matchesFavorite && matchesRating && matchesFailedEmbedding && matchesSearch(image, search);
+  const matchesFailedTagging = !failedTaggingOnly || image.ai_tagger_error !== null;
+  return matchesFolder && matchesMedia && matchesFavorite && matchesRating && matchesFailedEmbedding && matchesFailedTagging && matchesSearch(image, search);
 }
 
 function compareNullableNumber(a: number | null, b: number | null): number {
@@ -658,11 +682,24 @@ function replaceImage(images: ImageRecord[], updatedImage: ImageRecord, sort: So
 function replaceExistingImages(
   currentImages: ImageRecord[],
   updatedImages: ImageRecord[],
-  sort: SortOrder,
 ): ImageRecord[] {
+  // Replace matched records in place WITHOUT re-sorting. `media-updated` carries
+  // thumbnail/metadata fills that don't move an item in the list (Timeline
+  // re-buckets by taken_at separately), and it fires constantly while the
+  // background workers run. Re-sorting here meant an O(n log n) pass on every
+  // batch — fine for the ~200-item gallery window, but a UI-freezing churn in
+  // Timeline view where `images` can hold the entire library (TIMELINE_PAGE_SIZE).
+  // Returning the same array reference when nothing matched also avoids a wasted
+  // re-render. Relative order for just-updated items is corrected on next load.
   const updatesByPath = new Map(updatedImages.map((image) => [image.path, image]));
-  const nextImages = currentImages.map((image) => updatesByPath.get(image.path) ?? image);
-  return nextImages.sort((a, b) => compareImages(a, b, sort));
+  let changed = false;
+  const nextImages = currentImages.map((image) => {
+    const update = updatesByPath.get(image.path);
+    if (!update) return image;
+    changed = true;
+    return update;
+  });
+  return changed ? nextImages : currentImages;
 }
 
 export function tileSizeForZoom(zoomPreset: ZoomPreset): number {
@@ -691,6 +728,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   favoritesOnly: false,
   minimumRating: 0,
   failedEmbeddingsOnly: false,
+  failedTaggingOnly: false,
   zoomPreset: "comfortable",
   selectedImage: null,
   collectionTitle: null,
@@ -726,6 +764,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   taggingQueueFolderIds: [],
   mutedFolderIds: [],
   notificationsPaused: false,
+  theme: initialTheme(),
   workerPaused: {},
 
   appVersion: null,
@@ -840,8 +879,26 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     await loadBackgroundJobProgress();
   },
 
+  reorderFolders: async (folderIds) => {
+    const previous = get().folders;
+    const byId = new Map(previous.map((folder) => [folder.id, folder]));
+    const folders = folderIds
+      .map((id, index) => {
+        const folder = byId.get(id);
+        return folder ? { ...folder, sort_order: index + 1 } : null;
+      })
+      .filter((folder): folder is Folder => folder !== null);
+    set({ folders });
+    try {
+      await invoke("reorder_folders", { params: { folder_ids: folderIds } });
+    } catch (error) {
+      set({ folders: previous });
+      throw error;
+    }
+  },
+
   selectFolder: (folderId) => {
-    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, activeView: "gallery", failedEmbeddingsOnly: false, imageLoadError: null });
+    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, activeView: "gallery", failedEmbeddingsOnly: false, failedTaggingOnly: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
@@ -874,7 +931,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   loadImages: async (reset = false) => {
-    const { selectedFolderId, search, sort, loadedCount, mediaFilter, favoritesOnly, minimumRating, failedEmbeddingsOnly } = get();
+    const { selectedFolderId, search, sort, loadedCount, mediaFilter, favoritesOnly, minimumRating, failedEmbeddingsOnly, failedTaggingOnly, activeView } = get();
     const parsedSearch = parseSearchValue(search);
     const requestToken = ++galleryRequestToken;
     set({ loadingImages: true, imageLoadError: null });
@@ -961,9 +1018,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           favorites_only: favoritesOnly,
           rating_min: minimumRating > 0 ? minimumRating : null,
           embedding_failed_only: failedEmbeddingsOnly,
+          tagging_failed_only: failedTaggingOnly,
           sort,
           offset,
-          limit: PAGE_SIZE,
+          limit: activeView === "timeline" ? TIMELINE_PAGE_SIZE : PAGE_SIZE,
         },
       });
 
@@ -1070,7 +1128,35 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   setFailedEmbeddingsOnly: (failedEmbeddingsOnly) => {
-    set({ failedEmbeddingsOnly, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
+    set({ failedEmbeddingsOnly, failedTaggingOnly: failedEmbeddingsOnly ? false : get().failedTaggingOnly, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
+    void get().loadImages(true);
+  },
+
+  setFailedTaggingOnly: (failedTaggingOnly) => {
+    set({ failedTaggingOnly, failedEmbeddingsOnly: failedTaggingOnly ? false : get().failedEmbeddingsOnly, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
+    void get().loadImages(true);
+  },
+
+  showFailedTagging: (folderId) => {
+    set({
+      selectedFolderId: folderId,
+      activeView: "gallery",
+      search: "",
+      mediaFilter: "all",
+      favoritesOnly: false,
+      minimumRating: 0,
+      failedEmbeddingsOnly: false,
+      failedTaggingOnly: true,
+      images: [],
+      loadedCount: 0,
+      collectionTitle: null,
+      similarSourceImageId: null,
+      similarSourceFolderId: null,
+      similarHasMore: false,
+      similarFolderId: null,
+      similarCrop: null,
+      imageLoadError: null,
+    });
     void get().loadImages(true);
   },
 
@@ -1555,6 +1641,12 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   setNotificationsPaused: (paused) => {
     set({ notificationsPaused: paused });
     void invoke("set_notifications_paused", { paused }).catch(() => {});
+  },
+
+  setTheme: (theme) => {
+    window.localStorage.setItem(THEME_KEY, theme);
+    document.documentElement.dataset.theme = theme;
+    set({ theme });
   },
 
   loadWorkerStates: async () => {
@@ -2161,6 +2253,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
             state.favoritesOnly,
             state.minimumRating,
             state.failedEmbeddingsOnly,
+            state.failedTaggingOnly,
             state.search,
           ),
         );
@@ -2200,6 +2293,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
             state.favoritesOnly,
             state.minimumRating,
             state.failedEmbeddingsOnly,
+            state.failedTaggingOnly,
             state.search,
           ),
         );
@@ -2214,7 +2308,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         }
 
         return {
-          images: replaceExistingImages(state.images, visibleImages, state.sort),
+          images: replaceExistingImages(state.images, visibleImages),
           selectedImage,
         };
       });

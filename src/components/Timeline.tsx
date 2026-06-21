@@ -5,11 +5,30 @@ import { ContextMenu, ImageTile } from "./Gallery";
 
 const GAP = 6;
 const HEADER_HEIGHT = 52;
+const SCRUBBER_WIDTH = 48;
+const MONTH_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"] as const;
 
 interface TimelineGroup {
   key: string;
   label: string;
   images: ImageRecord[];
+}
+
+// One virtualized row: either a month header or a row of up to `cols` tiles.
+type TimelineRow =
+  | { type: "header"; group: TimelineGroup }
+  | { type: "tiles"; images: ImageRecord[] };
+
+interface ScrubberMonth {
+  monthNum: number;
+  label: string;
+  groupIndex: number;
+}
+
+interface ScrubberYear {
+  year: string;
+  firstGroupIndex: number;
+  months: ScrubberMonth[];
 }
 
 function buildLabel(key: string): string {
@@ -44,6 +63,27 @@ function groupImages(images: ImageRecord[]): TimelineGroup[] {
     .map(([key, imgs]) => ({ key, label: buildLabel(key), images: imgs }));
 }
 
+function buildScrubberYears(groups: TimelineGroup[]): ScrubberYear[] {
+  const byYear = new Map<string, ScrubberYear>();
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+    if (group.key === "unknown") continue;
+    const year = group.key.substring(0, 4);
+    const monthNum = Number(group.key.substring(5, 7));
+    if (!byYear.has(year)) {
+      byYear.set(year, { year, firstGroupIndex: i, months: [] });
+    }
+    byYear.get(year)!.months.push({
+      monthNum,
+      label: MONTH_SHORT[monthNum - 1] ?? "",
+      groupIndex: i,
+    });
+  }
+  // Keep insertion order so the scrubber runs the same direction as the scrolled
+  // content (oldest at top with taken_asc), keeping the active highlight aligned.
+  return Array.from(byYear.values());
+}
+
 export function Timeline() {
   const images = useGalleryStore((s) => s.images);
   const loadMoreImages = useGalleryStore((s) => s.loadMoreImages);
@@ -55,13 +95,15 @@ export function Timeline() {
 
   const parentRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [activeGroupIndex, setActiveGroupIndex] = useState(0);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
     image: ImageRecord;
   } | null>(null);
 
-  // Measure container width before first paint to avoid a single-column flash.
+  // parentRef is the scroll container. Its clientWidth already excludes the
+  // scrubber because they are flex siblings, so no further adjustment is needed.
   useLayoutEffect(() => {
     const el = parentRef.current;
     if (!el) return;
@@ -74,35 +116,59 @@ export function Timeline() {
   }, []);
 
   const tileSize = tileSizeForZoom(zoomPreset);
+  const groups = useMemo(() => groupImages(images), [images]);
+  const scrubberYears = useMemo(() => buildScrubberYears(groups), [groups]);
+  // Show as soon as there's more than one month to jump between — not gated on
+  // a full year. With taken_asc sort the loaded set is oldest-first, so this
+  // reflects whatever range is currently loaded.
+  const showScrubber = groups.length > 1;
+
   const cols = useMemo(
     () => Math.max(1, Math.floor((containerWidth - GAP) / (tileSize + GAP))),
     [containerWidth, tileSize],
   );
 
-  const groups = useMemo(() => groupImages(images), [images]);
+  // Flatten the month groups into a single list of fixed-height rows — one
+  // header row per group, then one tile-row per `cols` images. This lets the
+  // virtualizer render only the on-screen rows, exactly like the Gallery.
+  // Previously each *group* was one virtual item that rendered ALL of its
+  // images, so scrolling into a busy month mounted thousands of tiles at once.
+  const { rows, rowToGroupIndex, groupFirstRow } = useMemo(() => {
+    const rows: TimelineRow[] = [];
+    const rowToGroupIndex: number[] = [];
+    const groupFirstRow: number[] = [];
+    groups.forEach((group, groupIndex) => {
+      groupFirstRow[groupIndex] = rows.length;
+      rows.push({ type: "header", group });
+      rowToGroupIndex.push(groupIndex);
+      for (let i = 0; i < group.images.length; i += cols) {
+        rows.push({ type: "tiles", images: group.images.slice(i, i + cols) });
+        rowToGroupIndex.push(groupIndex);
+      }
+    });
+    return { rows, rowToGroupIndex, groupFirstRow };
+  }, [groups, cols]);
 
-  // estimateSize must be exact so virtualizer positions groups correctly.
-  // Each group height = header + rowCount * (tileSize + GAP) where the last row's
-  // GAP acts as spacing between this group and the next header.
   const estimateSize = useCallback(
-    (index: number): number => {
-      const group = groups[index];
-      if (!group) return HEADER_HEIGHT;
-      const rowCount = Math.ceil(group.images.length / cols);
-      return HEADER_HEIGHT + rowCount * (tileSize + GAP);
-    },
-    [groups, cols, tileSize],
+    (index: number): number =>
+      rows[index]?.type === "header" ? HEADER_HEIGHT : tileSize + GAP,
+    [rows, tileSize],
   );
 
   const virtualizer = useVirtualizer({
-    count: groups.length,
+    count: rows.length,
     getScrollElement: () => parentRef.current,
     estimateSize,
-    overscan: 2,
+    overscan: 6,
+    paddingStart: GAP,
   });
 
-  // Re-measure all items when cols changes so virtualizer positions stay accurate
-  // after a window resize (react-virtual v3 doesn't invalidate cached sizes on its own).
+  // Refs so the scroll handler can read the latest mappings without re-binding.
+  const rowToGroupIndexRef = useRef(rowToGroupIndex);
+  rowToGroupIndexRef.current = rowToGroupIndex;
+  const groupFirstRowRef = useRef(groupFirstRow);
+  groupFirstRowRef.current = groupFirstRow;
+
   useEffect(() => {
     virtualizer.measure();
   }, [cols, virtualizer]);
@@ -110,12 +176,25 @@ export function Timeline() {
   const handleScroll = useCallback(() => {
     const el = parentRef.current;
     if (!el) return;
-    if (el.scrollTop < 24) return;
-    const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 600;
+
+    // Active month = the group owning the first row still visible at the top.
+    const scrollTop = el.scrollTop;
+    const items = virtualizer.getVirtualItems();
+    let activeRow = items.length > 0 ? items[0].index : 0;
+    for (const item of items) {
+      if (item.start + item.size > scrollTop + HEADER_HEIGHT / 2) {
+        activeRow = item.index;
+        break;
+      }
+    }
+    setActiveGroupIndex(rowToGroupIndexRef.current[activeRow] ?? 0);
+
+    if (scrollTop < 24) return;
+    const nearBottom = scrollTop + el.clientHeight >= el.scrollHeight - 600;
     if (nearBottom && !loadingImages && images.length < totalImages) {
       void loadMoreImages();
     }
-  }, [images.length, loadMoreImages, loadingImages, totalImages]);
+  }, [virtualizer, images.length, loadMoreImages, loadingImages, totalImages]);
 
   useEffect(() => {
     const el = parentRef.current;
@@ -140,105 +219,135 @@ export function Timeline() {
     };
   }, []);
 
-  return (
-    <div
-      ref={parentRef}
-      className="relative flex-1 overflow-y-auto overflow-x-hidden min-h-0 bg-[#07080f]"
-    >
-      {images.length === 0 && loadingImages ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
-          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8 min-w-72">
-            <div className="h-5 w-5 mx-auto rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
-            <p className="mt-4 text-sm text-white/40 font-medium">Loading timeline</p>
-            <p className="text-xs text-white/20 mt-1">Fetching results</p>
-          </div>
-        </div>
-      ) : images.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
-          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8">
-            <svg
-              className="h-12 w-12 mx-auto text-white/10 mb-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={0.75}
-                d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-              />
-            </svg>
-            <p className="text-sm text-white/30 font-medium">
-              {imageLoadError ? "Could not load timeline" : "No media found"}
-            </p>
-            <p className="text-xs text-white/15 mt-1">
-              {imageLoadError ?? "Add a folder to see your timeline"}
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-          {virtualizer.getVirtualItems().map((virtualItem) => {
-            const group = groups[virtualItem.index];
-            if (!group) return null;
-            return (
-              <div
-                key={virtualItem.key}
-                style={{
-                  position: "absolute",
-                  top: virtualItem.start,
-                  width: "100%",
-                  height: virtualItem.size,
-                }}
-              >
-                {/* Group header */}
-                <div
-                  className="flex items-center gap-3 px-4"
-                  style={{ height: HEADER_HEIGHT }}
-                >
-                  <span className="text-sm font-semibold text-white/80 shrink-0">
-                    {group.label}
-                  </span>
-                  <span className="text-xs text-white/25 shrink-0 tabular-nums">
-                    {group.images.length}
-                  </span>
-                  <div className="flex-1 h-px bg-white/[0.06]" />
-                </div>
+  const scrollToGroup = useCallback(
+    (groupIndex: number) => {
+      const row = groupFirstRowRef.current[groupIndex] ?? 0;
+      virtualizer.scrollToIndex(row, { align: "start" });
+    },
+    [virtualizer],
+  );
 
-                {/* Image grid — paddingBottom:GAP gives the gap below the last row,
-                    matching the row-to-row gap and making estimateSize exact. */}
+  return (
+    // Outer flex-row: fills remaining height in <main>'s flex-col, then
+    // splits horizontally between the scroll area and the scrubber.
+    <div className="flex flex-1 min-h-0 bg-gray-950">
+      {/* Scroll container — flex-1 takes all width except the scrubber */}
+      <div
+        ref={parentRef}
+        className="relative flex-1 overflow-y-auto overflow-x-hidden min-h-0"
+      >
+        {images.length === 0 && loadingImages ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
+            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8 min-w-72">
+              <div className="h-5 w-5 mx-auto rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
+              <p className="mt-4 text-sm text-white/40 font-medium">Loading timeline</p>
+              <p className="text-xs text-white/20 mt-1">Fetching results</p>
+            </div>
+          </div>
+        ) : images.length === 0 ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
+            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8">
+              <svg
+                className="h-12 w-12 mx-auto text-white/10 mb-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={0.75}
+                  d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                />
+              </svg>
+              <p className="text-sm text-white/30 font-medium">
+                {imageLoadError ? "Could not load timeline" : "No media found"}
+              </p>
+              <p className="text-xs text-white/15 mt-1">
+                {imageLoadError ?? "Add a folder to see your timeline"}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+            {virtualizer.getVirtualItems().map((virtualItem) => {
+              const row = rows[virtualItem.index];
+              if (!row) return null;
+              return (
                 <div
+                  key={virtualItem.key}
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: `repeat(${cols}, ${tileSize}px)`,
-                    gap: GAP,
-                    paddingLeft: GAP,
-                    paddingRight: GAP,
-                    paddingBottom: GAP,
+                    position: "absolute",
+                    top: virtualItem.start,
+                    width: "100%",
+                    height: virtualItem.size,
                   }}
                 >
-                  {group.images.map((image) => (
-                    <ImageTile
-                      key={image.id}
-                      image={image}
-                      onClick={() => openImage(image)}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        setContextMenu({ x: event.clientX, y: event.clientY, image });
+                  {row.type === "header" ? (
+                    <div
+                      className="flex items-center gap-3 px-4"
+                      style={{ height: HEADER_HEIGHT }}
+                    >
+                      <span className="text-sm font-semibold text-white/80 shrink-0">
+                        {row.group.label}
+                      </span>
+                      <span className="text-xs text-white/25 shrink-0 tabular-nums">
+                        {row.group.images.length}
+                      </span>
+                      <div className="flex-1 h-px bg-white/[0.06]" />
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: `repeat(${cols}, ${tileSize}px)`,
+                        gap: GAP,
+                        paddingLeft: GAP,
+                        paddingRight: GAP,
+                        paddingBottom: GAP,
+                        boxSizing: "border-box",
                       }}
-                    />
-                  ))}
+                    >
+                      {row.images.map((image) => (
+                        <ImageTile
+                          key={image.id}
+                          image={image}
+                          onClick={() => openImage(image)}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            setContextMenu({ x: event.clientX, y: event.clientY, image });
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
 
-      {images.length > 0 && loadingImages ? (
-        <div className="flex justify-center py-8">
-          <div className="h-4 w-4 rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
+        {images.length > 0 && loadingImages ? (
+          <div className="flex justify-center py-8">
+            <div className="h-4 w-4 rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
+          </div>
+        ) : null}
+      </div>
+
+      {/* Scrubber — flex sibling so it stays visible while the left panel scrolls */}
+      {showScrubber ? (
+        <div
+          className="overflow-y-auto border-l border-white/[0.04] py-2 flex flex-col items-center gap-0.5"
+          style={{ width: SCRUBBER_WIDTH }}
+        >
+          {scrubberYears.map((yearEntry) => (
+            <ScrubberYearBlock
+              key={yearEntry.year}
+              yearEntry={yearEntry}
+              activeGroupIndex={activeGroupIndex}
+              onScrollTo={scrollToGroup}
+            />
+          ))}
         </div>
       ) : null}
 
@@ -250,6 +359,54 @@ export function Timeline() {
           onClose={() => setContextMenu(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+interface ScrubberYearBlockProps {
+  yearEntry: ScrubberYear;
+  activeGroupIndex: number;
+  onScrollTo: (index: number) => void;
+}
+
+function ScrubberYearBlock({ yearEntry, activeGroupIndex, onScrollTo }: ScrubberYearBlockProps) {
+  const isYearActive = yearEntry.months.some((m) => m.groupIndex === activeGroupIndex);
+
+  return (
+    <div className="w-full flex flex-col items-center">
+      <button
+        className={`w-full text-center py-0.5 text-[10px] font-semibold tracking-wide transition-colors ${
+          isYearActive ? "text-white/80" : "text-white/30 hover:text-white/55"
+        }`}
+        onClick={() => onScrollTo(yearEntry.firstGroupIndex)}
+        title={yearEntry.year}
+      >
+        {yearEntry.year}
+      </button>
+
+      <div
+        className="grid gap-[3px] pb-1.5"
+        style={{ gridTemplateColumns: "repeat(3, 10px)" }}
+      >
+        {Array.from({ length: 12 }, (_, i) => {
+          const monthNum = i + 1;
+          const monthEntry = yearEntry.months.find((m) => m.monthNum === monthNum);
+          const isActive = monthEntry !== undefined && monthEntry.groupIndex === activeGroupIndex;
+          if (!monthEntry) {
+            return <span key={monthNum} className="h-[10px] w-[10px]" />;
+          }
+          return (
+            <button
+              key={monthNum}
+              title={`${monthEntry.label} ${yearEntry.year}`}
+              onClick={() => onScrollTo(monthEntry.groupIndex)}
+              className={`h-[10px] w-[10px] rounded-full transition-colors ${
+                isActive ? "bg-white/70" : "bg-white/15 hover:bg-white/40"
+              }`}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }

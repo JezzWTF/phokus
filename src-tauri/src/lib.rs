@@ -65,6 +65,11 @@ pub fn run() {
                 let conn = pool.get().expect("Failed to get connection for migration");
                 db::migrate(&conn).expect("Failed to run migrations");
                 db::reset_inflight_jobs(&conn).expect("Failed to reset inflight jobs");
+                let repaired_deferred = db::repair_deferred_embedding_jobs(&conn)
+                    .expect("Failed to repair deferred embedding jobs");
+                if repaired_deferred > 0 {
+                    log::info!("Requeued {repaired_deferred} deferred video embedding jobs.");
+                }
                 let backfilled =
                     db::backfill_embedding_jobs(&conn).expect("Failed to backfill embedding jobs");
                 if backfilled > 0 {
@@ -124,6 +129,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::add_folder,
             commands::get_folders,
+            commands::reorder_folders,
             commands::get_background_job_progress,
             commands::remove_folder,
             commands::get_images,
@@ -156,6 +162,7 @@ pub fn run() {
             commands::get_explore_tags,
             commands::get_images_by_ids,
             commands::get_failed_embedding_images,
+            commands::get_failed_tagging_images,
             commands::get_tagger_model_status,
             commands::get_tagger_acceleration,
             commands::set_tagger_acceleration,

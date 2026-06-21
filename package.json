@@ -14,6 +14,7 @@
     "dev:web": "cd website && pnpm dev",
     "build:app:cpu": "tauri build -- --no-default-features",
     "build:app:cuda": "tauri build --config src-tauri/tauri.cuda.conf.json",
+    "changelog:add": "node tools/changelog-add.mjs",
     "dev:vite": "vite",
     "preview": "vite preview",
     "tauri": "tauri"

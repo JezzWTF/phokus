@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useGalleryStore, ImageTag, AiRating } from "../store";
 import { VideoPlayer } from "./VideoPlayer";
 
@@ -377,7 +378,7 @@ export function Lightbox() {
       {selectedImage ? (
         <motion.div
           key="lightbox"
-          className="fixed inset-0 z-50 flex bg-black/90 backdrop-blur-sm"
+          className="media-dark-surface fixed inset-0 z-50 flex bg-black/90 backdrop-blur-sm"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -495,7 +496,7 @@ export function Lightbox() {
                 </AnimatePresence>
               </div>
 
-              <div className="flex w-72 shrink-0 flex-col border-l border-white/5 bg-gray-900/95">
+              <div className="lightbox-panel flex w-72 shrink-0 flex-col border-l border-white/5 bg-gray-900/95">
                 <div className="flex shrink-0 items-center justify-between px-5 pt-5 pb-4">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-white">{selectedImage.filename}</p>
@@ -780,7 +781,18 @@ export function Lightbox() {
                   </div>
 
                   <div>
-                    <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">Path</p>
+                    <div className="mb-1 flex items-center justify-between">
+                      <p className="text-xs uppercase tracking-wider text-gray-500">Path</p>
+                      <button
+                        className="rounded p-0.5 text-gray-600 transition-colors hover:text-gray-300"
+                        title="Reveal in Explorer"
+                        onClick={() => void revealItemInDir(selectedImage.path)}
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                        </svg>
+                      </button>
+                    </div>
                     <p className="break-all text-xs text-gray-400">{selectedImage.path}</p>
                   </div>
                 </div>

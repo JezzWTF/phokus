@@ -5,6 +5,52 @@ All notable changes to Phokus are documented here. The format is based on
 aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (0.x: anything may change between minor versions).
 
+## [Unreleased]
+
+### Added
+
+- **Timeline scrubber** — a year/month rail on the Timeline view that jumps to
+  any period in the library. Timeline now loads the full filtered set so the
+  scrubber spans the whole library instead of just the first page.
+- **Folder reordering** in the sidebar — drag-and-drop (with edge auto-scroll)
+  or keyboard (↑/↓ on the drag handle), with the custom order persisted across
+  sessions; the Libraries list also gains A–Z / Z–A / Custom sort.
+- Failed AI-tagging jobs can now be located from the background worker prompt,
+  including a gallery filter for images with failed tags and an expanded list
+  of failed filenames/errors.
+- A new theme system adds Phokus, Subtle Light, and Conventional Dark chrome
+  options across the app.
+- First-run onboarding now includes an inline theme picker so new users can
+  choose their preferred app chrome before continuing the tour.
+
+### Changed
+
+- The gallery grid is now row-virtualised, so very large libraries scroll
+  smoothly and only on-screen thumbnails are rendered.
+- Polished the new theme surfaces before release, including readable
+  subtle-light secondary buttons, failed-worker action buttons, and onboarding
+  controls.
+- Onboarding preview media keeps the dark gallery/media surface regardless of
+  the active chrome theme.
+
+### Fixed
+
+- Video embedding jobs are no longer claimed before their thumbnail exists, and
+  any that previously failed for that reason are requeued on startup — videos no
+  longer churn through failed embeddings.
+- Subtle Light theme consistency — the lightbox metadata panel now follows the
+  light chrome while the image canvas stays dark (matching Conventional Dark),
+  and gallery/timeline media badges, duplicate-finder thumbnails, and the window
+  restore icon now theme correctly instead of staying Phokus-dark.
+- Timeline scrolling is now smooth on large libraries — it virtualizes per row
+  of tiles instead of per month, so a month with thousands of photos no longer
+  mounts every tile at once (thumbnails now load in incrementally as you scroll,
+  matching the All Media grid).
+- Background worker updates (thumbnails, metadata, embeddings, tags) no longer
+  re-sort the entire loaded image set on every batch. In Timeline, which loads
+  the whole library, this re-sort caused severe lag and could crash the app
+  during background indexing.
+
 ## [0.1.0] — 2026-06-14
 
 First public release. Windows desktop, distributed as an unsigned NSIS

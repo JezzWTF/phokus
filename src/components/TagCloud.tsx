@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ExploreTagEntry, TagCloudEntry, useGalleryStore } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
@@ -110,29 +110,44 @@ function buildCloud(entries: TagCloudEntry[], containerW: number, containerH: nu
   }));
 }
 
-function CloudCard({ node, onOpen }: { node: PlacedNode; onOpen: (imageIds: number[]) => void }) {
+function CloudCard({ node, onOpen, animated }: { node: PlacedNode; onOpen: (imageIds: number[]) => void; animated: boolean }) {
   const src = node.entry.thumbnail_path ? convertFileSrc(node.entry.thumbnail_path) : null;
   const { w, h, accent } = node;
+  const driftTransition = {
+    duration: node.driftDuration,
+    ease: "easeInOut" as const,
+    delay: seeded(node.index + 41) * 1.6,
+    repeat: 1,
+    repeatType: "reverse" as const,
+  };
 
   return (
     <motion.button
-      className="group absolute overflow-hidden rounded-2xl border border-white/8 bg-white/[0.04] text-left shadow-[0_8px_40px_rgba(0,0,0,0.5)] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+      className="explore-cluster-card group absolute overflow-hidden rounded-2xl border border-white/8 bg-white/[0.04] text-left shadow-[0_8px_28px_rgba(0,0,0,0.38)] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
       style={{ width: w, height: h, left: node.x - w / 2, top: node.y - h / 2 }}
-      initial={{ opacity: 0, scale: 0.75 }}
-      animate={{
-        opacity: 1,
-        scale: 1,
-        x: [0, node.driftX, 0],
-        y: [0, node.driftY, 0],
-        rotate: [node.rotateSeed, node.rotateSeed + 1.4, node.rotateSeed],
-      }}
-      transition={{
-        opacity: { duration: 0.3, delay: Math.min(node.index * 0.035, 0.7) },
-        scale:   { duration: 0.3, delay: Math.min(node.index * 0.035, 0.7) },
-        x:       { duration: node.driftDuration, repeat: Infinity, ease: "easeInOut", delay: seeded(node.index + 41) * 3 },
-        y:       { duration: node.driftDuration + 1.6, repeat: Infinity, ease: "easeInOut", delay: seeded(node.index + 51) * 3 },
-        rotate:  { duration: node.driftDuration + 0.9, repeat: Infinity, ease: "easeInOut" },
-      }}
+      initial={animated ? { opacity: 0, scale: 0.82, rotate: node.rotateSeed } : { opacity: 0, scale: 0.96 }}
+      animate={
+        animated
+          ? {
+              opacity: 1,
+              scale: 1,
+              x: [0, node.driftX * 0.65, 0],
+              y: [0, node.driftY * 0.65, 0],
+              rotate: [node.rotateSeed, node.rotateSeed + 0.8, node.rotateSeed],
+            }
+          : { opacity: 1, scale: 1, rotate: node.rotateSeed }
+      }
+      transition={
+        animated
+          ? {
+              opacity: { duration: 0.24, delay: Math.min(node.index * 0.024, 0.45) },
+              scale: { duration: 0.24, delay: Math.min(node.index * 0.024, 0.45) },
+              x: driftTransition,
+              y: { ...driftTransition, duration: node.driftDuration + 1.2, delay: seeded(node.index + 51) * 1.6 },
+              rotate: { ...driftTransition, duration: node.driftDuration + 0.8, delay: seeded(node.index + 61) * 1.2 },
+            }
+          : { opacity: { duration: 0.18, delay: Math.min(node.index * 0.016, 0.28) }, scale: { duration: 0.18, delay: Math.min(node.index * 0.016, 0.28) } }
+      }
       whileHover={{ scale: 1.06, rotate: 0, transition: { duration: 0.18 } }}
       onClick={() => onOpen(node.entry.image_ids)}
       title={`Open cluster — ${node.entry.count.toLocaleString()} images`}
@@ -143,22 +158,24 @@ function CloudCard({ node, onOpen }: { node: PlacedNode; onOpen: (imageIds: numb
           alt=""
           className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
           draggable={false}
+          loading="lazy"
+          decoding="async"
         />
       ) : (
         <div className="absolute inset-0 bg-gradient-to-br from-white/[0.07] to-transparent" />
       )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
+      <div className="explore-cluster-overlay absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
       {/* Accent glow on hover */}
       <div
         className="absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
         style={{ background: `radial-gradient(ellipse at bottom, ${accent}25, transparent 70%)` }}
       />
       <div className="absolute inset-x-0 bottom-0 p-3">
-        <div className="mb-2 h-px rounded-full" style={{ background: `linear-gradient(to right, ${accent}80, transparent)` }} />
+        <div className="explore-cluster-rule mb-2 h-px rounded-full" style={{ background: `linear-gradient(to right, ${accent}80, transparent)` }} />
         <div className="flex items-end justify-between gap-2">
           <div>
-            <p className="text-[9px] uppercase tracking-[0.18em] text-white/35">Cluster</p>
-            <p className="text-base font-semibold leading-none text-white">{node.entry.count.toLocaleString()}</p>
+            <p className="explore-cluster-label text-[9px] uppercase tracking-[0.18em] text-white/35">Cluster</p>
+            <p className="explore-cluster-count text-base font-semibold leading-none text-white">{node.entry.count.toLocaleString()}</p>
           </div>
           <span
             className="rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.1em] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
@@ -197,7 +214,7 @@ function TagWord({
       animate={{ opacity: 0.4 + ratio * 0.6, scale: 1 }}
       transition={{ delay: Math.min(index * 0.008, 0.55), duration: 0.22 }}
       whileHover={{ scale: 1.2, opacity: 1, rotate: 0, transition: { duration: 0.14 } }}
-      className="group inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-white/[0.07]"
+      className="explore-tag-word group inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-white/[0.07]"
       style={{ fontSize, rotate: tilt }}
       onClick={() => onSearch(entry.tag)}
       title={`${entry.tag} — ${entry.count.toLocaleString()} images`}
@@ -221,7 +238,7 @@ function TagWord({
 function Spinner() {
   return (
     <motion.div
-      className="h-5 w-5 rounded-full border-2 border-white/15 border-t-white/50"
+      className="explore-spinner h-5 w-5 rounded-full border-2 border-white/15 border-t-white/50"
       animate={{ rotate: 360 }}
       transition={{ duration: 0.85, repeat: Infinity, ease: "linear" }}
     />
@@ -238,6 +255,7 @@ function ClusterCloud({
   entries: TagCloudEntry[];
   onOpen: (imageIds: number[]) => void;
 }) {
+  const reducedMotion = useReducedMotion();
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
 
@@ -261,9 +279,14 @@ function ClusterCloud({
 
   return (
     <div ref={canvasRef} className="relative min-h-0 flex-1 overflow-hidden">
-      <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:radial-gradient(circle,rgba(255,255,255,0.6)_1px,transparent_1px)] [background-size:28px_28px]" />
+      <div className="explore-cluster-grid pointer-events-none absolute inset-0 opacity-[0.07] [background-image:radial-gradient(circle,rgba(255,255,255,0.6)_1px,transparent_1px)] [background-size:28px_28px]" />
       {nodes.map((node) => (
-        <CloudCard key={`${node.entry.representative_image_id}:${node.index}`} node={node} onOpen={onOpen} />
+        <CloudCard
+          key={`${node.entry.representative_image_id}:${node.index}`}
+          node={node}
+          onOpen={onOpen}
+          animated={!reducedMotion && node.index < 12}
+        />
       ))}
     </div>
   );
@@ -300,13 +323,13 @@ export function TagCloud() {
   const entryCount = exploreMode === "visual" ? tagCloudEntries.length : exploreTagEntries.length;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(59,130,246,0.08),transparent_50%),radial-gradient(ellipse_at_80%_75%,rgba(168,85,247,0.07),transparent_40%),#07080f]">
+    <div className="explore-view flex min-h-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(59,130,246,0.08),transparent_50%),radial-gradient(ellipse_at_80%_75%,rgba(168,85,247,0.07),transparent_40%),#07080f]">
       {/* Header */}
-      <div className="shrink-0 border-b border-white/[0.05] px-6 py-4">
+      <div className="explore-header shrink-0 border-b border-white/[0.05] px-6 py-4">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold text-white">Explore</h2>
-            <p className="mt-0.5 truncate text-[11px] text-white/30">
+            <h2 className="explore-title text-[15px] font-semibold text-white">Explore</h2>
+            <p className="explore-subtitle mt-0.5 truncate text-[11px] text-white/30">
               {loading
                 ? exploreMode === "visual" ? "Computing visual clusters…" : "Loading tags…"
                 : hasEntries
@@ -320,9 +343,9 @@ export function TagCloud() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <FolderScopeDropdown />
-            <div className="flex rounded-lg border border-white/8 bg-white/[0.03] p-0.5">
+            <div className="explore-mode-toggle flex rounded-lg border border-white/8 bg-white/[0.03] p-0.5">
               <button
-                className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                className={`explore-mode-button rounded-md px-3 py-1.5 text-xs transition-colors ${
                   exploreMode === "visual" ? "bg-white/10 text-white" : "text-gray-500 hover:text-gray-300"
                 }`}
                 onClick={() => setExploreMode("visual")}
@@ -330,7 +353,7 @@ export function TagCloud() {
                 Clusters
               </button>
               <button
-                className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                className={`explore-mode-button rounded-md px-3 py-1.5 text-xs transition-colors ${
                   exploreMode === "tags" ? "bg-white/10 text-white" : "text-gray-500 hover:text-gray-300"
                 }`}
                 onClick={() => setExploreMode("tags")}
@@ -343,13 +366,13 @@ export function TagCloud() {
       </div>
 
       {loading ? (
-        <div className="flex flex-1 items-center justify-center gap-3 text-white/25">
+        <div className="explore-empty flex flex-1 items-center justify-center gap-3 text-white/25">
           <Spinner />
           <span className="text-sm">{exploreMode === "visual" ? "Computing clusters…" : "Loading tags…"}</span>
         </div>
       ) : !hasEntries ? (
         <div className="flex flex-1 items-center justify-center px-8">
-          <p className="max-w-xs text-center text-sm leading-relaxed text-white/25">
+          <p className="explore-empty max-w-xs text-center text-sm leading-relaxed text-white/25">
             {exploreMode === "visual"
               ? "No visual clusters yet. Images need embeddings before they can be grouped. Check indexing progress in the sidebar."
               : "No tags yet. Run the AI tagger from Settings, or add tags manually in the image preview."}

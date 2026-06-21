@@ -221,8 +221,8 @@ fn load_images(paths: &[PathBuf], image_size: usize) -> Result<Tensor> {
 /// Returns the path that should be fed to the CLIP image embedder for a given media file.
 ///
 /// For videos the thumbnail image is used (because CLIP only understands still images).
-/// If a video has no thumbnail yet, an error is returned — the caller should mark the
-/// embedding job as failed rather than trying to decode the raw video file.
+/// Video jobs without thumbnails are excluded when jobs are claimed. The error remains
+/// as a guard against a race where a thumbnail disappears after a job is claimed.
 pub fn embedding_source_path(
     path: &str,
     thumbnail_path: Option<&str>,
