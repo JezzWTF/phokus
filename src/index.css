@@ -61,6 +61,36 @@ html[data-theme="subtle-light"] .media-dark-surface {
   --color-gray-100: #f3f4f6;
 }
 
+/* The lightbox keeps its dark canvas + backdrop (via .media-dark-surface on the
+   root), but the metadata panel is chrome and should follow the active theme.
+   In subtle-light it lives inside the dark-surface root, so re-light it here by
+   remapping the palette on the panel itself. Tailwind v4 resolves every colour
+   utility through a --color-* variable, so remapping the variables re-themes the
+   whole subtree — including accents — without a single !important. */
+html[data-theme="subtle-light"] .lightbox-panel {
+  --color-white: #18202c;
+  --color-gray-950: #e9e7e2;
+  --color-gray-900: #dedbd4;
+  --color-gray-800: #cfcbc3;
+  --color-gray-700: #aea99f;
+  --color-gray-600: #817b72;
+  --color-gray-500: #655f57;
+  --color-gray-400: #514b44;
+  --color-gray-300: #403b35;
+  --color-gray-200: #302c28;
+  --color-gray-100: #24211e;
+  /* Pastel accents are tuned for a dark panel; darken them for the light one. */
+  --color-amber-300: #b45309;
+  --color-amber-400: #b45309;
+  --color-sky-300: #0369a1;
+  --color-emerald-300: #047857;
+  --color-rose-300: #be123c;
+  --color-rose-400: #be123c;
+  --color-red-300: #b91c1c;
+  --color-violet-300: #6d28d9;
+  --color-violet-400: #6d28d9;
+}
+
 html[data-theme="subtle-light"] .settings-modal {
   background: #f4f2ea !important;
   border-color: #d6d1c7 !important;

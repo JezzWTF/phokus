@@ -496,7 +496,7 @@ export function Lightbox() {
                 </AnimatePresence>
               </div>
 
-              <div className="flex w-72 shrink-0 flex-col border-l border-white/5 bg-gray-900/95">
+              <div className="lightbox-panel flex w-72 shrink-0 flex-col border-l border-white/5 bg-gray-900/95">
                 <div className="flex shrink-0 items-center justify-between px-5 pt-5 pb-4">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-white">{selectedImage.filename}</p>

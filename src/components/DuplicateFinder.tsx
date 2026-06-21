@@ -71,7 +71,7 @@ function DuplicateGroupCard({ group }: { group: DuplicateGroup }) {
           return (
             <button
               key={image.id}
-              className={`group relative overflow-hidden rounded-xl border transition-all ${
+              className={`media-dark-surface group relative overflow-hidden rounded-xl border transition-all ${
                 isSelected
                   ? "border-red-400/50 ring-1 ring-red-400/30"
                   : "border-white/8 hover:border-white/20"

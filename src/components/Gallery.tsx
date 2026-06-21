@@ -124,7 +124,7 @@ export function ImageTile({
 
   return (
     <button
-      className="group relative overflow-hidden rounded-xl bg-white/[0.04] text-left focus:outline-none"
+      className="media-dark-surface group relative overflow-hidden rounded-xl bg-white/[0.04] text-left focus:outline-none"
       style={{ width: "100%", aspectRatio: "1 / 1" }}
       onClick={onClick}
       onContextMenu={onContextMenu}
