@@ -114,6 +114,7 @@ pub struct TaggingJob {
     pub image_id: i64,
     pub folder_id: i64,
     pub path: String,
+    pub thumbnail_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1202,14 +1203,14 @@ fn get_pending_thumbnail_jobs_excluding(
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-/// Video jobs need FFmpeg; while it isn't provisioned they must be invisible
-/// to both claiming and the tier-priority checks, or pending video jobs would
-/// stall every lower tier indefinitely.
+/// Video and AVIF thumbnail jobs need FFmpeg; while it isn't provisioned they
+/// must be invisible to both claiming and tier-priority checks, or pending
+/// FFmpeg-backed jobs would stall every lower tier indefinitely.
 fn media_kind_clause(include_videos: bool) -> &'static str {
     if include_videos {
         ""
     } else {
-        "AND i.media_kind = 'image'"
+        "AND i.media_kind = 'image' AND lower(i.path) NOT GLOB '*.avif'"
     }
 }
 
@@ -1593,7 +1594,7 @@ pub fn repair_deferred_embedding_jobs(conn: &Connection) -> Result<usize> {
          WHERE status = 'failed'
            AND last_error LIKE ?1
            AND image_id IN (
-               SELECT id FROM images WHERE media_kind = 'video'
+               SELECT id FROM images WHERE media_kind = 'video' OR lower(path) GLOB '*.avif'
            )",
         [pattern],
     )?;
@@ -1602,10 +1603,54 @@ pub fn repair_deferred_embedding_jobs(conn: &Connection) -> Result<usize> {
          SET embedding_status = 'pending', embedding_error = NULL
          WHERE embedding_status = 'failed'
            AND embedding_error LIKE ?1
-           AND media_kind = 'video'",
+           AND (media_kind = 'video' OR lower(path) GLOB '*.avif')",
         [pattern],
     )?;
     Ok(repaired)
+}
+
+pub fn repair_avif_jobs(conn: &Connection) -> Result<usize> {
+    let unsupported_pattern = "%Avif%not supported%";
+    let thumbnail_repaired = conn.execute(
+        "UPDATE thumbnail_jobs
+         SET status = 'pending', last_error = NULL, updated_at = datetime('now')
+         WHERE status = 'failed'
+           AND image_id IN (SELECT id FROM images WHERE lower(path) GLOB '*.avif')
+           AND last_error LIKE ?1",
+        [unsupported_pattern],
+    )?;
+    let embedding_repaired = conn.execute(
+        "UPDATE embedding_jobs
+         SET status = 'pending', last_error = NULL, updated_at = datetime('now')
+         WHERE status = 'failed'
+           AND image_id IN (SELECT id FROM images WHERE lower(path) GLOB '*.avif')
+           AND last_error LIKE ?1",
+        [unsupported_pattern],
+    )?;
+    conn.execute(
+        "UPDATE images
+         SET embedding_status = 'pending', embedding_error = NULL
+         WHERE embedding_status = 'failed'
+           AND lower(path) GLOB '*.avif'
+           AND embedding_error LIKE ?1",
+        [unsupported_pattern],
+    )?;
+    let tagging_repaired = conn.execute(
+        "UPDATE tagging_jobs
+         SET status = 'pending', last_error = NULL, updated_at = datetime('now')
+         WHERE status = 'failed'
+           AND image_id IN (SELECT id FROM images WHERE lower(path) GLOB '*.avif')
+           AND last_error LIKE ?1",
+        [unsupported_pattern],
+    )?;
+    conn.execute(
+        "UPDATE images
+         SET ai_tagger_error = NULL
+         WHERE lower(path) GLOB '*.avif'
+           AND ai_tagger_error LIKE ?1",
+        [unsupported_pattern],
+    )?;
+    Ok(thumbnail_repaired + embedding_repaired + tagging_repaired)
 }
 
 pub fn rename_folder(conn: &Connection, folder_id: i64, new_name: &str) -> Result<()> {
@@ -2102,10 +2147,11 @@ fn get_pending_tagging_jobs_excluding(
     limit: usize,
 ) -> Result<Vec<TaggingJob>> {
     let sql = format!(
-        "SELECT j.image_id, i.folder_id, i.path
+        "SELECT j.image_id, i.folder_id, i.path, i.thumbnail_path
          FROM tagging_jobs j
          JOIN images i ON i.id = j.image_id
          WHERE j.status = 'pending'
+           AND NOT (lower(i.path) GLOB '*.avif' AND i.thumbnail_path IS NULL)
            {}
          ORDER BY j.created_at ASC
          LIMIT ?1",
@@ -2118,6 +2164,7 @@ fn get_pending_tagging_jobs_excluding(
                 image_id: row.get(0)?,
                 folder_id: row.get(1)?,
                 path: row.get(2)?,
+                thumbnail_path: row.get(3)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;

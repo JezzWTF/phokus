@@ -241,6 +241,90 @@ pub fn generate_video_thumbnail(
     ))
 }
 
+pub fn generate_avif_thumbnail(
+    tools: &MediaTools,
+    image_path: &Path,
+    cache_dir: &Path,
+) -> Result<GeneratedThumbnail> {
+    let path_str = image_path.to_string_lossy();
+    let out_path = thumb_path(cache_dir, &path_str);
+    let original_dimensions = ffprobe_dimensions(tools, image_path);
+
+    if out_path.exists() {
+        return Ok(GeneratedThumbnail {
+            path: out_path,
+            width: original_dimensions.0,
+            height: original_dimensions.1,
+        });
+    }
+
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let output_path = out_path.to_string_lossy().into_owned();
+    let output = tools
+        .ffmpeg_command()
+        .args([
+            "-y",
+            "-threads",
+            "2",
+            "-i",
+            path_str.as_ref(),
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=320:-1:force_original_aspect_ratio=decrease",
+            "-q:v",
+            "4",
+            &output_path,
+        ])
+        .output()?;
+
+    if output.status.success() && out_path.exists() {
+        return Ok(GeneratedThumbnail {
+            path: out_path,
+            width: original_dimensions.0,
+            height: original_dimensions.1,
+        });
+    }
+
+    Err(anyhow!(
+        "ffmpeg failed generating AVIF thumbnail for {path_str}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    ))
+}
+
+fn ffprobe_dimensions(tools: &MediaTools, image_path: &Path) -> (Option<i64>, Option<i64>) {
+    let output = tools
+        .ffprobe_command()
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0:s=x",
+            &image_path.to_string_lossy(),
+        ])
+        .output();
+    let Ok(output) = output else {
+        return (None, None);
+    };
+
+    if !output.status.success() {
+        return (None, None);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut parts = stdout.trim().split('x');
+    let width = parts.next().and_then(|part| part.parse::<i64>().ok());
+    let height = parts.next().and_then(|part| part.parse::<i64>().ok());
+    (width, height)
+}
+
 pub fn thumb_path(cache_dir: &Path, image_path: &str) -> PathBuf {
     thumb_path_with_ext(cache_dir, image_path, "jpg")
 }

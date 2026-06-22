@@ -220,19 +220,19 @@ fn load_images(paths: &[PathBuf], image_size: usize) -> Result<Tensor> {
 
 /// Returns the path that should be fed to the CLIP image embedder for a given media file.
 ///
-/// For videos the thumbnail image is used (because CLIP only understands still images).
-/// Video jobs without thumbnails are excluded when jobs are claimed. The error remains
-/// as a guard against a race where a thumbnail disappears after a job is claimed.
+/// For videos and AVIFs the thumbnail image is used because CLIP preprocessing
+/// only uses decoders from the `image` crate, while AVIF is decoded through
+/// FFmpeg into a JPEG thumbnail.
 pub fn embedding_source_path(
     path: &str,
     thumbnail_path: Option<&str>,
     media_kind: &str,
 ) -> Result<PathBuf> {
-    if media_kind == "video" {
+    if media_kind == "video" || is_avif_path(path) {
         match thumbnail_path {
             Some(thumb) => Ok(PathBuf::from(thumb)),
             None => Err(anyhow::anyhow!(
-                "No thumbnail available yet for video '{}' — embedding deferred until thumbnail is generated",
+                "No thumbnail available yet for '{}' — embedding deferred until thumbnail is generated",
                 std::path::Path::new(path)
                     .file_name()
                     .map(|n| n.to_string_lossy())
@@ -242,4 +242,11 @@ pub fn embedding_source_path(
     } else {
         Ok(PathBuf::from(path))
     }
+}
+
+fn is_avif_path(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("avif"))
 }

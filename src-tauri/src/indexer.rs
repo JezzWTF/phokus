@@ -663,10 +663,13 @@ fn process_thumbnail_batch(
 
     let (image_jobs, video_jobs): (Vec<_>, Vec<_>) =
         jobs.into_iter().partition(|job| job.media_kind == "image");
+    let (avif_jobs, raster_jobs): (Vec<_>, Vec<_>) = image_jobs
+        .into_iter()
+        .partition(|job| is_avif_path(Path::new(&job.path)));
 
     // Images: parallel decode, committed as one batch.
-    if !image_jobs.is_empty() {
-        let results = image_jobs
+    if !raster_jobs.is_empty() {
+        let results = raster_jobs
             .par_iter()
             .map(|job| {
                 (
@@ -676,6 +679,15 @@ fn process_thumbnail_batch(
             })
             .collect::<Vec<_>>();
         persist_thumbnail_results(app, pool, results)?;
+    }
+
+    // AVIF: FFmpeg-backed decode, like videos. Keep this off the shared rayon
+    // pool because each subprocess blocks its worker thread.
+    for job in &avif_jobs {
+        let result =
+            thumbnail::generate_avif_thumbnail(media_tools, Path::new(&job.path), cache_dir)
+                .map(Some);
+        persist_thumbnail_results(app, pool, vec![(job.image_id, result)])?;
     }
 
     // Videos: sequential, off the rayon pool — each ffmpeg call blocks its
@@ -747,6 +759,12 @@ fn persist_thumbnail_results(
     }
 
     Ok(())
+}
+
+fn is_avif_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("avif"))
 }
 
 /// Returns `Ok(true)` if a batch was claimed and processed, `Ok(false)` if
@@ -1142,9 +1160,14 @@ fn process_tagging_batch(
     let tag_results = jobs
         .iter()
         .map(|job| {
+            let source_path = if is_avif_path(Path::new(&job.path)) {
+                job.thumbnail_path.as_deref().unwrap_or(&job.path)
+            } else {
+                &job.path
+            };
             (
                 job.clone(),
-                tagger_ref.run(Path::new(&job.path), tagger::DEFAULT_MAX_TAGS),
+                tagger_ref.run(Path::new(source_path), tagger::DEFAULT_MAX_TAGS),
             )
         })
         .collect::<Vec<_>>();

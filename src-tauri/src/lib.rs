@@ -53,7 +53,7 @@ pub fn run() {
             std::fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
 
             // FFmpeg provisioning happens in the background so the window
-            // appears immediately; workers gate video jobs on readiness and
+            // appears immediately; workers gate video/AVIF jobs on readiness and
             // the onboarding/Settings UI shows progress and retry.
             media::spawn_ffmpeg_provision(app.handle().clone());
 
@@ -68,7 +68,12 @@ pub fn run() {
                 let repaired_deferred = db::repair_deferred_embedding_jobs(&conn)
                     .expect("Failed to repair deferred embedding jobs");
                 if repaired_deferred > 0 {
-                    log::info!("Requeued {repaired_deferred} deferred video embedding jobs.");
+                    log::info!("Requeued {repaired_deferred} deferred embedding jobs.");
+                }
+                let repaired_avif =
+                    db::repair_avif_jobs(&conn).expect("Failed to repair AVIF jobs");
+                if repaired_avif > 0 {
+                    log::info!("Requeued {repaired_avif} AVIF jobs.");
                 }
                 let backfilled =
                     db::backfill_embedding_jobs(&conn).expect("Failed to backfill embedding jobs");
