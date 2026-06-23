@@ -42,6 +42,7 @@ const DEMO_UPDATE_VERSION = "0.2.0";
 
 export function DemoPanel() {
   const folders = useGalleryStore((state) => state.folders);
+  const appVersion = useGalleryStore((state) => state.appVersion);
   const [open, setOpen] = useState(false);
   const downloadTimer = useRef<number | null>(null);
 
@@ -160,6 +161,18 @@ export function DemoPanel() {
     });
   };
 
+  // --- What's New flow ------------------------------------------------------
+  // Drives the post-update greeting without needing a real version change. The
+  // toast + modal pull their content from the bundled changelog for the running
+  // app version, so the current release's notes are what render.
+
+  const showWhatsNewToast = () =>
+    useGalleryStore.setState({ whatsNewToast: appVersion ?? DEMO_UPDATE_VERSION, whatsNewOpen: false });
+
+  const openWhatsNewModal = () => useGalleryStore.setState({ whatsNewOpen: true, whatsNewToast: null });
+
+  const resetWhatsNew = () => useGalleryStore.setState({ whatsNewOpen: false, whatsNewToast: null });
+
   if (!open) return null;
 
   const injectBtn =
@@ -213,6 +226,24 @@ export function DemoPanel() {
         </button>
         <button className={neutralBtn} onClick={resetUpdate}>
           Reset updater state
+        </button>
+      </div>
+
+      <div className="my-3 h-px bg-amber-400/20" />
+
+      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-200/60">What's new</p>
+      <p className="mb-2 text-[11px] leading-snug text-amber-200/70">
+        Post-update greeting for v{appVersion ?? "—"}, sourced from the bundled changelog.
+      </p>
+      <div className="flex flex-col gap-1.5">
+        <button className={injectBtn} onClick={showWhatsNewToast}>
+          Show "What's new" toast
+        </button>
+        <button className={injectBtn} onClick={openWhatsNewModal}>
+          Open "What's new" modal
+        </button>
+        <button className={neutralBtn} onClick={resetWhatsNew}>
+          Reset What's New state
         </button>
       </div>
     </div>

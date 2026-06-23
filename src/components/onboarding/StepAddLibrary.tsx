@@ -37,7 +37,7 @@ export function StepAddLibrary() {
           )}
         </div>
         <button
-          className="shrink-0 rounded-md border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-emerald-600/50 light-theme:bg-emerald-100 light-theme:text-emerald-700 light-theme:hover:bg-emerald-200"
+          className="shrink-0 rounded-md border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45"
           onClick={handlePick}
         >
           {folders.length > 0 ? "Add another folder" : "Choose a folder"}

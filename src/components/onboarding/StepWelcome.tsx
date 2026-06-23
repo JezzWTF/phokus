@@ -142,7 +142,7 @@ export function StepWelcome() {
               type="button"
               className={`rounded-md border p-2 text-left transition-colors ${
                 selected
-                  ? "border-emerald-400/35 bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/40 light-theme:border-emerald-600/50 light-theme:bg-emerald-100 light-theme:text-emerald-700 light-theme:hover:bg-emerald-200"
+                  ? "border-emerald-400/35 bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/40"
                   : "border-white/10 bg-white/[0.055] text-gray-300 hover:bg-white/10 hover:text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
               }`}
               onClick={() => setTheme(option.value)}

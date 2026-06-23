@@ -2430,3 +2430,33 @@ pub async fn set_onboarding_completed(app: AppHandle, completed: bool) -> Result
     )
     .map_err(|e| e.to_string())
 }
+
+const LAST_SEEN_VERSION_FILE: &str = "settings/last_seen_version.txt";
+
+/// The app version recorded on the previous launch. `None` when the file is
+/// absent (fresh install, or first launch since this was introduced) — the
+/// frontend uses that to decide whether to surface the "What's New" prompt.
+#[tauri::command]
+pub async fn get_last_seen_version(app: AppHandle) -> Result<Option<String>, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(LAST_SEEN_VERSION_FILE);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let trimmed = content.trim();
+    Ok(if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    })
+}
+
+#[tauri::command]
+pub async fn set_last_seen_version(app: AppHandle, version: String) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let settings_dir = app_dir.join("settings");
+    std::fs::create_dir_all(&settings_dir).map_err(|e| e.to_string())?;
+    std::fs::write(settings_dir.join("last_seen_version.txt"), version.trim())
+        .map_err(|e| e.to_string())
+}

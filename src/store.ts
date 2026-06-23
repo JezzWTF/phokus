@@ -6,6 +6,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { notifyTaskComplete } from "./notifications";
+import { getChangelogForVersion } from "./changelog";
 
 // Per-folder debounce timers for batching notifications.
 // Keyed as `${folderId}:embedding` or `${folderId}:tagging`.
@@ -378,6 +379,11 @@ interface GalleryState {
   updateProgress: number | null; // 0..1 download progress, null while size unknown
   updateError: string | null;
   updateDismissed: boolean;
+  // "What's New" greeting after a version change. `whatsNewToast` holds the
+  // version to advertise in the corner toast (null = hidden); `whatsNewOpen`
+  // controls the full changelog modal.
+  whatsNewOpen: boolean;
+  whatsNewToast: string | null;
 
   ffmpegStatus: FfmpegStatus;
   ffmpegProgress: { downloaded_bytes: number; total_bytes: number } | null;
@@ -479,6 +485,10 @@ interface GalleryState {
   checkForUpdates: (options?: { quiet?: boolean }) => Promise<void>;
   installUpdate: () => Promise<void>;
   dismissUpdate: () => void;
+  initWhatsNew: () => Promise<void>;
+  openWhatsNew: () => void;
+  closeWhatsNew: () => void;
+  dismissWhatsNewToast: () => void;
   loadFfmpegStatus: () => Promise<void>;
   retryFfmpegDownload: () => Promise<void>;
   loadOnboardingCompleted: () => Promise<void>;
@@ -810,6 +820,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   updateProgress: null,
   updateError: null,
   updateDismissed: false,
+  whatsNewOpen: false,
+  whatsNewToast: null,
 
   ffmpegStatus: "unknown",
   ffmpegProgress: null,
@@ -1801,7 +1813,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     const update = pendingUpdate;
     if (!update || get().updateStatus !== "available") return;
 
-    set({ updateStatus: "downloading", updateProgress: null, updateError: null });
+    // Clearing the dismissed flag re-surfaces the progress toast: the user may
+    // have clicked "Later" on the prompt and then triggered the install from the
+    // title-bar button or Settings, and they should still see download progress.
+    set({ updateStatus: "downloading", updateProgress: null, updateError: null, updateDismissed: false });
     try {
       let contentLength: number | null = null;
       let downloaded = 0;
@@ -1829,6 +1844,40 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   dismissUpdate: () => set({ updateDismissed: true }),
+
+  initWhatsNew: async () => {
+    try {
+      const current = await getVersion();
+      const lastSeen = (await invoke<string | null>("get_last_seen_version")) || null;
+      // Already greeted this version — nothing to do, and no need to rewrite.
+      if (lastSeen === current) return;
+
+      let shouldShow: boolean;
+      if (lastSeen) {
+        // A recorded earlier version means this launch is a genuine upgrade.
+        shouldShow = true;
+      } else {
+        // No record yet. Fresh installs are covered by the welcome tour, so only
+        // greet users who have already completed onboarding (i.e. upgraded into
+        // this feature) rather than someone opening the app for the first time.
+        shouldShow = await invoke<boolean>("get_onboarding_completed").catch(() => false);
+      }
+
+      // Only surface the prompt if we actually have notes for this version.
+      if (shouldShow && getChangelogForVersion(current)) {
+        set({ whatsNewToast: current });
+      }
+      await invoke("set_last_seen_version", { version: current }).catch(() => {});
+    } catch {
+      // Non-fatal: the greeting is a nicety, never block startup on it.
+    }
+  },
+
+  openWhatsNew: () => set({ whatsNewOpen: true, whatsNewToast: null }),
+
+  closeWhatsNew: () => set({ whatsNewOpen: false }),
+
+  dismissWhatsNewToast: () => set({ whatsNewToast: null }),
 
   loadFfmpegStatus: async () => {
     try {

@@ -5,6 +5,30 @@ All notable changes to Phokus are documented here. The format is based on
 aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (0.x: anything may change between minor versions).
 
+## [Unreleased]
+
+### Added
+
+- **What's New** — after updating, Phokus now greets you with a "What's new"
+  toast that opens an in-app release-notes screen for the new version, with the
+  changes grouped into collapsible Added / Changed / Fixed sections. It's
+  sourced from the bundled changelog (so it works offline) and can be reopened
+  any time from Settings → Updates → What's new.
+
+### Changed
+
+- The updater now shows a real download progress bar with a percentage in
+  Settings → Updates (previously it only said "Downloading").
+
+### Fixed
+
+- The update download/install progress toast now reappears when you start an
+  update from the title-bar indicator or Settings after dismissing the earlier
+  "Update available" prompt — previously progress only showed in Settings.
+- Subtle Light theme — fixed several surfaces and buttons that stayed dark or
+  became unreadable on hover, including new dialogs and the green action buttons
+  across the updater and onboarding.
+
 ## [0.1.1] — 2026-06-23
 
 ### Added

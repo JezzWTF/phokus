@@ -12,6 +12,8 @@ import { TitleBar } from "./components/TitleBar";
 import { SettingsModal } from "./components/SettingsModal";
 import { FolderPickerModal } from "./components/FolderPickerModal";
 import { UpdateToast } from "./components/UpdateToast";
+import { WhatsNewToast } from "./components/WhatsNewToast";
+import { WhatsNewModal } from "./components/WhatsNewModal";
 import { OnboardingOverlay } from "./components/onboarding/OnboardingOverlay";
 import { DemoPanel } from "./components/DemoPanel";
 import { initializeNotifications } from "./notifications";
@@ -29,15 +31,18 @@ export default function App() {
   const checkForUpdates = useGalleryStore((state) => state.checkForUpdates);
   const loadFfmpegStatus = useGalleryStore((state) => state.loadFfmpegStatus);
   const loadOnboardingCompleted = useGalleryStore((state) => state.loadOnboardingCompleted);
+  const initWhatsNew = useGalleryStore((state) => state.initWhatsNew);
   const activeView = useGalleryStore((state) => state.activeView);
 
   useEffect(() => {
     void initializeNotifications();
     void loadMutedFolderIds();
     void loadNotificationsPaused();
-    void loadAppVersion();
     void loadFfmpegStatus();
     void loadOnboardingCompleted();
+    // Load the app version first so the What's New toast/modal (which read
+    // appVersion from the store) have it before the greeting can appear.
+    void loadAppVersion().then(() => initWhatsNew());
     // Quiet launch check — dev builds have no signed artifacts to update to.
     if (import.meta.env.PROD) {
       void checkForUpdates({ quiet: true });
@@ -96,6 +101,8 @@ export default function App() {
       <SettingsModal />
       <FolderPickerModal />
       <UpdateToast />
+      <WhatsNewToast />
+      <WhatsNewModal />
       <OnboardingOverlay />
       {import.meta.env.DEV && <DemoPanel />}
     </div>
