@@ -1,6 +1,6 @@
 [package]
 name = "phokus"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local-first desktop media library"
 authors = ["JezzWTF"]
 license = "MIT"

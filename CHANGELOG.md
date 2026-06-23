@@ -5,7 +5,7 @@ All notable changes to Phokus are documented here. The format is based on
 aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (0.x: anything may change between minor versions).
 
-## [Unreleased]
+## [0.1.1] — 2026-06-23
 
 ### Added
 
@@ -121,4 +121,5 @@ installer with a built-in updater.
   Settings, with live size/reclaimable stats.
 - **Window state** persistence and single-instance handling.
 
+[0.1.1]: https://github.com/JezzWTF/phokus/releases/tag/v0.1.1
 [0.1.0]: https://github.com/JezzWTF/phokus/releases/tag/v0.1.0
