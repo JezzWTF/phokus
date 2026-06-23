@@ -208,6 +208,8 @@ pub fn run() {
             commands::retry_ffmpeg_download,
             commands::get_onboarding_completed,
             commands::set_onboarding_completed,
+            commands::get_last_seen_version,
+            commands::set_last_seen_version,
             commands::get_notifications_paused,
             commands::set_notifications_paused,
         ])

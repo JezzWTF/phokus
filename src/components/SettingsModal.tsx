@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AppTheme, CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, TaggerAcceleration, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
 import { FfmpegStatusRow } from "./onboarding/StepWelcome";
 import { ThemedDropdown } from "./ThemedDropdown";
+import { getChangelogForVersion } from "../changelog";
 
 type SettingsSection = "workspace" | "general";
 
@@ -192,9 +193,11 @@ export function SettingsModal() {
   const appVersion = useGalleryStore((state) => state.appVersion);
   const updateStatus = useGalleryStore((state) => state.updateStatus);
   const updateVersion = useGalleryStore((state) => state.updateVersion);
+  const updateProgress = useGalleryStore((state) => state.updateProgress);
   const updateError = useGalleryStore((state) => state.updateError);
   const checkForUpdates = useGalleryStore((state) => state.checkForUpdates);
   const installUpdate = useGalleryStore((state) => state.installUpdate);
+  const openWhatsNew = useGalleryStore((state) => state.openWhatsNew);
   const openOnboarding = useGalleryStore((state) => state.openOnboarding);
   const theme = useGalleryStore((state) => state.theme);
   const setTheme = useGalleryStore((state) => state.setTheme);
@@ -670,7 +673,24 @@ export function SettingsModal() {
                       updateStatus === "error" ? (
                         <span className="text-amber-300/90">Update check failed: {updateError}</span>
                       ) : updateStatus === "downloading" || updateStatus === "installing" ? (
-                        "Downloading update — the app will restart when it finishes."
+                        <span className="block">
+                          <span className="text-gray-400">
+                            {updateStatus === "installing"
+                              ? "Installing update…"
+                              : updateProgress !== null
+                                ? `Downloading update — ${Math.round(updateProgress * 100)}%`
+                                : "Downloading update…"}
+                          </span>
+                          <span className="mt-2 block h-1 overflow-hidden rounded-full bg-white/10">
+                            <span
+                              className={`block h-full rounded-full bg-emerald-400/80 transition-[width] duration-200 ${
+                                updateProgress === null ? "w-full animate-pulse" : ""
+                              }`}
+                              style={updateProgress !== null ? { width: `${Math.round(updateProgress * 100)}%` } : undefined}
+                            />
+                          </span>
+                          <span className="mt-1 block text-gray-600">The app will restart when it finishes.</span>
+                        </span>
                       ) : (
                         "Updates are checked quietly at launch and installed only when you choose."
                       )
@@ -678,7 +698,7 @@ export function SettingsModal() {
                   >
                     {updateStatus === "available" ? (
                       <button
-                        className="rounded-md border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25 light-theme:border-emerald-600/50 light-theme:bg-emerald-100 light-theme:text-emerald-700 light-theme:hover:bg-emerald-200"
+                        className="rounded-md border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25"
                         onClick={() => void installUpdate()}
                       >
                         Install &amp; restart
@@ -693,6 +713,19 @@ export function SettingsModal() {
                       </button>
                     )}
                   </SettingsItem>
+                  {getChangelogForVersion(appVersion) ? (
+                    <SettingsItem
+                      label="What's new"
+                      description={`See what changed in Phokus v${appVersion}.`}
+                    >
+                      <button
+                        className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
+                        onClick={openWhatsNew}
+                      >
+                        View changes
+                      </button>
+                    </SettingsItem>
+                  ) : null}
                 </SettingsGroup>
 
                 <SettingsGroup title="Setup">

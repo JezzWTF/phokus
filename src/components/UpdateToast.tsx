@@ -31,7 +31,7 @@ export function UpdateToast() {
               </p>
               <div className="mt-3 flex items-center gap-2">
                 <button
-                  className="rounded-md border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25 light-theme:border-emerald-600/50 light-theme:bg-emerald-100 light-theme:text-emerald-700 light-theme:hover:bg-emerald-200"
+                  className="rounded-md border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25"
                   onClick={() => void installUpdate()}
                 >
                   Install &amp; restart
