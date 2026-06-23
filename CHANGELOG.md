@@ -9,6 +9,19 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Custom multi-folder picker** — replaces the native OS dialog with an
+  in-app folder browser that lets you navigate, stage folders from multiple
+  locations, and add them all in one go. Duplicate roots are skipped
+  automatically; partially-failed batches remove successfully-added entries
+  from the staging panel so only failed folders remain to retry.
+- **Rebuild semantic index** maintenance action in Settings — drops and
+  recreates the vector tables at the current model dimension, then re-queues
+  every image for embedding. Fixes "dimension mismatch" search errors that
+  occur after switching between CLIP models with different output sizes.
+- **Video playback settings** — new Video Playback group in Settings with two
+  persisted toggles: "Autoplay in lightbox" (default on) and "Start muted"
+  (default off). Settings apply to the next opened video rather than the
+  current one.
 - **Timeline scrubber** — a year/month rail on the Timeline view that jumps to
   any period in the library. Timeline now loads the full filtered set so the
   scrubber spans the whole library instead of just the first page.
@@ -25,6 +38,11 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- Settings sections are reordered — General is now the first and default
+  section instead of AI Workspace.
+- The Duplicate Finder group list is now virtualised — only on-screen cards
+  mount, so large result sets (e.g. 5,000+ pairs) scroll without lag rather
+  than mounting every thumbnail at once.
 - The gallery grid is now row-virtualised, so very large libraries scroll
   smoothly and only on-screen thumbnails are rendered.
 - Polished the new theme surfaces before release, including readable
@@ -35,6 +53,16 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **AVIF thumbnails** — AVIF files are now processed correctly by routing
+  thumbnail generation through the bundled FFmpeg path instead of the Rust
+  image decoder (which has no dav1d dependency). Previously-failed AVIF jobs
+  are requeued on startup; JPEG derivatives are fed to the embedding and
+  tagging pipeline while the lightbox continues to display the original file.
+- Accent text is now readable in the Subtle Light theme.
+- Folder picker chevron tooltip now correctly shows "No subfolders" for leaf
+  entries instead of "Open folder" in both branches.
+- Folder picker Unix breadcrumb root now shows "/" instead of always "Home"
+  for non-home paths such as `/mnt/data`.
 - Video embedding jobs are no longer claimed before their thumbnail exists, and
   any that previously failed for that reason are requeued on startup — videos no
   longer churn through failed embeddings.
