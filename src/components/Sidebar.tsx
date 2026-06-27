@@ -403,12 +403,19 @@ function AlbumItem({
   manageMode = false,
   selectedForManage = false,
   onToggleManage,
+  reorderable = false,
+  onDragStart,
+  onDragEnd,
 }: {
   album: Album;
   manageMode?: boolean;
   selectedForManage?: boolean;
   onToggleManage?: () => void;
+  reorderable?: boolean;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
 }) {
+  const dragControls = useDragControls();
   const viewAlbum = useGalleryStore((state) => state.viewAlbum);
   const renameAlbum = useGalleryStore((state) => state.renameAlbum);
   const deleteAlbum = useGalleryStore((state) => state.deleteAlbum);
@@ -439,7 +446,7 @@ function AlbumItem({
 
   const cover = album.cover_thumbnail_path ? convertFileSrc(album.cover_thumbnail_path) : null;
 
-  return (
+  const row = (
     <div
       className={`group relative flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer transition-all duration-150 ${
         selectedForManage
@@ -473,6 +480,28 @@ function AlbumItem({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
           </svg>
         </div>
+      ) : null}
+
+      {/* Drag handle — hover-revealed, reorders albums */}
+      {reorderable ? (
+        <button
+          type="button"
+          aria-label={`Reorder ${album.name}`}
+          title="Drag to reorder"
+          className="-ml-1 flex h-6 w-3.5 shrink-0 cursor-grab touch-none items-center justify-center rounded text-gray-700 opacity-0 transition-opacity hover:text-gray-400 group-hover:opacity-100"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onDragStart?.();
+            dragControls.start(e);
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <svg className="h-3 w-3" viewBox="0 0 12 12" fill="currentColor">
+            <circle cx="3" cy="3" r="1" /><circle cx="9" cy="3" r="1" />
+            <circle cx="3" cy="6" r="1" /><circle cx="9" cy="6" r="1" />
+            <circle cx="3" cy="9" r="1" /><circle cx="9" cy="9" r="1" />
+          </svg>
+        </button>
       ) : null}
 
       {/* Cover thumbnail — distinguishes albums from folder rows */}
@@ -539,6 +568,25 @@ function AlbumItem({
       ) : null}
     </div>
   );
+
+  if (reorderable) {
+    return (
+      <Reorder.Item
+        as="div"
+        value={album.id}
+        drag="y"
+        dragControls={dragControls}
+        dragListener={false}
+        dragElastic={0.08}
+        onDragEnd={onDragEnd}
+        layout
+        transition={{ layout: { type: "spring", stiffness: 520, damping: 38, mass: 0.55 } }}
+      >
+        {row}
+      </Reorder.Item>
+    );
+  }
+  return row;
 }
 
 export function Sidebar() {
@@ -553,12 +601,46 @@ export function Sidebar() {
   const albums = useGalleryStore((state) => state.albums);
   const createAlbum = useGalleryStore((state) => state.createAlbum);
   const deleteAlbums = useGalleryStore((state) => state.deleteAlbums);
+  const reorderAlbums = useGalleryStore((state) => state.reorderAlbums);
   const [creatingAlbum, setCreatingAlbum] = useState(false);
   const [newAlbumName, setNewAlbumName] = useState("");
   const newAlbumInputRef = useRef<HTMLInputElement>(null);
   const [manageAlbums, setManageAlbums] = useState(false);
   const [manageSelectedIds, setManageSelectedIds] = useState<Set<number>>(new Set());
   const [confirmingAlbumDelete, setConfirmingAlbumDelete] = useState(false);
+  const [orderedAlbums, setOrderedAlbums] = useState(albums);
+  const orderedAlbumsRef = useRef(albums);
+  const [draggingAlbum, setDraggingAlbum] = useState(false);
+
+  // Keep the local drag order in sync with the store except mid-drag, so a
+  // background album refresh doesn't yank the row out from under the pointer.
+  useEffect(() => {
+    if (draggingAlbum) return;
+    setOrderedAlbums(albums);
+    orderedAlbumsRef.current = albums;
+  }, [albums, draggingAlbum]);
+
+  const handleAlbumReorder = (ids: number[]) => {
+    const byId = new Map(orderedAlbumsRef.current.map((album) => [album.id, album]));
+    const next = ids
+      .map((id) => byId.get(id))
+      .filter((album): album is Album => album !== undefined);
+    orderedAlbumsRef.current = next;
+    setOrderedAlbums(next);
+  };
+
+  const finishAlbumReorder = () => {
+    setDraggingAlbum(false);
+    const nextIds = orderedAlbumsRef.current.map((album) => album.id);
+    // Read live store order (not the render-time closure) in case albums changed.
+    const currentIds = useGalleryStore.getState().albums.map((album) => album.id);
+    if (
+      nextIds.length !== currentIds.length ||
+      nextIds.some((id, index) => id !== currentIds[index])
+    ) {
+      void reorderAlbums(nextIds);
+    }
+  };
   const [librarySort, setLibrarySortState] = useState<LibrarySort>(() => {
     const saved = window.localStorage.getItem(LIBRARY_SORT_KEY);
     return saved === "za" || saved === "custom" ? saved : "az";
@@ -974,16 +1056,34 @@ export function Sidebar() {
             <p className="px-3 py-3 text-center text-[11px] leading-relaxed text-gray-700">
               Select images and “Add to album” to start curating
             </p>
-          ) : (
+          ) : manageAlbums ? (
             albums.map((album) => (
               <AlbumItem
                 key={album.id}
                 album={album}
-                manageMode={manageAlbums}
+                manageMode
                 selectedForManage={manageSelectedIds.has(album.id)}
                 onToggleManage={() => toggleManageSelected(album.id)}
               />
             ))
+          ) : (
+            <Reorder.Group
+              as="div"
+              axis="y"
+              values={orderedAlbums.map((album) => album.id)}
+              onReorder={handleAlbumReorder}
+              className="space-y-px"
+            >
+              {orderedAlbums.map((album) => (
+                <AlbumItem
+                  key={album.id}
+                  album={album}
+                  reorderable
+                  onDragStart={() => setDraggingAlbum(true)}
+                  onDragEnd={finishAlbumReorder}
+                />
+              ))}
+            </Reorder.Group>
           )}
         </div>
       </div>

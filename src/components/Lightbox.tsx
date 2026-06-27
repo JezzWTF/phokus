@@ -1,8 +1,8 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { useGalleryStore, ImageTag, AiRating } from "../store";
+import { revealItemInDir, openUrl } from "@tauri-apps/plugin-opener";
+import { useGalleryStore, ImageTag, ImageExif, AiRating } from "../store";
 import { VideoPlayer } from "./VideoPlayer";
 
 function formatBytes(bytes: number): string {
@@ -156,6 +156,7 @@ export function Lightbox() {
   const albums = useGalleryStore((state) => state.albums);
   const addToAlbum = useGalleryStore((state) => state.addToAlbum);
   const createAlbum = useGalleryStore((state) => state.createAlbum);
+  const getImageExif = useGalleryStore((state) => state.getImageExif);
 
   // Tracks the image id that is currently displayed, used to discard async
   // tag mutations that resolve after the user has navigated to another image.
@@ -167,6 +168,7 @@ export function Lightbox() {
   const [isPanning, setIsPanning] = useState(false);
   const lastPanPointRef = useRef({ x: 0, y: 0 });
   const [imageTags, setImageTags] = useState<ImageTag[]>([]);
+  const [imageExif, setImageExif] = useState<ImageExif | null>(null);
   const [tagInput, setTagInput] = useState("");
   const [tagAdding, setTagAdding] = useState(false);
   const [tagsExpanded, setTagsExpanded] = useState(false);
@@ -221,6 +223,7 @@ export function Lightbox() {
   useEffect(() => {
     setView(IDENTITY_VIEW);
     setImageTags([]);
+    setImageExif(null);
     setTagInput("");
     setTagsExpanded(false);
     setTaggingQueued(false);
@@ -238,6 +241,20 @@ export function Lightbox() {
       .catch(() => { if (!cancelled) setImageTags([]); });
     return () => { cancelled = true; };
   }, [selectedImage?.id, selectedImage?.ai_tagged_at, getImageTags]);
+
+  // EXIF is read on demand from the file (not stored), so it works on every
+  // already-indexed image without a reindex. Only meaningful for images.
+  useEffect(() => {
+    if (!selectedImage || selectedImage.media_kind !== "image") {
+      setImageExif(null);
+      return;
+    }
+    let cancelled = false;
+    void getImageExif(selectedImage.id)
+      .then((exif) => { if (!cancelled) setImageExif(exif); })
+      .catch(() => { if (!cancelled) setImageExif(null); });
+    return () => { cancelled = true; };
+  }, [selectedImage?.id, selectedImage?.media_kind, getImageExif]);
 
   // Reset the queued state once the worker finishes so the button is usable again
   useEffect(() => {
@@ -851,6 +868,53 @@ export function Lightbox() {
                       </div>
                     ) : null}
                   </div>
+
+                  {imageExif &&
+                  (imageExif.make ||
+                    imageExif.model ||
+                    imageExif.lens ||
+                    imageExif.f_number ||
+                    imageExif.exposure_time ||
+                    imageExif.iso ||
+                    imageExif.focal_length ||
+                    (imageExif.gps_lat != null && imageExif.gps_lon != null)) ? (
+                    <div>
+                      <p className="mb-2 text-xs uppercase tracking-wider text-gray-500">Camera</p>
+                      <div className="space-y-1.5">
+                        {imageExif.make || imageExif.model ? (
+                          <p className="text-sm text-white">
+                            {[imageExif.make, imageExif.model].filter(Boolean).join(" ")}
+                          </p>
+                        ) : null}
+                        {imageExif.lens ? <p className="text-xs text-gray-400">{imageExif.lens}</p> : null}
+                        {imageExif.f_number || imageExif.exposure_time || imageExif.iso || imageExif.focal_length ? (
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400">
+                            {imageExif.f_number ? <span>{imageExif.f_number}</span> : null}
+                            {imageExif.exposure_time ? <span>{imageExif.exposure_time}</span> : null}
+                            {imageExif.iso ? <span>ISO {imageExif.iso}</span> : null}
+                            {imageExif.focal_length ? <span>{imageExif.focal_length}</span> : null}
+                          </div>
+                        ) : null}
+                        {imageExif.gps_lat != null && imageExif.gps_lon != null ? (
+                          <button
+                            className="inline-flex items-center gap-1 text-xs text-sky-400 transition-colors hover:text-sky-300"
+                            title="Open location in your browser"
+                            onClick={() =>
+                              void openUrl(
+                                `https://www.openstreetmap.org/?mlat=${imageExif.gps_lat}&mlon=${imageExif.gps_lon}#map=15/${imageExif.gps_lat}/${imageExif.gps_lon}`,
+                              )
+                            }
+                          >
+                            {imageExif.gps_lat.toFixed(5)}, {imageExif.gps_lon.toFixed(5)}
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div>
                     <div className="mb-1 flex items-center justify-between">

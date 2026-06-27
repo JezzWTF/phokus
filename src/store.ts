@@ -189,6 +189,19 @@ export interface Album {
   updated_at: string;
 }
 
+export interface ImageExif {
+  make: string | null;
+  model: string | null;
+  lens: string | null;
+  iso: string | null;
+  f_number: string | null;
+  exposure_time: string | null;
+  focal_length: string | null;
+  datetime_original: string | null;
+  gps_lat: number | null;
+  gps_lon: number | null;
+}
+
 export interface TagCloudEntry {
   count: number;
   representative_image_id: number;
@@ -551,6 +564,9 @@ interface GalleryState {
   getImageTags: (imageId: number) => Promise<ImageTag[]>;
   addUserTag: (imageId: number, tag: string) => Promise<ImageTag>;
   removeTag: (tagId: number) => Promise<void>;
+  getImageExif: (imageId: number) => Promise<ImageExif>;
+  renameTag: (from: string, to: string) => Promise<void>;
+  deleteTag: (tag: string) => Promise<number>;
 
   // Gallery multi-select (Feature A)
   toggleGallerySelected: (imageId: number) => void;
@@ -2208,6 +2224,47 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     });
     // Invalidate explore tags cache so removed tag disappears immediately
     set({ exploreTagsFolderId: undefined });
+  },
+
+  getImageExif: async (imageId) => {
+    return invoke<ImageExif>("get_image_exif", { params: { image_id: imageId } });
+  },
+
+  renameTag: async (from, to) => {
+    await invoke("rename_tag", { params: { from, to } });
+    // Tag content changed — invalidate the explore-tags and tag-cloud caches.
+    set({
+      exploreTagsFolderId: undefined,
+      exploreTagEntries: [],
+      tagCloudFolderId: undefined,
+      tagCloudEntries: [],
+    });
+    const parsed = parseSearchValue(get().search);
+    if (parsed.mode === "tag" && parsed.query === from) {
+      // An active tag-search points at the old name — repoint it so the gallery
+      // refreshes instead of showing stale results for a tag that no longer exists.
+      get().setSearch(`/t ${to}`);
+    } else if (get().activeView === "explore") {
+      await get().loadExploreTags();
+    }
+  },
+
+  deleteTag: async (tag) => {
+    const removed = await invoke<number>("delete_tag", { params: { tag } });
+    set({
+      exploreTagsFolderId: undefined,
+      exploreTagEntries: [],
+      tagCloudFolderId: undefined,
+      tagCloudEntries: [],
+    });
+    const parsed = parseSearchValue(get().search);
+    if (parsed.mode === "tag" && parsed.query === tag) {
+      // The searched tag is gone — reload so the now-empty result is reflected.
+      void get().loadImages(true);
+    } else if (get().activeView === "explore") {
+      await get().loadExploreTags();
+    }
+    return removed;
   },
 
   // ── Gallery multi-select (Feature A) ──────────────────────────────────────

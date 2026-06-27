@@ -292,6 +292,162 @@ function ClusterCloud({
   );
 }
 
+// A flat, manageable row for a single tag — rename (which doubles as merge when
+// the new name already exists) and delete across the whole library.
+function TagManageRow({
+  entry,
+  onSearch,
+  onRename,
+  onDelete,
+}: {
+  entry: ExploreTagEntry;
+  onSearch: (tag: string) => void;
+  onRename: (from: string, to: string) => Promise<void>;
+  onDelete: (tag: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(entry.tag);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      setValue(entry.tag);
+      setTimeout(() => inputRef.current?.select(), 0);
+    }
+  }, [editing, entry.tag]);
+
+  const commitRename = async () => {
+    const next = value.trim();
+    if (!next || next === entry.tag) {
+      setEditing(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await onRename(entry.tag, next);
+    } finally {
+      setBusy(false);
+      setEditing(false);
+    }
+  };
+
+  return (
+    <div className="group flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-white/[0.04]">
+      <div className="min-w-0 flex-1">
+        {editing ? (
+          <input
+            ref={inputRef}
+            className="w-full rounded border border-white/10 bg-white/10 px-2 py-1 text-sm text-white outline-none ring-1 ring-blue-500/40"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
+              if (e.key === "Escape") setEditing(false);
+            }}
+            disabled={busy}
+          />
+        ) : (
+          <button
+            className="truncate text-left text-sm text-white/85 transition-colors hover:text-white"
+            onClick={() => onSearch(entry.tag)}
+            title="Search this tag"
+          >
+            {entry.tag}
+          </button>
+        )}
+      </div>
+      <span className="shrink-0 text-xs tabular-nums text-white/30">{entry.count.toLocaleString()}</span>
+
+      {editing ? (
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            className="rounded-md bg-blue-500/20 px-2 py-1 text-[11px] text-blue-200 transition-colors hover:bg-blue-500/30 disabled:opacity-50"
+            onClick={() => void commitRename()}
+            disabled={busy || !value.trim()}
+            title="Rename (merges into the target if it already exists)"
+          >
+            Save
+          </button>
+          <button
+            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/50 transition-colors hover:bg-white/5 hover:text-white/80"
+            onClick={() => setEditing(false)}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : confirming ? (
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            className="rounded-md bg-red-500/20 px-2 py-1 text-[11px] text-red-300 transition-colors hover:bg-red-500/30 disabled:opacity-50"
+            onClick={async () => { setBusy(true); try { await onDelete(entry.tag); } finally { setBusy(false); setConfirming(false); } }}
+            disabled={busy}
+          >
+            Delete
+          </button>
+          <button
+            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/50 transition-colors hover:bg-white/5 hover:text-white/80"
+            onClick={() => setConfirming(false)}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <button
+            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/60 transition-colors hover:bg-white/8 hover:text-white"
+            onClick={() => setEditing(true)}
+            title="Rename or merge into another tag"
+          >
+            Rename
+          </button>
+          <button
+            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/60 transition-colors hover:bg-red-500/10 hover:text-red-300"
+            onClick={() => setConfirming(true)}
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TagManageList({
+  entries,
+  onSearch,
+  onRename,
+  onDelete,
+}: {
+  entries: ExploreTagEntry[];
+  onSearch: (tag: string) => void;
+  onRename: (from: string, to: string) => Promise<void>;
+  onDelete: (tag: string) => Promise<void>;
+}) {
+  return (
+    <div className="mx-auto w-full max-w-2xl overflow-y-auto px-6 py-6">
+      <p className="mb-3 px-3 text-[11px] leading-relaxed text-white/30">
+        Rename a tag to clean it up, or rename it to an existing tag's name to merge them. Delete
+        removes a tag from every image. These changes apply across your whole library.
+      </p>
+      <div className="divide-y divide-white/[0.05]">
+        {entries.map((entry) => (
+          <TagManageRow
+            key={entry.tag}
+            entry={entry}
+            onSearch={onSearch}
+            onRename={onRename}
+            onDelete={onDelete}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function TagCloud() {
   const exploreMode = useGalleryStore((state) => state.exploreMode);
   const setExploreMode = useGalleryStore((state) => state.setExploreMode);
@@ -303,7 +459,11 @@ export function TagCloud() {
   const loadExploreTags = useGalleryStore((state) => state.loadExploreTags);
   const showVisualCluster = useGalleryStore((state) => state.showVisualCluster);
   const searchForTag = useGalleryStore((state) => state.searchForTag);
+  const renameTag = useGalleryStore((state) => state.renameTag);
+  const deleteTag = useGalleryStore((state) => state.deleteTag);
   const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
+  const [manageTags, setManageTags] = useState(false);
+  const handleDeleteTag = async (tag: string) => { await deleteTag(tag); };
 
   useEffect(() => {
     if (exploreMode === "visual") void loadTagCloud();
@@ -342,6 +502,18 @@ export function TagCloud() {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {exploreMode === "tags" && hasEntries ? (
+              <button
+                className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                  manageTags
+                    ? "border-white/15 bg-white/10 text-white"
+                    : "border-white/8 bg-white/[0.03] text-gray-500 hover:text-gray-300"
+                }`}
+                onClick={() => setManageTags((v) => !v)}
+              >
+                {manageTags ? "Done" : "Manage"}
+              </button>
+            ) : null}
             <FolderScopeDropdown />
             <div className="explore-mode-toggle flex rounded-lg border border-white/8 bg-white/[0.03] p-0.5">
               <button
@@ -380,6 +552,13 @@ export function TagCloud() {
         </div>
       ) : exploreMode === "visual" ? (
         <ClusterCloud entries={tagCloudEntries} onOpen={showVisualCluster} />
+      ) : manageTags ? (
+        <TagManageList
+          entries={exploreTagEntries}
+          onSearch={searchForTag}
+          onRename={renameTag}
+          onDelete={handleDeleteTag}
+        />
       ) : (
         /* Tag cloud — words sized by log-scaled frequency, wrapped freely */
         <div className="overflow-y-auto px-8 py-8">

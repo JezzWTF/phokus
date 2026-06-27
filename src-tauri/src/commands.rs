@@ -1660,6 +1660,96 @@ pub fn get_build_variant() -> String {
     }
 }
 
+/// Camera/EXIF metadata for the lightbox info panel. Read on demand from the
+/// file (not stored in the DB) so it works on every already-indexed image
+/// without a reindex. All fields are optional — absent tags are simply omitted.
+#[derive(Serialize, Default)]
+pub struct ImageExif {
+    pub make: Option<String>,
+    pub model: Option<String>,
+    pub lens: Option<String>,
+    pub iso: Option<String>,
+    pub f_number: Option<String>,
+    pub exposure_time: Option<String>,
+    pub focal_length: Option<String>,
+    pub datetime_original: Option<String>,
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
+}
+
+fn gps_coord(exif: &exif::Exif, coord: exif::Tag, reference: exif::Tag) -> Option<f64> {
+    let field = exif.get_field(coord, exif::In::PRIMARY)?;
+    if let exif::Value::Rational(ref parts) = field.value {
+        if parts.len() >= 3 {
+            let degrees = parts[0].to_f64() + parts[1].to_f64() / 60.0 + parts[2].to_f64() / 3600.0;
+            // Read the hemisphere straight from the ref tag's ASCII bytes
+            // ("N"/"S"/"E"/"W") rather than its formatted display string.
+            let negative = exif
+                .get_field(reference, exif::In::PRIMARY)
+                .map(|f| match &f.value {
+                    exif::Value::Ascii(values) => values
+                        .iter()
+                        .flatten()
+                        .next()
+                        .map(|&byte| byte == b'S' || byte == b'W')
+                        .unwrap_or(false),
+                    _ => false,
+                })
+                .unwrap_or(false);
+            return Some(if negative { -degrees } else { degrees });
+        }
+    }
+    None
+}
+
+fn extract_image_exif(path: &Path) -> ImageExif {
+    let mut out = ImageExif::default();
+    let Ok(file) = std::fs::File::open(path) else {
+        return out;
+    };
+    let mut reader = std::io::BufReader::new(file);
+    let Ok(exif) = exif::Reader::new().read_from_container(&mut reader) else {
+        return out;
+    };
+
+    let text = |tag: exif::Tag| -> Option<String> {
+        let value = exif
+            .get_field(tag, exif::In::PRIMARY)?
+            .display_value()
+            .with_unit(&exif)
+            .to_string();
+        let trimmed = value.trim().trim_matches('"').trim().to_string();
+        (!trimmed.is_empty()).then_some(trimmed)
+    };
+
+    out.make = text(exif::Tag::Make);
+    out.model = text(exif::Tag::Model);
+    out.lens = text(exif::Tag::LensModel);
+    out.iso = text(exif::Tag::PhotographicSensitivity);
+    out.f_number = text(exif::Tag::FNumber);
+    out.exposure_time = text(exif::Tag::ExposureTime);
+    out.focal_length = text(exif::Tag::FocalLength);
+    out.datetime_original = text(exif::Tag::DateTimeOriginal);
+    out.gps_lat = gps_coord(&exif, exif::Tag::GPSLatitude, exif::Tag::GPSLatitudeRef);
+    out.gps_lon = gps_coord(&exif, exif::Tag::GPSLongitude, exif::Tag::GPSLongitudeRef);
+    out
+}
+
+#[derive(Deserialize)]
+pub struct GetImageExifParams {
+    pub image_id: i64,
+}
+
+#[tauri::command]
+pub async fn get_image_exif(
+    db: State<'_, DbState>,
+    params: GetImageExifParams,
+) -> Result<ImageExif, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let record = db::get_image_by_id(&conn, params.image_id).map_err(|e| e.to_string())?;
+    Ok(extract_image_exif(Path::new(&record.path)))
+}
+
 // ── k-means with cosine similarity (all vectors assumed to be unit-normalized) ──
 
 fn dot(a: &[f32], b: &[f32]) -> f32 {
@@ -2072,6 +2162,41 @@ pub async fn add_user_tag(
 pub async fn remove_tag(db: State<'_, DbState>, params: RemoveTagParams) -> Result<(), String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     db::remove_tag(&conn, params.tag_id).map_err(|e| e.to_string())
+}
+
+#[derive(Deserialize)]
+pub struct RenameTagParams {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteTagParams {
+    pub tag: String,
+}
+
+#[tauri::command]
+pub async fn rename_tag(db: State<'_, DbState>, params: RenameTagParams) -> Result<(), String> {
+    let from = params.from.trim();
+    let to = params.to.trim();
+    if from.is_empty() || to.is_empty() {
+        return Err("Tag names cannot be empty".to_string());
+    }
+    if from == to {
+        return Ok(());
+    }
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::rename_tag(&conn, from, to).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_tag(db: State<'_, DbState>, params: DeleteTagParams) -> Result<i64, String> {
+    let tag = params.tag.trim();
+    if tag.is_empty() {
+        return Err("Tag name cannot be empty".to_string());
+    }
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::delete_tag(&conn, tag).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------

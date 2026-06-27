@@ -24,6 +24,17 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   views too.
 - **Build badge in Settings** — the version line in Settings → Updates now shows
   whether the running build is the CPU or CUDA (GPU-accelerated) variant.
+- **Camera info in the lightbox** — the image info panel now shows EXIF details
+  (camera, lens, aperture, shutter, ISO, focal length) and, when a photo is
+  geotagged, its GPS coordinates as a link that opens the location in your
+  browser. Read on demand from the file, so it works on already-indexed images
+  without re-indexing.
+- **Tag management** — Explore → Tag Cloud gains a Manage mode with a flat tag
+  list where you can rename a tag, merge it into another (rename it to an
+  existing tag's name), or delete it from every image. Changes apply across the
+  whole library.
+- **Reorderable albums** — drag albums in the sidebar (hover the row for the
+  drag handle) to set their order, which persists across sessions.
 - **What's New** — after updating, Phokus now greets you with a "What's new"
   toast that opens an in-app release-notes screen for the new version, with the
   changes grouped into collapsible Added / Changed / Fixed sections. It's

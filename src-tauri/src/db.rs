@@ -2624,6 +2624,35 @@ pub fn remove_tag(conn: &Connection, tag_id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Rename a tag across the whole library, or merge it into an existing tag when
+/// `to` already exists. Images that already carry `to` keep a single instance
+/// (the colliding source row is dropped).
+pub fn rename_tag(conn: &Connection, from: &str, to: &str) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    // Move rows where the target tag isn't already on that image; UNIQUE
+    // collisions are skipped (OR IGNORE)…
+    tx.execute(
+        "UPDATE OR IGNORE image_tags SET tag = ?2 WHERE tag = ?1",
+        params![from, to],
+    )?;
+    // …then drop the now-duplicate leftovers still under the old name.
+    tx.execute("DELETE FROM image_tags WHERE tag = ?1", params![from])?;
+    // The tag-cloud cache keys on image-id hashes, not tag text, so a rename
+    // wouldn't invalidate it automatically — clear it.
+    tx.execute("DELETE FROM tag_cloud_cache", [])?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Delete a tag from every image in the library. Returns the number of rows removed.
+pub fn delete_tag(conn: &Connection, name: &str) -> Result<i64> {
+    let tx = conn.unchecked_transaction()?;
+    let removed = tx.execute("DELETE FROM image_tags WHERE tag = ?1", params![name])? as i64;
+    tx.execute("DELETE FROM tag_cloud_cache", [])?;
+    tx.commit()?;
+    Ok(removed)
+}
+
 pub fn enqueue_missing_tagging_jobs_for_folder(conn: &Connection, folder_id: i64) -> Result<usize> {
     let inserted = conn.execute(
         "INSERT INTO tagging_jobs (image_id, status, attempts, last_error, created_at, updated_at)
