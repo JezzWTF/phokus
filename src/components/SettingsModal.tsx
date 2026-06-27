@@ -191,6 +191,7 @@ export function SettingsModal() {
   const getOrphanedThumbnailsInfo = useGalleryStore((state) => state.getOrphanedThumbnailsInfo);
   const cleanupOrphanedThumbnails = useGalleryStore((state) => state.cleanupOrphanedThumbnails);
   const appVersion = useGalleryStore((state) => state.appVersion);
+  const buildVariant = useGalleryStore((state) => state.buildVariant);
   const updateStatus = useGalleryStore((state) => state.updateStatus);
   const updateVersion = useGalleryStore((state) => state.updateVersion);
   const updateProgress = useGalleryStore((state) => state.updateProgress);
@@ -662,6 +663,11 @@ export function SettingsModal() {
                     label={
                       <span className="inline-flex items-center gap-2.5">
                         <span>Phokus {appVersion ? `v${appVersion}` : "—"}</span>
+                        {buildVariant ? (
+                          <StatusPill tone={buildVariant === "cuda" ? "ready" : "muted"}>
+                            {buildVariant === "cuda" ? "CUDA" : "CPU"}
+                          </StatusPill>
+                        ) : null}
                         {updateStatus === "available" || updateStatus === "downloading" || updateStatus === "installing" ? (
                           <StatusPill tone="busy">v{updateVersion} available</StatusPill>
                         ) : updateStatus === "upToDate" ? (

@@ -9,6 +9,21 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Albums** — curate your own collections. A new Albums section in the sidebar
+  (with cover thumbnails, kept visually distinct from Libraries) lets you create,
+  rename, and open albums; albums can span multiple folders. Add images from the
+  gallery's bulk action bar or from the lightbox, remove them from within an
+  album, and use the section's Manage mode to multi-select and delete albums in
+  one go. Deleting an album never touches your files — only the grouping is
+  removed.
+- **Multi-select & bulk actions in the gallery** — hover a thumbnail's top-left
+  corner to reveal a selection checkbox (or click it to start selecting); while
+  selecting, click tiles to toggle and double-click to open. A floating action
+  bar then lets you tag (with autocomplete), rate, favorite, add to an album, or
+  delete the whole selection at once. Works in similar-image, region, and album
+  views too.
+- **Build badge in Settings** — the version line in Settings → Updates now shows
+  whether the running build is the CPU or CUDA (GPU-accelerated) variant.
 - **What's New** — after updating, Phokus now greets you with a "What's new"
   toast that opens an in-app release-notes screen for the new version, with the
   changes grouped into collapsible Added / Changed / Fixed sections. It's
@@ -17,11 +32,19 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- **Safer deletion** — deleting media now asks for confirmation and spells out
+  that it permanently removes the file(s) from disk. This covers the new gallery
+  bulk delete and the Duplicate Finder, which previously deleted on a single
+  click with no confirmation or warning.
 - The updater now shows a real download progress bar with a percentage in
   Settings → Updates (previously it only said "Downloading").
 
 ### Fixed
 
+- **Rating no longer scrambles search results** — rating or favoriting an image
+  while viewing similar-image, region, semantic, tag, or album results no longer
+  re-sorts the view back into the default order; the current result ordering is
+  preserved.
 - The update download/install progress toast now reappears when you start an
   update from the title-bar indicator or Settings after dismissing the earlier
   "Update available" prompt — previously progress only showed in Settings.

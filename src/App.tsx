@@ -24,6 +24,7 @@ export default function App() {
   const loadImages = useGalleryStore((state) => state.loadImages);
   const loadCaptionModelStatus = useGalleryStore((state) => state.loadCaptionModelStatus);
   const loadDuplicateScanCache = useGalleryStore((state) => state.loadDuplicateScanCache);
+  const loadAlbums = useGalleryStore((state) => state.loadAlbums);
   const loadMutedFolderIds = useGalleryStore((state) => state.loadMutedFolderIds);
   const loadNotificationsPaused = useGalleryStore((state) => state.loadNotificationsPaused);
   const subscribeToProgress = useGalleryStore((state) => state.subscribeToProgress);
@@ -51,6 +52,7 @@ export default function App() {
       void loadBackgroundJobProgress();
       void loadCaptionModelStatus();
       void loadDuplicateScanCache();
+      void loadAlbums();
       return loadImages(true);
     });
     let unlisten: (() => void) | undefined;

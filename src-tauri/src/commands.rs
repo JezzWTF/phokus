@@ -2,7 +2,9 @@ use crate::captioner::{
     self, CaptionAcceleration, CaptionDetail, CaptionModelStatus, CaptionRuntimeProbe,
     CaptionVisionProbe,
 };
-use crate::db::{self, DbPool, ExploreTagEntry, Folder, FolderJobProgress, ImageRecord, ImageTag};
+use crate::db::{
+    self, Album, DbPool, ExploreTagEntry, Folder, FolderJobProgress, ImageRecord, ImageTag,
+};
 use crate::embedder;
 use crate::hnsw_index;
 use crate::indexer::{self, WatcherHandle};
@@ -1647,6 +1649,17 @@ pub async fn get_images_by_ids(
     db::get_images_by_ids(&conn, &params.image_ids).map_err(|e| e.to_string())
 }
 
+/// Which acceleration variant this binary was compiled with. Used to badge the
+/// version in Settings so it's clear whether the CPU or CUDA build is running.
+#[tauri::command]
+pub fn get_build_variant() -> String {
+    if cfg!(feature = "candle-cuda") {
+        "cuda".to_string()
+    } else {
+        "cpu".to_string()
+    }
+}
+
 // ── k-means with cosine similarity (all vectors assumed to be unit-normalized) ──
 
 fn dot(a: &[f32], b: &[f32]) -> f32 {
@@ -2059,6 +2072,184 @@ pub async fn add_user_tag(
 pub async fn remove_tag(db: State<'_, DbState>, params: RemoveTagParams) -> Result<(), String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     db::remove_tag(&conn, params.tag_id).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Albums
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct CreateAlbumParams {
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+pub struct RenameAlbumParams {
+    pub album_id: i64,
+    pub new_name: String,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteAlbumParams {
+    pub album_id: i64,
+}
+
+#[derive(Deserialize)]
+pub struct ReorderAlbumsParams {
+    pub album_ids: Vec<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteAlbumsParams {
+    pub album_ids: Vec<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct AlbumImagesParams {
+    pub album_id: i64,
+    pub image_ids: Vec<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct GetAlbumImagesParams {
+    pub album_id: i64,
+    pub sort: Option<String>,
+    pub offset: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+#[tauri::command]
+pub async fn list_albums(db: State<'_, DbState>) -> Result<Vec<Album>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::list_albums(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn create_album(db: State<'_, DbState>, params: CreateAlbumParams) -> Result<Album, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let name = params.name.trim();
+    if name.is_empty() {
+        return Err("Album name cannot be empty".to_string());
+    }
+    db::create_album(&conn, name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn rename_album(db: State<'_, DbState>, params: RenameAlbumParams) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let name = params.new_name.trim();
+    if name.is_empty() {
+        return Err("Album name cannot be empty".to_string());
+    }
+    db::rename_album(&conn, params.album_id, name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_album(db: State<'_, DbState>, params: DeleteAlbumParams) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::delete_album(&conn, params.album_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn reorder_albums(db: State<'_, DbState>, params: ReorderAlbumsParams) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::reorder_albums(&conn, &params.album_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_albums(db: State<'_, DbState>, params: DeleteAlbumsParams) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::delete_albums(&conn, &params.album_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn add_images_to_album(
+    db: State<'_, DbState>,
+    params: AlbumImagesParams,
+) -> Result<i64, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::add_images_to_album(&conn, params.album_id, &params.image_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remove_images_from_album(
+    db: State<'_, DbState>,
+    params: AlbumImagesParams,
+) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::remove_images_from_album(&conn, params.album_id, &params.image_ids)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_album_images(
+    db: State<'_, DbState>,
+    params: GetAlbumImagesParams,
+) -> Result<ImagesPage, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let sort = params.sort.as_deref().unwrap_or("position");
+    let offset = params.offset.unwrap_or(0);
+    let limit = params.limit.unwrap_or(100);
+    let total = db::count_album_images(&conn, params.album_id).map_err(|e| e.to_string())?;
+    let images = db::get_album_images(&conn, params.album_id, sort, offset, limit)
+        .map_err(|e| e.to_string())?;
+    Ok(ImagesPage {
+        images,
+        total,
+        offset,
+        limit,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Bulk image operations
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct BulkUpdateDetailsParams {
+    pub image_ids: Vec<i64>,
+    pub favorite: Option<bool>,
+    pub rating: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct BulkAddTagsParams {
+    pub image_ids: Vec<i64>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct BulkRemoveTagParams {
+    pub image_ids: Vec<i64>,
+    pub tag: String,
+}
+
+#[tauri::command]
+pub async fn bulk_update_details(
+    db: State<'_, DbState>,
+    params: BulkUpdateDetailsParams,
+) -> Result<Vec<ImageRecord>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::bulk_update_details(&conn, &params.image_ids, params.favorite, params.rating)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn bulk_add_tags(
+    db: State<'_, DbState>,
+    params: BulkAddTagsParams,
+) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::bulk_add_tags(&conn, &params.image_ids, &params.tags).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn bulk_remove_tag(
+    db: State<'_, DbState>,
+    params: BulkRemoveTagParams,
+) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::bulk_remove_tag_by_name(&conn, &params.image_ids, &params.tag).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------

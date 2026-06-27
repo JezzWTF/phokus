@@ -176,7 +176,18 @@ export interface ThumbnailBatch {
   images: ImageRecord[];
 }
 
-export type ActiveView = "gallery" | "explore" | "duplicates" | "timeline";
+export type ActiveView = "gallery" | "explore" | "duplicates" | "timeline" | "album";
+
+export interface Album {
+  id: number;
+  name: string;
+  cover_image_id: number | null;
+  cover_thumbnail_path: string | null;
+  image_count: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface TagCloudEntry {
   count: number;
@@ -374,6 +385,7 @@ interface GalleryState {
   workerPaused: Record<number, Record<WorkerKey, boolean>>;
 
   appVersion: string | null;
+  buildVariant: "cpu" | "cuda" | null;
   updateStatus: UpdateStatus;
   updateVersion: string | null;
   updateProgress: number | null; // 0..1 download progress, null while size unknown
@@ -410,6 +422,14 @@ interface GalleryState {
   duplicateSelectedIds: Set<number>;
   duplicateLastScanned: number | null; // Unix timestamp (seconds)
   duplicateScanFolderId: number | null | undefined; // undefined = never scanned
+
+  // Gallery multi-select (Feature A)
+  gallerySelectedIds: Set<number>;
+
+  // Albums (Feature B)
+  albums: Album[];
+  albumsLoaded: boolean;
+  selectedAlbumId: number | null;
 
   loadFolders: () => Promise<void>;
   loadBackgroundJobProgress: () => Promise<void>;
@@ -531,6 +551,27 @@ interface GalleryState {
   getImageTags: (imageId: number) => Promise<ImageTag[]>;
   addUserTag: (imageId: number, tag: string) => Promise<ImageTag>;
   removeTag: (tagId: number) => Promise<void>;
+
+  // Gallery multi-select (Feature A)
+  toggleGallerySelected: (imageId: number) => void;
+  selectAllGallery: () => void;
+  clearGallerySelection: () => void;
+  bulkSetFavorite: (favorite: boolean) => Promise<void>;
+  bulkSetRating: (rating: number) => Promise<void>;
+  bulkAddTags: (tags: string[]) => Promise<void>;
+  bulkRemoveTag: (tag: string) => Promise<void>;
+  bulkDeleteSelected: () => Promise<number>;
+
+  // Albums (Feature B)
+  loadAlbums: () => Promise<void>;
+  createAlbum: (name: string) => Promise<Album>;
+  renameAlbum: (albumId: number, name: string) => Promise<void>;
+  deleteAlbum: (albumId: number) => Promise<void>;
+  deleteAlbums: (albumIds: number[]) => Promise<void>;
+  reorderAlbums: (albumIds: number[]) => Promise<void>;
+  addToAlbum: (albumId: number, imageIds: number[]) => Promise<number>;
+  removeFromAlbum: (albumId: number, imageIds: number[]) => Promise<void>;
+  viewAlbum: (albumId: number) => void;
 }
 
 const PAGE_SIZE = 200;
@@ -815,6 +856,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   workerPaused: {},
 
   appVersion: null,
+  buildVariant: null,
   updateStatus: "idle",
   updateVersion: null,
   updateProgress: null,
@@ -848,6 +890,12 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   duplicateSelectedIds: new Set(),
   duplicateLastScanned: null,
   duplicateScanFolderId: undefined,
+
+  gallerySelectedIds: new Set(),
+
+  albums: [],
+  albumsLoaded: false,
+  selectedAlbumId: null,
 
   setCacheDir: (cacheDir) => set({ cacheDir }),
 
@@ -957,7 +1005,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   selectFolder: (folderId) => {
-    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, activeView: "gallery", failedEmbeddingsOnly: false, failedTaggingOnly: false, imageLoadError: null });
+    set({ selectedFolderId: folderId, selectedAlbumId: null, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, activeView: "gallery", failedEmbeddingsOnly: false, failedTaggingOnly: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
@@ -993,9 +1041,35 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     const { selectedFolderId, search, sort, loadedCount, mediaFilter, favoritesOnly, minimumRating, failedEmbeddingsOnly, failedTaggingOnly, activeView } = get();
     const parsedSearch = parseSearchValue(search);
     const requestToken = ++galleryRequestToken;
-    set({ loadingImages: true, imageLoadError: null });
+    // Any fresh collection load invalidates a selection that referenced the
+    // previous set of visible images.
+    set({ loadingImages: true, imageLoadError: null, ...(reset ? { gallerySelectedIds: new Set<number>() } : {}) });
 
     try {
+      // Album view loads from the album membership, honoring sort changes from
+      // the Toolbar while staying within the album (ignores folder/search/filters).
+      if (activeView === "album") {
+        const albumId = get().selectedAlbumId;
+        if (albumId === null) {
+          set({ loadingImages: false });
+          return;
+        }
+        const offset = reset ? 0 : loadedCount;
+        const result = await invoke<{ images: ImageRecord[]; total: number; offset: number; limit: number }>("get_album_images", {
+          params: { album_id: albumId, sort, offset, limit: PAGE_SIZE },
+        });
+        if (requestToken !== galleryRequestToken) return;
+        const albumName = get().albums.find((entry) => entry.id === albumId)?.name ?? "Album";
+        set((state) => ({
+          images: reset ? result.images : [...state.images, ...result.images],
+          totalImages: result.total,
+          loadedCount: reset ? result.images.length : state.loadedCount + result.images.length,
+          loadingImages: false,
+          collectionTitle: albumName,
+        }));
+        return;
+      }
+
       if (parsedSearch.mode === "semantic" && parsedSearch.query) {
         const images = await invoke<ImageRecord[]>("semantic_search_images", {
           params: {
@@ -1107,6 +1181,27 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     const { loadedCount, totalImages, loadingImages, collectionTitle, similarSourceImageId, similarHasMore, similarFolderId, similarCrop } = get();
     if (loadingImages || loadedCount >= totalImages) return;
     if (collectionTitle === "Explore Cluster") return;
+    const { activeView, selectedAlbumId, sort } = get();
+    if (activeView === "album" && selectedAlbumId !== null) {
+      const requestToken = ++galleryRequestToken;
+      set({ loadingImages: true });
+      try {
+        const result = await invoke<{ images: ImageRecord[]; total: number; offset: number; limit: number }>("get_album_images", {
+          params: { album_id: selectedAlbumId, sort, offset: loadedCount, limit: PAGE_SIZE },
+        });
+        if (requestToken !== galleryRequestToken) return;
+        set((state) => ({
+          images: [...state.images, ...result.images],
+          loadedCount: state.loadedCount + result.images.length,
+          totalImages: result.total,
+          loadingImages: false,
+        }));
+      } catch {
+        if (requestToken !== galleryRequestToken) return;
+        set({ loadingImages: false });
+      }
+      return;
+    }
     if (collectionTitle === "Similar Images" && similarSourceImageId !== null) {
       if (!similarHasMore) return;
       await get().loadSimilarImages(similarSourceImageId, similarFolderId, false, get().similarSourceFolderId ?? null);
@@ -1305,6 +1400,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       similarSourceFolderId: null,
       similarHasMore: false,
       similarFolderId: null,
+      gallerySelectedIds: new Set<number>(),
+      selectedAlbumId: null,
       galleryScrollResetKey: state.galleryScrollResetKey + 1,
     }));
 
@@ -1353,6 +1450,11 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       similarSourceFolderId: sourceFolderId,
       similarFolderId: folderId ?? null,
       similarScope,
+      // Force the gallery grid so results (and the bulk bar) render regardless
+      // of which view the search was launched from.
+      activeView: "gallery",
+      gallerySelectedIds: reset ? new Set<number>() : state.gallerySelectedIds,
+      selectedAlbumId: null,
       galleryScrollResetKey: reset ? state.galleryScrollResetKey + 1 : state.galleryScrollResetKey,
     }));
 
@@ -1421,6 +1523,11 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       similarFolderId: folderId ?? null,
       similarCrop: crop,
       similarScope,
+      // Force the gallery grid so results (and the bulk bar) render regardless
+      // of which view the search was launched from.
+      activeView: "gallery",
+      gallerySelectedIds: new Set<number>(),
+      selectedAlbumId: null,
       galleryScrollResetKey: state.galleryScrollResetKey + 1,
       selectedImage: null,
     }));
@@ -1781,6 +1888,12 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     } catch {
       // leave null; the UI falls back to a dash
     }
+    try {
+      const variant = await invoke<string>("get_build_variant");
+      set({ buildVariant: variant === "cuda" ? "cuda" : "cpu" });
+    } catch {
+      // leave null; the badge is hidden until known
+    }
   },
 
   checkForUpdates: async (options) => {
@@ -2097,6 +2210,237 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     set({ exploreTagsFolderId: undefined });
   },
 
+  // ── Gallery multi-select (Feature A) ──────────────────────────────────────
+
+  toggleGallerySelected: (imageId) => {
+    set((state) => {
+      const next = new Set(state.gallerySelectedIds);
+      if (next.has(imageId)) next.delete(imageId);
+      else next.add(imageId);
+      return { gallerySelectedIds: next };
+    });
+  },
+
+  selectAllGallery: () => {
+    set((state) => ({ gallerySelectedIds: new Set(state.images.map((image) => image.id)) }));
+  },
+
+  clearGallerySelection: () => set({ gallerySelectedIds: new Set() }),
+
+  bulkSetFavorite: async (favorite) => {
+    const ids = Array.from(get().gallerySelectedIds);
+    if (ids.length === 0) return;
+    const updated = await invoke<ImageRecord[]>("bulk_update_details", {
+      params: { image_ids: ids, favorite, rating: null },
+    });
+    set((state) => {
+      const match = state.selectedImage && updated.find((image) => image.id === state.selectedImage!.id);
+      // Derived collections keep their relevance order (replace in place); only
+      // the real sorted gallery re-sorts.
+      return {
+        images: isDerivedCollectionTitle(state.collectionTitle)
+          ? replaceExistingImages(state.images, updated)
+          : mergeImages(state.images, updated, state.sort),
+        selectedImage: match ?? state.selectedImage,
+      };
+    });
+  },
+
+  bulkSetRating: async (rating) => {
+    const ids = Array.from(get().gallerySelectedIds);
+    if (ids.length === 0) return;
+    const updated = await invoke<ImageRecord[]>("bulk_update_details", {
+      params: { image_ids: ids, favorite: null, rating },
+    });
+    set((state) => {
+      const match = state.selectedImage && updated.find((image) => image.id === state.selectedImage!.id);
+      return {
+        images: isDerivedCollectionTitle(state.collectionTitle)
+          ? replaceExistingImages(state.images, updated)
+          : mergeImages(state.images, updated, state.sort),
+        selectedImage: match ?? state.selectedImage,
+      };
+    });
+  },
+
+  bulkAddTags: async (tags) => {
+    const ids = Array.from(get().gallerySelectedIds);
+    const cleaned = tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0);
+    if (ids.length === 0 || cleaned.length === 0) return;
+    await invoke<void>("bulk_add_tags", { params: { image_ids: ids, tags: cleaned } });
+    // New tags landed — invalidate Explore tag caches.
+    set({ exploreTagsFolderId: undefined, tagCloudFolderId: undefined, tagCloudEntries: [] });
+  },
+
+  bulkRemoveTag: async (tag) => {
+    const ids = Array.from(get().gallerySelectedIds);
+    if (ids.length === 0 || !tag.trim()) return;
+    await invoke<void>("bulk_remove_tag", { params: { image_ids: ids, tag: tag.trim() } });
+    set({ exploreTagsFolderId: undefined, tagCloudFolderId: undefined, tagCloudEntries: [] });
+  },
+
+  bulkDeleteSelected: async () => {
+    const ids = Array.from(get().gallerySelectedIds);
+    if (ids.length === 0) return 0;
+    const affectedFolderIds = new Set<number>(
+      get().images.filter((image) => get().gallerySelectedIds.has(image.id)).map((image) => image.folder_id),
+    );
+    const succeededIds = await invoke<number[]>("delete_images_from_disk", { params: { image_ids: ids } });
+    const succeededSet = new Set(succeededIds);
+    set((state) => ({
+      // Only remove images confirmed deleted — failed files remain selected for retry.
+      images: state.images.filter((image) => !succeededSet.has(image.id)),
+      loadedCount: state.images.filter((image) => !succeededSet.has(image.id)).length,
+      totalImages: Math.max(0, state.totalImages - succeededIds.length),
+      gallerySelectedIds: new Set([...state.gallerySelectedIds].filter((id) => !succeededSet.has(id))),
+      // Deletion changes tag/duplicate/album aggregates.
+      tagCloudFolderId: undefined,
+      tagCloudEntries: [],
+      exploreTagsFolderId: undefined,
+    }));
+    // The DB cascade already removed these from album_images; refresh counts/covers.
+    void get().loadAlbums();
+    await invoke("invalidate_duplicate_scan_cache", { folderId: null });
+    for (const folderId of affectedFolderIds) {
+      await invoke("invalidate_duplicate_scan_cache", { folderId });
+    }
+    return succeededIds.length;
+  },
+
+  // ── Albums (Feature B) ────────────────────────────────────────────────────
+
+  loadAlbums: async () => {
+    const albums = await invoke<Album[]>("list_albums");
+    set({ albums, albumsLoaded: true });
+  },
+
+  createAlbum: async (name) => {
+    const album = await invoke<Album>("create_album", { params: { name } });
+    await get().loadAlbums();
+    return album;
+  },
+
+  renameAlbum: async (albumId, name) => {
+    await invoke("rename_album", { params: { album_id: albumId, new_name: name } });
+    await get().loadAlbums();
+  },
+
+  deleteAlbum: async (albumId) => {
+    await invoke("delete_album", { params: { album_id: albumId } });
+    // If the deleted album is being viewed, drop back to All Media.
+    if (get().activeView === "album" && get().selectedAlbumId === albumId) {
+      set({ activeView: "gallery", selectedAlbumId: null, collectionTitle: null });
+      void get().loadImages(true);
+    }
+    await get().loadAlbums();
+  },
+
+  deleteAlbums: async (albumIds) => {
+    if (albumIds.length === 0) return;
+    await invoke("delete_albums", { params: { album_ids: albumIds } });
+    // If a deleted album is being viewed, drop back to All Media.
+    if (get().activeView === "album" && get().selectedAlbumId !== null && albumIds.includes(get().selectedAlbumId!)) {
+      set({ activeView: "gallery", selectedAlbumId: null, collectionTitle: null });
+      void get().loadImages(true);
+    }
+    await get().loadAlbums();
+  },
+
+  reorderAlbums: async (albumIds) => {
+    const previous = get().albums;
+    const byId = new Map(previous.map((album) => [album.id, album]));
+    const albums = albumIds
+      .map((id, index) => {
+        const album = byId.get(id);
+        return album ? { ...album, sort_order: index + 1 } : null;
+      })
+      .filter((album): album is Album => album !== null);
+    set({ albums });
+    try {
+      await invoke("reorder_albums", { params: { album_ids: albumIds } });
+    } catch (error) {
+      set({ albums: previous });
+      throw error;
+    }
+  },
+
+  addToAlbum: async (albumId, imageIds) => {
+    if (imageIds.length === 0) return 0;
+    const added = await invoke<number>("add_images_to_album", {
+      params: { album_id: albumId, image_ids: imageIds },
+    });
+    await get().loadAlbums();
+    return added;
+  },
+
+  removeFromAlbum: async (albumId, imageIds) => {
+    if (imageIds.length === 0) return;
+    await invoke("remove_images_from_album", {
+      params: { album_id: albumId, image_ids: imageIds },
+    });
+    // If viewing this album, splice the removed images out immediately.
+    if (get().activeView === "album" && get().selectedAlbumId === albumId) {
+      const removed = new Set(imageIds);
+      set((state) => {
+        const nextImages = state.images.filter((image) => !removed.has(image.id));
+        // Decrement by what was actually on screen, not the requested count —
+        // some ids may live beyond the loaded page.
+        const removedFromView = state.images.length - nextImages.length;
+        return {
+          images: nextImages,
+          loadedCount: nextImages.length,
+          totalImages: Math.max(0, state.totalImages - removedFromView),
+          gallerySelectedIds: new Set([...state.gallerySelectedIds].filter((id) => !removed.has(id))),
+        };
+      });
+    }
+    await get().loadAlbums();
+  },
+
+  viewAlbum: (albumId) => {
+    const requestToken = ++galleryRequestToken;
+    const album = get().albums.find((entry) => entry.id === albumId);
+    const sort = get().sort;
+    set((state) => ({
+      activeView: "album",
+      selectedAlbumId: albumId,
+      search: "",
+      images: [],
+      totalImages: album?.image_count ?? 0,
+      loadedCount: 0,
+      loadingImages: true,
+      collectionTitle: album?.name ?? "Album",
+      imageLoadError: null,
+      similarSourceImageId: null,
+      similarSourceFolderId: null,
+      similarHasMore: false,
+      similarFolderId: null,
+      similarCrop: null,
+      gallerySelectedIds: new Set<number>(),
+      galleryScrollResetKey: state.galleryScrollResetKey + 1,
+    }));
+
+    void (async () => {
+      try {
+        const result = await invoke<{ images: ImageRecord[]; total: number; offset: number; limit: number }>("get_album_images", {
+          params: { album_id: albumId, sort, offset: 0, limit: PAGE_SIZE },
+        });
+        if (requestToken !== galleryRequestToken) return;
+        set({
+          images: result.images,
+          totalImages: result.total,
+          loadedCount: result.images.length,
+          loadingImages: false,
+          imageLoadError: null,
+          collectionTitle: album?.name ?? "Album",
+        });
+      } catch (error) {
+        if (requestToken !== galleryRequestToken) return;
+        set({ images: [], totalImages: 0, loadedCount: 0, loadingImages: false, imageLoadError: String(error) });
+      }
+    })();
+  },
+
   loadDuplicateScanCache: async (folderId = null) => {
     interface CacheResult { groups: DuplicateGroup[]; scanned_at: number }
     const cached = await invoke<CacheResult | null>("load_duplicate_scan_cache", { folderId: folderId ?? null });
@@ -2219,7 +2563,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     });
 
     set((state) => ({
-      images: replaceImage(state.images, updatedImage, state.sort),
+      // Derived collections (similar / region / semantic / tag / album results)
+      // are ordered by relevance, not `state.sort` — re-sorting them on a
+      // favorite/rating change would scramble the results. Replace in place
+      // there; only the real sorted gallery re-sorts.
+      images: isDerivedCollectionTitle(state.collectionTitle)
+        ? replaceExistingImages(state.images, [updatedImage])
+        : replaceImage(state.images, updatedImage, state.sort),
       selectedImage: state.selectedImage?.id === updatedImage.id ? updatedImage : state.selectedImage,
     }));
   },
@@ -2350,7 +2700,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const batch = event.payload;
 
       set((state) => {
-        if (isDerivedCollectionTitle(state.collectionTitle) || state.activeView === "explore") {
+        // Album view holds a fixed membership set; newly-indexed files never
+        // auto-join it. Guarding on activeView also covers the brief window
+        // where collectionTitle is null mid sort-change in an album.
+        if (
+          isDerivedCollectionTitle(state.collectionTitle) ||
+          state.activeView === "explore" ||
+          state.activeView === "album"
+        ) {
           return state;
         }
 
@@ -2386,12 +2743,22 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const batch = event.payload;
 
       set((state) => {
+        const selectedImageUpdate =
+          state.selectedImage && batch.images.some((image) => image.id === state.selectedImage?.id)
+            ? batch.images.find((image) => image.id === state.selectedImage?.id) ?? state.selectedImage
+            : state.selectedImage;
+
+        // Album view holds already-loaded images; paint thumbnail/metadata
+        // fills in place (without re-sorting) so tiles refresh while browsing.
+        if (state.activeView === "album") {
+          return {
+            images: replaceExistingImages(state.images, batch.images),
+            selectedImage: selectedImageUpdate,
+          };
+        }
+
         if (isDerivedCollectionTitle(state.collectionTitle) || state.activeView === "explore") {
-          const selectedImage =
-            state.selectedImage && batch.images.some((image) => image.id === state.selectedImage?.id)
-              ? batch.images.find((image) => image.id === state.selectedImage?.id) ?? state.selectedImage
-              : state.selectedImage;
-          return { selectedImage };
+          return { selectedImage: selectedImageUpdate };
         }
 
         const visibleImages = batch.images.filter((image) =>
@@ -2407,18 +2774,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           ),
         );
 
-        const selectedImage =
-          state.selectedImage && batch.images.some((image) => image.id === state.selectedImage?.id)
-            ? batch.images.find((image) => image.id === state.selectedImage?.id) ?? state.selectedImage
-            : state.selectedImage;
-
         if (visibleImages.length === 0) {
-          return { selectedImage };
+          return { selectedImage: selectedImageUpdate };
         }
 
         return {
           images: replaceExistingImages(state.images, visibleImages),
-          selectedImage,
+          selectedImage: selectedImageUpdate,
         };
       });
     });

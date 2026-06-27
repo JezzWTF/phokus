@@ -129,6 +129,7 @@ export function DuplicateFinder() {
   const deleteSelectedDuplicates = useGalleryStore((state) => state.deleteSelectedDuplicates);
 
   const [deleting, setDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteResult, setDeleteResult] = useState<string | null>(null);
 
   // Virtualize the group list so a large result set (e.g. thousands of pairs)
@@ -153,6 +154,7 @@ export function DuplicateFinder() {
 
   const handleDelete = async () => {
     setDeleting(true);
+    setConfirmingDelete(false);
     setDeleteResult(null);
     try {
       const deleted = await deleteSelectedDuplicates();
@@ -222,13 +224,48 @@ export function DuplicateFinder() {
                 >
                   Deselect all
                 </button>
-                <button
-                  className="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-1.5 text-xs text-red-300 transition-colors hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-40"
-                  onClick={handleDelete}
-                  disabled={deleting}
-                >
-                  {deleting ? "Deleting…" : `Delete ${selectedCount} file${selectedCount === 1 ? "" : "s"}`}
-                </button>
+                <div className="relative">
+                  <button
+                    className="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-1.5 text-xs text-red-300 transition-colors hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => setConfirmingDelete((v) => !v)}
+                    disabled={deleting}
+                  >
+                    {deleting ? "Deleting…" : `Delete ${selectedCount} file${selectedCount === 1 ? "" : "s"}`}
+                  </button>
+                  {confirmingDelete && !deleting ? (
+                    <>
+                      {/* Click-away backdrop */}
+                      <div className="fixed inset-0 z-40" onClick={() => setConfirmingDelete(false)} />
+                      <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-red-500/30 bg-gray-950/98 p-3 text-left shadow-2xl backdrop-blur">
+                        <div className="mb-1 flex items-center gap-1.5 text-red-300">
+                          <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                          </svg>
+                          <p className="text-xs font-semibold">Delete from disk</p>
+                        </div>
+                        <p className="mb-2.5 text-[11px] leading-relaxed text-gray-400">
+                          Permanently delete {selectedCount} file{selectedCount === 1 ? "" : "s"} from your computer.
+                          This removes the actual file{selectedCount === 1 ? "" : "s"} from disk and cannot be undone.
+                        </p>
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                            onClick={() => setConfirmingDelete(false)}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            className="rounded-md bg-red-500/20 px-2.5 py-1 text-[11px] font-medium text-red-300 transition-colors hover:bg-red-500/30 hover:text-red-200"
+                            onClick={handleDelete}
+                          >
+                            Delete {selectedCount} from disk
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
               </>
             ) : null}
             <button
