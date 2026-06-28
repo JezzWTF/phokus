@@ -2,7 +2,9 @@ use crate::captioner::{
     self, CaptionAcceleration, CaptionDetail, CaptionModelStatus, CaptionRuntimeProbe,
     CaptionVisionProbe,
 };
-use crate::db::{self, DbPool, ExploreTagEntry, Folder, FolderJobProgress, ImageRecord, ImageTag};
+use crate::db::{
+    self, Album, DbPool, ExploreTagEntry, Folder, FolderJobProgress, ImageRecord, ImageTag,
+};
 use crate::embedder;
 use crate::hnsw_index;
 use crate::indexer::{self, WatcherHandle};
@@ -40,6 +42,9 @@ pub struct GetImagesParams {
     pub rating_min: Option<i64>,
     pub embedding_failed_only: Option<bool>,
     pub tagging_failed_only: Option<bool>,
+    /// Optional `[r, g, b]` color filter — matches images whose palette contains
+    /// a prominent color near this one.
+    pub color: Option<[u8; 3]>,
     pub sort: Option<String>,
     pub offset: Option<i64>,
     pub limit: Option<i64>,
@@ -56,6 +61,9 @@ pub struct UpdateImageDetailsParams {
 pub struct FindSimilarImagesParams {
     pub image_id: i64,
     pub folder_id: Option<i64>,
+    /// When set, restrict results to images in this album (takes precedence
+    /// over `folder_id`). Used by the "Similar: Album" scope.
+    pub album_id: Option<i64>,
     pub offset: Option<usize>,
     pub limit: Option<usize>,
     pub threshold: Option<f32>,
@@ -70,6 +78,8 @@ pub struct FindSimilarByRegionParams {
     pub crop_w: f32,
     pub crop_h: f32,
     pub folder_id: Option<i64>,
+    /// Restrict to an album (takes precedence over `folder_id`).
+    pub album_id: Option<i64>,
     pub offset: Option<usize>,
     pub limit: Option<usize>,
 }
@@ -557,6 +567,7 @@ pub async fn get_images(
     let rating_min = params.rating_min.unwrap_or(0);
     let embedding_failed_only = params.embedding_failed_only.unwrap_or(false);
     let tagging_failed_only = params.tagging_failed_only.unwrap_or(false);
+    let color = params.color.map(|[r, g, b]| (r, g, b));
 
     let total = db::count_images(
         &conn,
@@ -567,6 +578,7 @@ pub async fn get_images(
         rating_min,
         embedding_failed_only,
         tagging_failed_only,
+        color,
     )
     .map_err(|e| e.to_string())?;
 
@@ -579,6 +591,7 @@ pub async fn get_images(
         rating_min,
         embedding_failed_only,
         tagging_failed_only,
+        color,
         sort,
         offset,
         limit,
@@ -702,6 +715,7 @@ pub async fn find_similar_images(
         &conn,
         params.image_id,
         params.folder_id,
+        params.album_id,
         threshold,
         offset,
         limit + 1,
@@ -747,24 +761,36 @@ pub async fn find_similar_by_region(
         )
         .map_err(|e| e.to_string())?;
 
-    // Search for similar images using the crop embedding
-    let image_ids = match params.folder_id {
-        Some(folder_id) => vector::search_image_ids_by_embedding_in_folder(
+    // Search for similar images using the crop embedding. Album scope takes
+    // precedence over folder scope.
+    let image_ids = if let Some(album_id) = params.album_id {
+        vector::search_image_ids_by_embedding_in_album(
             &conn,
             &embedding,
-            folder_id,
+            album_id,
             Some(params.image_id),
             offset + limit + 1,
         )
-        .map_err(|e| e.to_string())?,
-        None => {
-            // Fetch one extra candidate to compensate for the source image that
-            // will be removed, so has_more is accurate and results span multiple pages.
-            let mut ids =
-                vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 2)
-                    .map_err(|e| e.to_string())?;
-            ids.retain(|&id| id != params.image_id);
-            ids
+        .map_err(|e| e.to_string())?
+    } else {
+        match params.folder_id {
+            Some(folder_id) => vector::search_image_ids_by_embedding_in_folder(
+                &conn,
+                &embedding,
+                folder_id,
+                Some(params.image_id),
+                offset + limit + 1,
+            )
+            .map_err(|e| e.to_string())?,
+            None => {
+                // Fetch one extra candidate to compensate for the source image that
+                // will be removed, so has_more is accurate and results span multiple pages.
+                let mut ids =
+                    vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 2)
+                        .map_err(|e| e.to_string())?;
+                ids.retain(|&id| id != params.image_id);
+                ids
+            }
         }
     };
 
@@ -1647,6 +1673,119 @@ pub async fn get_images_by_ids(
     db::get_images_by_ids(&conn, &params.image_ids).map_err(|e| e.to_string())
 }
 
+/// Which acceleration variant this binary was compiled with. Used to badge the
+/// version in Settings so it's clear whether the CPU or CUDA build is running.
+#[tauri::command]
+pub fn get_build_variant() -> String {
+    if cfg!(feature = "candle-cuda") {
+        "cuda".to_string()
+    } else {
+        "cpu".to_string()
+    }
+}
+
+/// Camera/EXIF metadata for the lightbox info panel. Read on demand from the
+/// file (not stored in the DB) so it works on every already-indexed image
+/// without a reindex. All fields are optional — absent tags are simply omitted.
+#[derive(Serialize, Default)]
+pub struct ImageExif {
+    pub make: Option<String>,
+    pub model: Option<String>,
+    pub lens: Option<String>,
+    pub iso: Option<String>,
+    pub f_number: Option<String>,
+    pub exposure_time: Option<String>,
+    pub focal_length: Option<String>,
+    pub datetime_original: Option<String>,
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
+}
+
+fn gps_coord(exif: &exif::Exif, coord: exif::Tag, reference: exif::Tag) -> Option<f64> {
+    let (max_abs, positive_ref, negative_ref) = match (coord, reference) {
+        (exif::Tag::GPSLatitude, exif::Tag::GPSLatitudeRef) => (90.0, b'N', b'S'),
+        (exif::Tag::GPSLongitude, exif::Tag::GPSLongitudeRef) => (180.0, b'E', b'W'),
+        _ => return None,
+    };
+    let field = exif.get_field(coord, exif::In::PRIMARY)?;
+    if let exif::Value::Rational(ref parts) = field.value {
+        if parts.len() >= 3 {
+            let degrees = parts[0].to_f64() + parts[1].to_f64() / 60.0 + parts[2].to_f64() / 3600.0;
+            if !degrees.is_finite() || degrees < 0.0 || degrees > max_abs {
+                return None;
+            }
+            // Read the hemisphere straight from the ref tag's ASCII bytes
+            // ("N"/"S"/"E"/"W") rather than its formatted display string.
+            let ref_byte =
+                exif.get_field(reference, exif::In::PRIMARY)
+                    .and_then(|f| match &f.value {
+                        exif::Value::Ascii(values) => values.iter().flatten().next().copied(),
+                        _ => None,
+                    })?;
+            if ref_byte != positive_ref && ref_byte != negative_ref {
+                return None;
+            }
+            let signed = if ref_byte == negative_ref {
+                -degrees
+            } else {
+                degrees
+            };
+            return signed
+                .is_finite()
+                .then_some(signed.clamp(-max_abs, max_abs));
+        }
+    }
+    None
+}
+
+fn extract_image_exif(path: &Path) -> ImageExif {
+    let mut out = ImageExif::default();
+    let Ok(file) = std::fs::File::open(path) else {
+        return out;
+    };
+    let mut reader = std::io::BufReader::new(file);
+    let Ok(exif) = exif::Reader::new().read_from_container(&mut reader) else {
+        return out;
+    };
+
+    let text = |tag: exif::Tag| -> Option<String> {
+        let value = exif
+            .get_field(tag, exif::In::PRIMARY)?
+            .display_value()
+            .with_unit(&exif)
+            .to_string();
+        let trimmed = value.trim().trim_matches('"').trim().to_string();
+        (!trimmed.is_empty()).then_some(trimmed)
+    };
+
+    out.make = text(exif::Tag::Make);
+    out.model = text(exif::Tag::Model);
+    out.lens = text(exif::Tag::LensModel);
+    out.iso = text(exif::Tag::PhotographicSensitivity);
+    out.f_number = text(exif::Tag::FNumber);
+    out.exposure_time = text(exif::Tag::ExposureTime);
+    out.focal_length = text(exif::Tag::FocalLength);
+    out.datetime_original = text(exif::Tag::DateTimeOriginal);
+    out.gps_lat = gps_coord(&exif, exif::Tag::GPSLatitude, exif::Tag::GPSLatitudeRef);
+    out.gps_lon = gps_coord(&exif, exif::Tag::GPSLongitude, exif::Tag::GPSLongitudeRef);
+    out
+}
+
+#[derive(Deserialize)]
+pub struct GetImageExifParams {
+    pub image_id: i64,
+}
+
+#[tauri::command]
+pub async fn get_image_exif(
+    db: State<'_, DbState>,
+    params: GetImageExifParams,
+) -> Result<ImageExif, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let record = db::get_image_by_id(&conn, params.image_id).map_err(|e| e.to_string())?;
+    Ok(extract_image_exif(Path::new(&record.path)))
+}
+
 // ── k-means with cosine similarity (all vectors assumed to be unit-normalized) ──
 
 fn dot(a: &[f32], b: &[f32]) -> f32 {
@@ -2061,6 +2200,228 @@ pub async fn remove_tag(db: State<'_, DbState>, params: RemoveTagParams) -> Resu
     db::remove_tag(&conn, params.tag_id).map_err(|e| e.to_string())
 }
 
+#[derive(Deserialize)]
+pub struct RenameTagParams {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteTagParams {
+    pub tag: String,
+}
+
+#[tauri::command]
+pub async fn rename_tag(db: State<'_, DbState>, params: RenameTagParams) -> Result<(), String> {
+    let from = params.from.trim();
+    let to = params.to.trim();
+    if from.is_empty() || to.is_empty() {
+        return Err("Tag names cannot be empty".to_string());
+    }
+    if from == to {
+        return Ok(());
+    }
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::rename_tag(&conn, from, to).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_tag(db: State<'_, DbState>, params: DeleteTagParams) -> Result<i64, String> {
+    let tag = params.tag.trim();
+    if tag.is_empty() {
+        return Err("Tag name cannot be empty".to_string());
+    }
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::delete_tag(&conn, tag).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Albums
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct CreateAlbumParams {
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+pub struct RenameAlbumParams {
+    pub album_id: i64,
+    pub new_name: String,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteAlbumParams {
+    pub album_id: i64,
+}
+
+#[derive(Deserialize)]
+pub struct ReorderAlbumsParams {
+    pub album_ids: Vec<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteAlbumsParams {
+    pub album_ids: Vec<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct AlbumImagesParams {
+    pub album_id: i64,
+    pub image_ids: Vec<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct GetAlbumImagesParams {
+    pub album_id: i64,
+    pub sort: Option<String>,
+    pub offset: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+#[tauri::command]
+pub async fn list_albums(db: State<'_, DbState>) -> Result<Vec<Album>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::list_albums(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn create_album(
+    db: State<'_, DbState>,
+    params: CreateAlbumParams,
+) -> Result<Album, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let name = params.name.trim();
+    if name.is_empty() {
+        return Err("Album name cannot be empty".to_string());
+    }
+    db::create_album(&conn, name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn rename_album(db: State<'_, DbState>, params: RenameAlbumParams) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let name = params.new_name.trim();
+    if name.is_empty() {
+        return Err("Album name cannot be empty".to_string());
+    }
+    db::rename_album(&conn, params.album_id, name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_album(db: State<'_, DbState>, params: DeleteAlbumParams) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::delete_album(&conn, params.album_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn reorder_albums(
+    db: State<'_, DbState>,
+    params: ReorderAlbumsParams,
+) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::reorder_albums(&conn, &params.album_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_albums(
+    db: State<'_, DbState>,
+    params: DeleteAlbumsParams,
+) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::delete_albums(&conn, &params.album_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn add_images_to_album(
+    db: State<'_, DbState>,
+    params: AlbumImagesParams,
+) -> Result<i64, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::add_images_to_album(&conn, params.album_id, &params.image_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remove_images_from_album(
+    db: State<'_, DbState>,
+    params: AlbumImagesParams,
+) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::remove_images_from_album(&conn, params.album_id, &params.image_ids)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_album_images(
+    db: State<'_, DbState>,
+    params: GetAlbumImagesParams,
+) -> Result<ImagesPage, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let sort = params.sort.as_deref().unwrap_or("position");
+    let offset = params.offset.unwrap_or(0);
+    let limit = params.limit.unwrap_or(100);
+    let total = db::count_album_images(&conn, params.album_id).map_err(|e| e.to_string())?;
+    let images = db::get_album_images(&conn, params.album_id, sort, offset, limit)
+        .map_err(|e| e.to_string())?;
+    Ok(ImagesPage {
+        images,
+        total,
+        offset,
+        limit,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Bulk image operations
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct BulkUpdateDetailsParams {
+    pub image_ids: Vec<i64>,
+    pub favorite: Option<bool>,
+    pub rating: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct BulkAddTagsParams {
+    pub image_ids: Vec<i64>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct BulkRemoveTagParams {
+    pub image_ids: Vec<i64>,
+    pub tag: String,
+}
+
+#[tauri::command]
+pub async fn bulk_update_details(
+    db: State<'_, DbState>,
+    params: BulkUpdateDetailsParams,
+) -> Result<Vec<ImageRecord>, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::bulk_update_details(&conn, &params.image_ids, params.favorite, params.rating)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn bulk_add_tags(
+    db: State<'_, DbState>,
+    params: BulkAddTagsParams,
+) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::bulk_add_tags(&conn, &params.image_ids, &params.tags).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn bulk_remove_tag(
+    db: State<'_, DbState>,
+    params: BulkRemoveTagParams,
+) -> Result<(), String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::bulk_remove_tag_by_name(&conn, &params.image_ids, &params.tag).map_err(|e| e.to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Queue scope / folder-id persistence
 // ---------------------------------------------------------------------------
@@ -2148,6 +2509,47 @@ pub async fn open_app_data_folder(app: AppHandle) -> Result<(), String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     app.opener()
         .open_path(app_dir.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Deserialize)]
+pub struct OpenMapLocationParams {
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[tauri::command]
+pub async fn open_map_location(
+    app: AppHandle,
+    params: OpenMapLocationParams,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if !params.lat.is_finite()
+        || !params.lon.is_finite()
+        || !(-90.0..=90.0).contains(&params.lat)
+        || !(-180.0..=180.0).contains(&params.lon)
+    {
+        return Err("Invalid map coordinates".to_string());
+    }
+
+    let url = format!(
+        "https://www.openstreetmap.org/?mlat={lat:.6}&mlon={lon:.6}#map=15/{lat:.6}/{lon:.6}",
+        lat = params.lat,
+        lon = params.lon,
+    );
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn open_changelog_url(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(
+            "https://github.com/JezzWTF/phokus/blob/main/CHANGELOG.md",
+            None::<&str>,
+        )
         .map_err(|e| e.to_string())
 }
 

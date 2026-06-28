@@ -1,8 +1,8 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { useGalleryStore, ImageTag, AiRating } from "../store";
+import { useGalleryStore, ImageTag, ImageExif, AiRating } from "../store";
 import { VideoPlayer } from "./VideoPlayer";
 
 function formatBytes(bytes: number): string {
@@ -144,15 +144,18 @@ export function Lightbox() {
   const closeImage = useGalleryStore((state) => state.closeImage);
   const images = useGalleryStore((state) => state.images);
   const openImage = useGalleryStore((state) => state.openImage);
-  const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
-  const loadSimilarByRegion = useGalleryStore((state) => state.loadSimilarByRegion);
-  const similarScope = useGalleryStore((state) => state.similarScope);
+  const findSimilar = useGalleryStore((state) => state.findSimilar);
+  const findSimilarByRegion = useGalleryStore((state) => state.findSimilarByRegion);
   const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
   const getImageTags = useGalleryStore((state) => state.getImageTags);
   const addUserTag = useGalleryStore((state) => state.addUserTag);
   const removeTag = useGalleryStore((state) => state.removeTag);
   const taggerModelStatus = useGalleryStore((state) => state.taggerModelStatus);
   const queueTaggingForImage = useGalleryStore((state) => state.queueTaggingForImage);
+  const albums = useGalleryStore((state) => state.albums);
+  const addToAlbum = useGalleryStore((state) => state.addToAlbum);
+  const createAlbum = useGalleryStore((state) => state.createAlbum);
+  const getImageExif = useGalleryStore((state) => state.getImageExif);
 
   // Tracks the image id that is currently displayed, used to discard async
   // tag mutations that resolve after the user has navigated to another image.
@@ -164,12 +167,17 @@ export function Lightbox() {
   const [isPanning, setIsPanning] = useState(false);
   const lastPanPointRef = useRef({ x: 0, y: 0 });
   const [imageTags, setImageTags] = useState<ImageTag[]>([]);
+  const [imageExif, setImageExif] = useState<ImageExif | null>(null);
   const [tagInput, setTagInput] = useState("");
   const [tagAdding, setTagAdding] = useState(false);
   const [tagsExpanded, setTagsExpanded] = useState(false);
   const [taggingQueued, setTaggingQueued] = useState(false);
 
   // Region selection state
+  const [albumMenuOpen, setAlbumMenuOpen] = useState(false);
+  const [albumAddedTo, setAlbumAddedTo] = useState<number | null>(null);
+  const [newAlbumName, setNewAlbumName] = useState("");
+  const [albumAdding, setAlbumAdding] = useState(false);
   const [regionSelectMode, setRegionSelectMode] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragRect, setDragRect] = useState<DragRect | null>(null);
@@ -215,6 +223,7 @@ export function Lightbox() {
   useEffect(() => {
     setView(IDENTITY_VIEW);
     setImageTags([]);
+    setImageExif(null);
     setTagInput("");
     setTagsExpanded(false);
     setTaggingQueued(false);
@@ -232,6 +241,20 @@ export function Lightbox() {
       .catch(() => { if (!cancelled) setImageTags([]); });
     return () => { cancelled = true; };
   }, [selectedImage?.id, selectedImage?.ai_tagged_at, getImageTags]);
+
+  // EXIF is read on demand from the file (not stored), so it works on every
+  // already-indexed image without a reindex. Only meaningful for images.
+  useEffect(() => {
+    if (!selectedImage || selectedImage.media_kind !== "image") {
+      setImageExif(null);
+      return;
+    }
+    let cancelled = false;
+    void getImageExif(selectedImage.id)
+      .then((exif) => { if (!cancelled) setImageExif(exif); })
+      .catch(() => { if (!cancelled) setImageExif(null); });
+    return () => { cancelled = true; };
+  }, [selectedImage?.id, selectedImage?.media_kind, getImageExif]);
 
   // Reset the queued state once the worker finishes so the button is usable again
   useEffect(() => {
@@ -361,12 +384,10 @@ export function Lightbox() {
       exitRegionMode();
       setRegionSearching(true);
 
-      const folderId =
-        similarScope === "current_folder" ? selectedImage.folder_id : null;
-      void loadSimilarByRegion(selectedImage.id, crop, folderId, selectedImage.folder_id)
+      void findSimilarByRegion(selectedImage.id, crop, selectedImage.folder_id)
         .finally(() => setRegionSearching(false));
     },
-    [isPanning, isDragging, dragRect, selectedImage, similarScope, loadSimilarByRegion, exitRegionMode],
+    [isPanning, isDragging, dragRect, selectedImage, findSimilarByRegion, exitRegionMode],
   );
 
   // Build the CSS rect for the selection overlay (viewport-relative)
@@ -520,7 +541,7 @@ export function Lightbox() {
                       }`}
                       onClick={() => {
                         if (!canFindSimilar) return;
-                        void loadSimilarImages(selectedImage.id, similarScope === "current_folder" ? selectedImage.folder_id : null, true, selectedImage.folder_id);
+                        void findSimilar(selectedImage.id, selectedImage.folder_id);
                       }}
                       disabled={!canFindSimilar}
                     >
@@ -779,6 +800,129 @@ export function Lightbox() {
                       </button>
                     </form>
                   </div>
+
+                  <div className="relative">
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="text-xs uppercase tracking-wider text-gray-500">Albums</p>
+                      <button
+                        className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+                        onClick={() => { setAlbumMenuOpen((v) => !v); setAlbumAddedTo(null); }}
+                      >
+                        Add to album
+                      </button>
+                    </div>
+                    {albumMenuOpen ? (
+                      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-1.5">
+                        <div className="max-h-40 overflow-y-auto">
+                          {albums.length === 0 ? (
+                            <p className="px-2 py-1.5 text-[11px] text-gray-600">No albums yet — create one below.</p>
+                          ) : (
+                            albums.map((album) => (
+                              <button
+                                key={album.id}
+                                className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-xs text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
+                                onClick={() => {
+                                  if (albumAdding) return;
+                                  setAlbumAdding(true);
+                                  void addToAlbum(album.id, [selectedImage.id])
+                                    .then(() => setAlbumAddedTo(album.id))
+                                    .catch(() => undefined)
+                                    .finally(() => setAlbumAdding(false));
+                                }}
+                                disabled={albumAdding}
+                              >
+                                <span className="truncate">{album.name}</span>
+                                {albumAddedTo === album.id ? (
+                                  <span className="shrink-0 text-[10px] text-emerald-400">Added</span>
+                                ) : (
+                                  <span className="shrink-0 text-[10px] text-gray-600">{album.image_count}</span>
+                                )}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                        <form
+                          className="mt-1 flex gap-1 border-t border-white/[0.06] pt-1.5"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const name = newAlbumName.trim();
+                            if (!name || albumAdding) return;
+                            setAlbumAdding(true);
+                            void createAlbum(name)
+                              .then(async (album) => {
+                                await addToAlbum(album.id, [selectedImage.id]);
+                                setAlbumAddedTo(album.id);
+                                setNewAlbumName("");
+                              })
+                              .catch(() => undefined)
+                              .finally(() => setAlbumAdding(false));
+                          }}
+                        >
+                          <input
+                            className="min-w-0 flex-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-white placeholder-gray-600 focus:border-white/20 focus:outline-none"
+                            placeholder="New album…"
+                            value={newAlbumName}
+                            onChange={(e) => setNewAlbumName(e.target.value)}
+                            disabled={albumAdding}
+                          />
+                          <button
+                            type="submit"
+                            className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+                            disabled={albumAdding || !newAlbumName.trim()}
+                          >
+                            Add
+                          </button>
+                        </form>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {imageExif &&
+                  (imageExif.make ||
+                    imageExif.model ||
+                    imageExif.lens ||
+                    imageExif.f_number ||
+                    imageExif.exposure_time ||
+                    imageExif.iso ||
+                    imageExif.focal_length ||
+                    (imageExif.gps_lat != null && imageExif.gps_lon != null)) ? (
+                    <div>
+                      <p className="mb-2 text-xs uppercase tracking-wider text-gray-500">Camera</p>
+                      <div className="space-y-1.5">
+                        {imageExif.make || imageExif.model ? (
+                          <p className="text-sm text-white">
+                            {[imageExif.make, imageExif.model].filter(Boolean).join(" ")}
+                          </p>
+                        ) : null}
+                        {imageExif.lens ? <p className="text-xs text-gray-400">{imageExif.lens}</p> : null}
+                        {imageExif.f_number || imageExif.exposure_time || imageExif.iso || imageExif.focal_length ? (
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400">
+                            {imageExif.f_number ? <span>{imageExif.f_number}</span> : null}
+                            {imageExif.exposure_time ? <span>{imageExif.exposure_time}</span> : null}
+                            {imageExif.iso ? <span>ISO {imageExif.iso}</span> : null}
+                            {imageExif.focal_length ? <span>{imageExif.focal_length}</span> : null}
+                          </div>
+                        ) : null}
+                        {imageExif.gps_lat != null && imageExif.gps_lon != null ? (
+                          <button
+                            className="inline-flex items-center gap-1 text-xs text-sky-400 transition-colors hover:text-sky-300"
+                            title="Open location in your browser"
+                            onClick={() =>
+                              void invoke("open_map_location", {
+                                params: { lat: imageExif.gps_lat, lon: imageExif.gps_lon },
+                              })
+                            }
+                          >
+                            {imageExif.gps_lat.toFixed(5)}, {imageExif.gps_lon.toFixed(5)}
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div>
                     <div className="mb-1 flex items-center justify-between">

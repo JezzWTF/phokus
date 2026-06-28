@@ -372,6 +372,41 @@ pub fn search_image_ids_by_embedding_in_folder(
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// Brute-force cosine search scoped to a single album (membership via
+/// `album_images`), ordered by ascending distance. Mirrors the folder-scoped
+/// variant for region-based similarity search.
+pub fn search_image_ids_by_embedding_in_album(
+    conn: &Connection,
+    embedding: &[f32],
+    album_id: i64,
+    exclude_image_id: Option<i64>,
+    limit: usize,
+) -> Result<Vec<i64>> {
+    if embedding.len() != CLIP_VECTOR_DIM {
+        return Err(anyhow!(
+            "expected {}-dimensional embedding, got {}",
+            CLIP_VECTOR_DIM,
+            embedding.len()
+        ));
+    }
+
+    let packed = pack_f32(embedding);
+    let exclude_id = exclude_image_id.unwrap_or(-1);
+    let mut stmt = conn.prepare(
+        "SELECT v.image_id
+         FROM image_vec v
+         JOIN album_images ai ON ai.image_id = v.image_id
+         WHERE ai.album_id = ?2
+           AND v.image_id != ?3
+         ORDER BY vec_distance_cosine(v.embedding, vec_f32(?1)) ASC
+         LIMIT ?4",
+    )?;
+    let rows = stmt.query_map((&packed, album_id, exclude_id, limit as i64), |row| {
+        row.get::<_, i64>(0)
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 #[allow(dead_code)]
 pub fn search_caption_ids_by_embedding(
     conn: &Connection,

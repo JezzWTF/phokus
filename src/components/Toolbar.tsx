@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { tileSizeForZoom, useGalleryStore, SortOrder, MediaFilter, SearchCommand, parseSearchValue, searchModeLabel, ExploreTagEntry } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
+import { ColorFilter } from "./ColorFilter";
 
 const BASE_SORT_OPTIONS: { value: SortOrder; label: string }[] = [
   { value: "date_desc", label: "Newest first" },
@@ -160,8 +161,11 @@ export function Toolbar() {
   const setFailedEmbeddingsOnly = useGalleryStore((state) => state.setFailedEmbeddingsOnly);
   const failedTaggingOnly = useGalleryStore((state) => state.failedTaggingOnly);
   const setFailedTaggingOnly = useGalleryStore((state) => state.setFailedTaggingOnly);
+  const colorFilter = useGalleryStore((state) => state.colorFilter);
+  const setColorFilter = useGalleryStore((state) => state.setColorFilter);
   const similarScope = useGalleryStore((state) => state.similarScope);
   const setSimilarScope = useGalleryStore((state) => state.setSimilarScope);
+  const similarSourceAlbumId = useGalleryStore((state) => state.similarSourceAlbumId);
   const mediaJobProgress = useGalleryStore((state) => state.mediaJobProgress);
   const zoomPreset = useGalleryStore((state) => state.zoomPreset);
   const setZoomPreset = useGalleryStore((state) => state.setZoomPreset);
@@ -187,6 +191,12 @@ export function Toolbar() {
   const hasActiveSearch = search.trim().length > 0;
   const parsedSearch = parseSearchValue(composeSearchValue(searchCommand, searchQuery));
   const isSimilarResults = collectionTitle === "Similar Images";
+  // Album scope is offered while browsing an album (where it's the default) and
+  // while viewing similar/region results that were launched from an album.
+  const showAlbumScope =
+    activeView === "album" ||
+    (similarSourceAlbumId !== null &&
+      (collectionTitle === "Similar Images" || collectionTitle === "Region Search Results"));
 
   // If current sort is video-only but we switched away from video filter, reset to date_desc
   useEffect(() => {
@@ -444,12 +454,15 @@ export function Toolbar() {
 
       {/* Filter row */}
       <div className="flex items-center gap-1 px-4 pb-1.5">
-        <FilterPill label="All" active={mediaFilter === "all" && !favoritesOnly && !failedEmbeddingsOnly && !failedTaggingOnly && minimumRating === 0} onClick={() => { setMediaFilter("all"); setFavoritesOnly(false); setMinimumRating(0); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); }} />
+        <FilterPill label="All" active={mediaFilter === "all" && !favoritesOnly && !failedEmbeddingsOnly && !failedTaggingOnly && minimumRating === 0 && colorFilter === null} onClick={() => { setMediaFilter("all"); setFavoritesOnly(false); setMinimumRating(0); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); setColorFilter(null); }} />
         <FilterPill label="Images" active={mediaFilter === "image" && !favoritesOnly && !failedEmbeddingsOnly && !failedTaggingOnly} onClick={() => { setMediaFilter("image"); setFavoritesOnly(false); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); }} />
         <FilterPill label="Videos" active={mediaFilter === "video" && !favoritesOnly && !failedEmbeddingsOnly && !failedTaggingOnly} onClick={() => { setMediaFilter("video"); setFavoritesOnly(false); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); }} />
         <FilterPill label="Favorites" active={favoritesOnly} onClick={() => { setFavoritesOnly(!favoritesOnly); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); }} />
         <FilterPill label="Rated" active={minimumRating === 1} onClick={() => { setMinimumRating(minimumRating === 1 ? 0 : 1); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); }} />
         <FilterPill label="4★+" active={minimumRating === 4} onClick={() => { setMinimumRating(minimumRating === 4 ? 0 : 4); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); }} />
+        {showAlbumScope ? (
+          <FilterPill label="Similar: Album" active={similarScope === "current_album"} onClick={() => setSimilarScope("current_album")} />
+        ) : null}
         <FilterPill label="Similar: Folder" active={similarScope === "current_folder"} onClick={() => setSimilarScope("current_folder")} />
         <FilterPill label="Similar: All" active={similarScope === "all_media"} onClick={() => setSimilarScope("all_media")} />
         {hasAnyFailedEmbeddings ? (
@@ -468,7 +481,8 @@ export function Toolbar() {
             onClick={() => setFailedTaggingOnly(!failedTaggingOnly)}
           />
         ) : null}
-        {isSimilarResults ? <span className="ml-2 text-[11px] text-gray-500">Current similar scope: {similarScope === "current_folder" ? "current folder" : "all media"}</span> : null}
+        <ColorFilter />
+        {isSimilarResults ? <span className="ml-2 text-[11px] text-gray-500">Current similar scope: {similarScope === "current_album" ? "this album" : similarScope === "current_folder" ? "current folder" : "all media"}</span> : null}
       </div>
     </div>
   );

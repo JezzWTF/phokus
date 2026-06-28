@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Reorder, useDragControls } from "framer-motion";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useGalleryStore, Folder, IndexProgress } from "../store";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { useGalleryStore, Folder, Album, IndexProgress } from "../store";
 import { ThemedDropdown } from "./ThemedDropdown";
 
 interface ContextMenuState {
@@ -339,6 +340,270 @@ function FolderItem({
   );
 }
 
+function AlbumContextMenu({
+  x,
+  y,
+  onClose,
+  onRename,
+  onDelete,
+}: {
+  x: number;
+  y: number;
+  onClose: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handleDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", handleDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [onClose]);
+
+  const item = (label: string, onClick: () => void, danger = false) => (
+    <button
+      className={`w-full text-left px-3 py-1.5 text-[12px] rounded-md transition-colors ${
+        danger
+          ? "text-red-400 hover:bg-red-500/15 hover:text-red-300"
+          : "text-gray-300 hover:bg-white/8 hover:text-white"
+      }`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+        onClose();
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div
+      ref={ref}
+      className="fixed z-50 min-w-[160px] py-1 px-1 rounded-lg bg-gray-900 border border-white/10 shadow-xl shadow-black/50"
+      style={{ left: x, top: y }}
+    >
+      {item("Rename", onRename)}
+      <div className="my-1 border-t border-white/[0.06]" />
+      {item("Delete album", onDelete, true)}
+    </div>
+  );
+}
+
+function AlbumItem({
+  album,
+  manageMode = false,
+  selectedForManage = false,
+  onToggleManage,
+  reorderable = false,
+  onDragStart,
+  onDragEnd,
+}: {
+  album: Album;
+  manageMode?: boolean;
+  selectedForManage?: boolean;
+  onToggleManage?: () => void;
+  reorderable?: boolean;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+}) {
+  const dragControls = useDragControls();
+  const viewAlbum = useGalleryStore((state) => state.viewAlbum);
+  const renameAlbum = useGalleryStore((state) => state.renameAlbum);
+  const deleteAlbum = useGalleryStore((state) => state.deleteAlbum);
+  const activeView = useGalleryStore((state) => state.activeView);
+  const selectedAlbumId = useGalleryStore((state) => state.selectedAlbumId);
+  const selected = !manageMode && activeView === "album" && selectedAlbumId === album.id;
+
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(album.name);
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (renaming) {
+      setRenameValue(album.name);
+      setTimeout(() => renameInputRef.current?.select(), 0);
+    }
+  }, [renaming, album.name]);
+
+  const commitRename = async () => {
+    const trimmed = renameValue.trim();
+    if (trimmed && trimmed !== album.name) {
+      await renameAlbum(album.id, trimmed);
+    }
+    setRenaming(false);
+  };
+
+  const cover = album.cover_thumbnail_path ? convertFileSrc(album.cover_thumbnail_path) : null;
+
+  const row = (
+    <div
+      role={manageMode ? "checkbox" : "button"}
+      tabIndex={renaming ? -1 : 0}
+      aria-checked={manageMode ? selectedForManage : undefined}
+      aria-current={!manageMode && selected ? "page" : undefined}
+      className={`group relative flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer transition-all duration-150 ${
+        selectedForManage
+          ? "bg-blue-500/10 text-white ring-1 ring-inset ring-blue-400/50"
+          : selected
+            ? "bg-white/8 text-white"
+            : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
+      }`}
+      onClick={() => {
+        if (manageMode) {
+          onToggleManage?.();
+        } else if (!renaming) {
+          viewAlbum(album.id);
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (renaming || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        if (manageMode) {
+          onToggleManage?.();
+        } else {
+          viewAlbum(album.id);
+        }
+      }}
+      onContextMenu={(e) => {
+        if (manageMode) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setMenu({ x: Math.min(e.clientX, window.innerWidth - 180), y: Math.min(e.clientY, window.innerHeight - 120) });
+      }}
+    >
+      {/* Manage-mode selection checkbox */}
+      {manageMode ? (
+        <div
+          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${
+            selectedForManage ? "border-blue-400 bg-blue-500 text-white" : "border-white/30 text-transparent"
+          }`}
+        >
+          <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+      ) : null}
+
+      {/* Drag handle — hover-revealed, reorders albums */}
+      {reorderable ? (
+        <button
+          type="button"
+          aria-label={`Reorder ${album.name}`}
+          title="Drag to reorder"
+          className="-ml-1 flex h-6 w-3.5 shrink-0 cursor-grab touch-none items-center justify-center rounded text-gray-700 opacity-0 transition-opacity hover:text-gray-400 group-hover:opacity-100"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onDragStart?.();
+            dragControls.start(e);
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <svg className="h-3 w-3" viewBox="0 0 12 12" fill="currentColor">
+            <circle cx="3" cy="3" r="1" /><circle cx="9" cy="3" r="1" />
+            <circle cx="3" cy="6" r="1" /><circle cx="9" cy="6" r="1" />
+            <circle cx="3" cy="9" r="1" /><circle cx="9" cy="9" r="1" />
+          </svg>
+        </button>
+      ) : null}
+
+      {/* Cover thumbnail — distinguishes albums from folder rows */}
+      <div className="h-7 w-7 shrink-0 overflow-hidden rounded-md bg-white/[0.05] ring-1 ring-white/10">
+        {cover ? (
+          <img src={cover} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-white/20">
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </div>
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        {renaming ? (
+          <input
+            ref={renameInputRef}
+            className="w-full bg-white/10 text-white text-[13px] font-medium rounded px-1 py-0 outline-none ring-1 ring-blue-500/60 leading-tight"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
+              if (e.key === "Escape") setRenaming(false);
+            }}
+            onBlur={() => void commitRename()}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <div className={`truncate text-[13px] font-medium leading-tight ${selected ? "text-white" : ""}`}>
+            {album.name}
+          </div>
+        )}
+        <div className="text-[11px] text-gray-600 mt-0.5">{album.image_count.toLocaleString()}</div>
+      </div>
+
+      {!renaming && confirmingRemoval ? (
+        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+          <button
+            className="px-1.5 py-0.5 text-[10px] rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 hover:text-red-300 transition-colors"
+            onClick={() => { void deleteAlbum(album.id); setConfirmingRemoval(false); }}
+          >
+            Confirm
+          </button>
+          <button
+            className="px-1.5 py-0.5 text-[10px] rounded bg-white/5 text-gray-500 hover:bg-white/10 hover:text-gray-300 transition-colors"
+            onClick={() => setConfirmingRemoval(false)}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : null}
+
+      {menu ? (
+        <AlbumContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          onRename={() => setRenaming(true)}
+          onDelete={() => setConfirmingRemoval(true)}
+        />
+      ) : null}
+    </div>
+  );
+
+  if (reorderable) {
+    return (
+      <Reorder.Item
+        as="div"
+        value={album.id}
+        drag="y"
+        dragControls={dragControls}
+        dragListener={false}
+        dragElastic={0.08}
+        onDragEnd={onDragEnd}
+        layout
+        transition={{ layout: { type: "spring", stiffness: 520, damping: 38, mass: 0.55 } }}
+      >
+        {row}
+      </Reorder.Item>
+    );
+  }
+  return row;
+}
+
 export function Sidebar() {
   const folders = useGalleryStore((state) => state.folders);
   const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
@@ -348,6 +613,59 @@ export function Sidebar() {
   const activeView = useGalleryStore((state) => state.activeView);
   const setView = useGalleryStore((state) => state.setView);
   const reorderFolders = useGalleryStore((state) => state.reorderFolders);
+  const albums = useGalleryStore((state) => state.albums);
+  const createAlbum = useGalleryStore((state) => state.createAlbum);
+  const deleteAlbums = useGalleryStore((state) => state.deleteAlbums);
+  const reorderAlbums = useGalleryStore((state) => state.reorderAlbums);
+  const [creatingAlbum, setCreatingAlbum] = useState(false);
+  const [createAlbumPending, setCreateAlbumPending] = useState(false);
+  const [newAlbumName, setNewAlbumName] = useState("");
+  const newAlbumInputRef = useRef<HTMLInputElement>(null);
+  const [manageAlbums, setManageAlbums] = useState(false);
+  const [manageSelectedIds, setManageSelectedIds] = useState<Set<number>>(new Set());
+  const [confirmingAlbumDelete, setConfirmingAlbumDelete] = useState(false);
+  const [orderedAlbums, setOrderedAlbums] = useState(albums);
+  const orderedAlbumsRef = useRef(albums);
+  const [draggingAlbum, setDraggingAlbum] = useState(false);
+
+  // Keep the local drag order in sync with the store except mid-drag, so a
+  // background album refresh doesn't yank the row out from under the pointer.
+  useEffect(() => {
+    if (draggingAlbum) return;
+    setOrderedAlbums(albums);
+    orderedAlbumsRef.current = albums;
+  }, [albums, draggingAlbum]);
+
+  const handleAlbumReorder = (ids: number[]) => {
+    const byId = new Map(orderedAlbumsRef.current.map((album) => [album.id, album]));
+    const next = ids
+      .map((id) => byId.get(id))
+      .filter((album): album is Album => album !== undefined);
+    orderedAlbumsRef.current = next;
+    setOrderedAlbums(next);
+  };
+
+  const finishAlbumReorder = () => {
+    setDraggingAlbum(false);
+    const nextIds = orderedAlbumsRef.current.map((album) => album.id);
+    // Read live store order (not the render-time closure) in case albums changed.
+    const currentIds = useGalleryStore.getState().albums.map((album) => album.id);
+    const snapshotIds = albums.map((album) => album.id);
+    if (
+      snapshotIds.length !== currentIds.length ||
+      snapshotIds.some((id, index) => id !== currentIds[index])
+    ) {
+      orderedAlbumsRef.current = useGalleryStore.getState().albums;
+      setOrderedAlbums(orderedAlbumsRef.current);
+      return;
+    }
+    if (
+      nextIds.length !== currentIds.length ||
+      nextIds.some((id, index) => id !== currentIds[index])
+    ) {
+      void reorderAlbums(nextIds);
+    }
+  };
   const [librarySort, setLibrarySortState] = useState<LibrarySort>(() => {
     const saved = window.localStorage.getItem(LIBRARY_SORT_KEY);
     return saved === "za" || saved === "custom" ? saved : "az";
@@ -461,6 +779,53 @@ export function Sidebar() {
 
   const handleAddFolder = () => {
     setFolderPickerOpen(true);
+  };
+
+  const startCreatingAlbum = () => {
+    setCreatingAlbum(true);
+    setNewAlbumName("");
+    setTimeout(() => newAlbumInputRef.current?.focus(), 0);
+  };
+
+  const handleCreateAlbum = async () => {
+    const name = newAlbumName.trim();
+    if (!name) {
+      setCreatingAlbum(false);
+      return;
+    }
+    if (createAlbumPending) return;
+    setCreateAlbumPending(true);
+    try {
+      const album = await createAlbum(name);
+      setNewAlbumName("");
+      setCreatingAlbum(false);
+      useGalleryStore.getState().viewAlbum(album.id);
+    } finally {
+      setCreateAlbumPending(false);
+    }
+  };
+
+  const exitManageAlbums = () => {
+    setManageAlbums(false);
+    setManageSelectedIds(new Set());
+    setConfirmingAlbumDelete(false);
+  };
+
+  const toggleManageSelected = (albumId: number) => {
+    setManageSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(albumId)) next.delete(albumId);
+      else next.add(albumId);
+      return next;
+    });
+    setConfirmingAlbumDelete(false);
+  };
+
+  const handleDeleteSelectedAlbums = async () => {
+    const ids = Array.from(manageSelectedIds);
+    if (ids.length === 0) return;
+    await deleteAlbums(ids);
+    exitManageAlbums();
   };
 
   return (
@@ -601,6 +966,160 @@ export function Sidebar() {
           ))
         )}
       </Reorder.Group>
+
+      {/* Albums — a visually distinct block, separated from Libraries by a
+          heavier divider and given cover-thumbnail rows so the two never
+          read as one list. */}
+      <div className="shrink-0 border-t-2 border-white/[0.08] bg-white/[0.015]">
+        <div className="flex items-center justify-between gap-2 px-5 pt-3 pb-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-gray-600">
+            {manageAlbums ? `${manageSelectedIds.size} selected` : "Albums"}
+          </span>
+          {manageAlbums ? (
+            <button
+              onClick={exitManageAlbums}
+              className="rounded px-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500 transition-colors hover:text-gray-200"
+            >
+              Done
+            </button>
+          ) : (
+            <div className="flex items-center gap-0.5">
+              {albums.length > 0 ? (
+                <button
+                  onClick={() => setManageAlbums(true)}
+                  className="rounded p-0.5 text-gray-600 transition-colors hover:bg-white/8 hover:text-gray-200"
+                  title="Manage albums"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75}
+                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+              ) : null}
+              <button
+                onClick={startCreatingAlbum}
+                className="rounded p-0.5 text-gray-600 transition-colors hover:bg-white/8 hover:text-gray-200"
+                title="New album"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Manage action row */}
+        {manageAlbums ? (
+          <div className="px-3 pb-1.5">
+            {confirmingAlbumDelete ? (
+              <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] p-2">
+                <p className="mb-2 text-[11px] leading-relaxed text-gray-400">
+                  Delete {manageSelectedIds.size} album{manageSelectedIds.size === 1 ? "" : "s"}? Your images stay in
+                  the library — only the album{manageSelectedIds.size === 1 ? "" : "s"} {manageSelectedIds.size === 1 ? "is" : "are"} removed.
+                </p>
+                <div className="flex justify-end gap-1.5">
+                  <button
+                    className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                    onClick={() => setConfirmingAlbumDelete(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="rounded-md bg-red-500/20 px-2 py-1 text-[11px] font-medium text-red-300 transition-colors hover:bg-red-500/30 hover:text-red-200"
+                    onClick={() => void handleDeleteSelectedAlbums()}
+                  >
+                    Delete {manageSelectedIds.size}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  className="text-[11px] text-gray-500 transition-colors hover:text-gray-300"
+                  onClick={() =>
+                    setManageSelectedIds((prev) =>
+                      prev.size === albums.length ? new Set() : new Set(albums.map((a) => a.id)),
+                    )
+                  }
+                >
+                  {manageSelectedIds.size === albums.length ? "Deselect all" : "Select all"}
+                </button>
+                <button
+                  className="rounded-md border border-red-400/25 bg-red-500/10 px-2 py-1 text-[11px] text-red-300 transition-colors hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={() => setConfirmingAlbumDelete(true)}
+                  disabled={manageSelectedIds.size === 0}
+                >
+                  Delete {manageSelectedIds.size > 0 ? manageSelectedIds.size : ""}
+                </button>
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        <div className="max-h-52 overflow-y-auto px-2 pb-2 space-y-px">
+          {creatingAlbum ? (
+            <form
+              className="flex gap-1 px-1 py-1"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleCreateAlbum();
+              }}
+            >
+              <input
+                ref={newAlbumInputRef}
+                className="min-w-0 flex-1 rounded border border-white/10 bg-white/10 px-1.5 py-1 text-[13px] text-white outline-none ring-1 ring-blue-500/40 placeholder-gray-600"
+                placeholder="Album name…"
+                value={newAlbumName}
+                onChange={(e) => setNewAlbumName(e.target.value)}
+                disabled={createAlbumPending}
+                onKeyDown={(e) => {
+                  if (createAlbumPending) return;
+                  if (e.key === "Escape") {
+                    setCreatingAlbum(false);
+                    setNewAlbumName("");
+                  }
+                }}
+                onBlur={() => void handleCreateAlbum()}
+              />
+            </form>
+          ) : null}
+
+          {albums.length === 0 && !creatingAlbum ? (
+            <p className="px-3 py-3 text-center text-[11px] leading-relaxed text-gray-700">
+              Select images and “Add to album” to start curating
+            </p>
+          ) : manageAlbums ? (
+            albums.map((album) => (
+              <AlbumItem
+                key={album.id}
+                album={album}
+                manageMode
+                selectedForManage={manageSelectedIds.has(album.id)}
+                onToggleManage={() => toggleManageSelected(album.id)}
+              />
+            ))
+          ) : (
+            <Reorder.Group
+              as="div"
+              axis="y"
+              values={orderedAlbums.map((album) => album.id)}
+              onReorder={handleAlbumReorder}
+              className="space-y-px"
+            >
+              {orderedAlbums.map((album) => (
+                <AlbumItem
+                  key={album.id}
+                  album={album}
+                  reorderable
+                  onDragStart={() => setDraggingAlbum(true)}
+                  onDragEnd={finishAlbumReorder}
+                />
+              ))}
+            </Reorder.Group>
+          )}
+        </div>
+      </div>
     </aside>
   );
 }

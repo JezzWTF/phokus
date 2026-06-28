@@ -35,6 +35,18 @@ pub struct Folder {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Album {
+    pub id: i64,
+    pub name: String,
+    pub cover_image_id: Option<i64>,
+    pub cover_thumbnail_path: Option<String>,
+    pub image_count: i64,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageRecord {
     pub id: i64,
     pub folder_id: i64,
@@ -285,6 +297,41 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_image_tags_image_id ON image_tags(image_id);
         CREATE INDEX IF NOT EXISTS idx_image_tags_source ON image_tags(source);
         CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags(tag);
+
+        CREATE TABLE IF NOT EXISTS albums (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            name           TEXT NOT NULL,
+            cover_image_id INTEGER REFERENCES images(id) ON DELETE SET NULL,
+            sort_order     INTEGER NOT NULL DEFAULT 0,
+            -- Forward-compat for smart albums (saved searches); unused in v1.
+            -- 'manual' = a curated set held in album_images.
+            kind           TEXT NOT NULL DEFAULT 'manual',
+            query_json     TEXT,
+            created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS album_images (
+            album_id   INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+            image_id   INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+            position   INTEGER NOT NULL DEFAULT 0,
+            added_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (album_id, image_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_album_images_album ON album_images(album_id);
+        CREATE INDEX IF NOT EXISTS idx_album_images_image ON album_images(image_id);
+
+        CREATE TABLE IF NOT EXISTS image_colors (
+            image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+            idx      INTEGER NOT NULL,
+            r        INTEGER NOT NULL,
+            g        INTEGER NOT NULL,
+            b        INTEGER NOT NULL,
+            weight   REAL NOT NULL,
+            PRIMARY KEY (image_id, idx)
+        );
+        CREATE INDEX IF NOT EXISTS idx_image_colors_image ON image_colors(image_id);
         ",
     )?;
 
@@ -1586,6 +1633,309 @@ pub fn reorder_folders(conn: &Connection, folder_ids: &[i64]) -> Result<()> {
     Ok(())
 }
 
+// ── Albums ────────────────────────────────────────────────────────────────────
+
+fn map_album_row(row: &Row<'_>) -> rusqlite::Result<Album> {
+    Ok(Album {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        cover_image_id: row.get(2)?,
+        cover_thumbnail_path: row.get(3)?,
+        image_count: row.get(4)?,
+        sort_order: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+    })
+}
+
+/// SELECT that resolves each album's cover thumbnail (explicit cover, else the
+/// first member by position) and live image count. Shared by list/get-one.
+const ALBUM_SELECT: &str = "
+    SELECT a.id, a.name, a.cover_image_id,
+           (SELECT ci.thumbnail_path FROM images ci
+              WHERE ci.id = COALESCE(
+                  a.cover_image_id,
+                  (SELECT ai.image_id FROM album_images ai
+                     WHERE ai.album_id = a.id
+                     ORDER BY ai.position, ai.added_at LIMIT 1)
+              )) AS cover_thumbnail_path,
+           (SELECT COUNT(*) FROM album_images ai WHERE ai.album_id = a.id) AS image_count,
+           a.sort_order, a.created_at, a.updated_at
+    FROM albums a";
+
+pub fn list_albums(conn: &Connection) -> Result<Vec<Album>> {
+    let sql = format!("{ALBUM_SELECT} ORDER BY a.sort_order, a.id");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], map_album_row)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub fn get_album(conn: &Connection, album_id: i64) -> Result<Album> {
+    let sql = format!("{ALBUM_SELECT} WHERE a.id = ?1");
+    conn.query_row(&sql, [album_id], map_album_row)
+        .map_err(Into::into)
+}
+
+pub fn create_album(conn: &Connection, name: &str) -> Result<Album> {
+    let id: i64 = conn.query_row(
+        "INSERT INTO albums (name, sort_order)
+         VALUES (?1, COALESCE((SELECT MAX(sort_order) + 1 FROM albums), 1))
+         RETURNING id",
+        params![name],
+        |row| row.get(0),
+    )?;
+    get_album(conn, id)
+}
+
+pub fn rename_album(conn: &Connection, album_id: i64, new_name: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE albums SET name = ?2, updated_at = datetime('now') WHERE id = ?1",
+        params![album_id, new_name],
+    )?;
+    Ok(())
+}
+
+pub fn delete_album(conn: &Connection, album_id: i64) -> Result<()> {
+    // album_images rows cascade away via the FK.
+    conn.execute("DELETE FROM albums WHERE id = ?1", [album_id])?;
+    Ok(())
+}
+
+/// Delete many albums at once (membership rows cascade away via the FK).
+pub fn delete_albums(conn: &Connection, album_ids: &[i64]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for album_id in album_ids {
+        tx.execute("DELETE FROM albums WHERE id = ?1", [album_id])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn reorder_albums(conn: &Connection, album_ids: &[i64]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for (index, album_id) in album_ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE albums SET sort_order = ?2 WHERE id = ?1",
+            params![album_id, index as i64 + 1],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Append images to an album (idempotent). Returns the number newly added.
+pub fn add_images_to_album(conn: &Connection, album_id: i64, image_ids: &[i64]) -> Result<i64> {
+    let tx = conn.unchecked_transaction()?;
+    let mut next_position: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(position) + 1, 0) FROM album_images WHERE album_id = ?1",
+        [album_id],
+        |row| row.get(0),
+    )?;
+    let mut added = 0i64;
+    for image_id in image_ids {
+        let changed = tx.execute(
+            "INSERT INTO album_images (album_id, image_id, position)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(album_id, image_id) DO NOTHING",
+            params![album_id, image_id, next_position],
+        )?;
+        if changed > 0 {
+            next_position += 1;
+            added += 1;
+        }
+    }
+    tx.execute(
+        "UPDATE albums SET updated_at = datetime('now') WHERE id = ?1",
+        [album_id],
+    )?;
+    tx.commit()?;
+    Ok(added)
+}
+
+pub fn remove_images_from_album(conn: &Connection, album_id: i64, image_ids: &[i64]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for image_id in image_ids {
+        tx.execute(
+            "DELETE FROM album_images WHERE album_id = ?1 AND image_id = ?2",
+            params![album_id, image_id],
+        )?;
+    }
+    tx.execute(
+        "UPDATE albums SET updated_at = datetime('now') WHERE id = ?1",
+        [album_id],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn count_album_images(conn: &Connection, album_id: i64) -> Result<i64> {
+    let count = conn.query_row(
+        "SELECT COUNT(*) FROM album_images WHERE album_id = ?1",
+        [album_id],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+pub fn get_album_images(
+    conn: &Connection,
+    album_id: i64,
+    sort: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<ImageRecord>> {
+    // Default to curated order (album_images.position); otherwise honor the same
+    // sort vocabulary as get_images. Albums span folders, so no folder filter.
+    let order = match sort {
+        "name_asc" => "i.filename ASC",
+        "name_desc" => "i.filename DESC",
+        "date_asc" => "i.modified_at ASC NULLS LAST",
+        "date_desc" => "i.modified_at DESC NULLS LAST",
+        "size_asc" => "i.file_size ASC",
+        "size_desc" => "i.file_size DESC",
+        "rating_asc" => "i.rating ASC, i.modified_at DESC NULLS LAST",
+        "rating_desc" => "i.rating DESC, i.modified_at DESC NULLS LAST",
+        "duration_asc" => "i.duration_ms ASC NULLS LAST",
+        "duration_desc" => "i.duration_ms DESC NULLS LAST",
+        "taken_asc" => "COALESCE(i.taken_at, i.modified_at) ASC NULLS LAST",
+        "taken_desc" => "COALESCE(i.taken_at, i.modified_at) DESC NULLS LAST",
+        _ => "ai.position ASC",
+    };
+    let sql = format!(
+        "SELECT i.id, i.folder_id, i.path, i.filename, i.thumbnail_path, i.width, i.height, i.file_size, i.created_at, i.modified_at, i.taken_at, i.mime_type,
+                i.media_kind, i.duration_ms, i.video_codec, i.audio_codec, i.metadata_updated_at, i.metadata_error,
+                i.favorite, i.rating, i.embedding_status, i.embedding_model, i.embedding_updated_at, i.embedding_error,
+                i.generated_caption, i.caption_model, i.caption_updated_at, i.caption_error,
+                i.ai_rating, i.ai_tagger_model, i.ai_tagged_at, i.ai_tagger_error
+         FROM images i
+         JOIN album_images ai ON ai.image_id = i.id
+         WHERE ai.album_id = ?1
+         ORDER BY {order}
+         LIMIT ?2 OFFSET ?3"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![album_id, limit, offset], map_image_row)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+// ── Bulk image operations ──────────────────────────────────────────────────────
+
+/// Apply favorite and/or rating to many images at once; returns the updated rows.
+pub fn bulk_update_details(
+    conn: &Connection,
+    image_ids: &[i64],
+    favorite: Option<bool>,
+    rating: Option<i64>,
+) -> Result<Vec<ImageRecord>> {
+    let tx = conn.unchecked_transaction()?;
+    for image_id in image_ids {
+        tx.execute(
+            "UPDATE images
+             SET favorite = COALESCE(?2, favorite),
+                 rating = COALESCE(?3, rating)
+             WHERE id = ?1",
+            params![image_id, favorite, rating],
+        )?;
+    }
+    tx.commit()?;
+    get_images_by_ids(conn, image_ids)
+}
+
+/// Add one or more user tags to many images at once.
+pub fn bulk_add_tags(conn: &Connection, image_ids: &[i64], tags: &[String]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for image_id in image_ids {
+        for tag in tags {
+            let trimmed = tag.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO image_tags (image_id, tag, source, ai_model, confidence, created_at)
+                 VALUES (?1, ?2, 'user', NULL, NULL, datetime('now'))
+                 ON CONFLICT(image_id, tag) DO UPDATE SET
+                     source = 'user',
+                     ai_model = NULL,
+                     confidence = NULL
+                 WHERE source = 'ai'",
+                params![image_id, trimmed],
+            )?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Remove a tag (by name) from many images at once.
+pub fn bulk_remove_tag_by_name(conn: &Connection, image_ids: &[i64], tag: &str) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for image_id in image_ids {
+        tx.execute(
+            "DELETE FROM image_tags WHERE image_id = ?1 AND tag = ?2",
+            params![image_id, tag],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+// ── Color palettes (color search) ──────────────────────────────────────────────
+
+/// Replace an image's stored color palette. `colors` is `(r, g, b, weight)`.
+pub fn replace_image_colors(
+    conn: &Connection,
+    image_id: i64,
+    colors: &[(u8, u8, u8, f32)],
+) -> Result<()> {
+    conn.execute("DELETE FROM image_colors WHERE image_id = ?1", [image_id])?;
+    for (idx, (r, g, b, weight)) in colors.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO image_colors (image_id, idx, r, g, b, weight)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                image_id,
+                idx as i64,
+                *r as i64,
+                *g as i64,
+                *b as i64,
+                *weight as f64
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Images (with thumbnails) that have no stored palette yet — the backfill set.
+/// Returns `(image_id, thumbnail_path)`.
+pub fn get_images_missing_colors(conn: &Connection, limit: i64) -> Result<Vec<(i64, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT i.id, i.thumbnail_path
+         FROM images i
+         WHERE i.media_kind = 'image'
+           AND i.thumbnail_path IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM image_colors c WHERE c.image_id = i.id)
+         LIMIT ?1",
+    )?;
+    let rows = stmt.query_map([limit], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Count of images still awaiting palette extraction (for backfill progress).
+pub fn count_images_missing_colors(conn: &Connection) -> Result<i64> {
+    let count = conn.query_row(
+        "SELECT COUNT(*)
+         FROM images i
+         WHERE i.media_kind = 'image'
+           AND i.thumbnail_path IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM image_colors c WHERE c.image_id = i.id)",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
 pub fn repair_deferred_embedding_jobs(conn: &Connection) -> Result<usize> {
     let pattern = "No thumbnail available yet for%";
     let repaired = conn.execute(
@@ -1713,6 +2063,7 @@ pub fn get_images(
     rating_min: i64,
     embedding_failed_only: bool,
     tagging_failed_only: bool,
+    color: Option<(u8, u8, u8)>,
     sort: &str,
     offset: i64,
     limit: i64,
@@ -1737,6 +2088,10 @@ pub fn get_images(
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
     let tagging_failed_flag = i64::from(tagging_failed_only);
+    let (color_flag, qr, qg, qb) = match color {
+        Some((r, g, b)) => (1i64, r as i64, g as i64, b as i64),
+        None => (0, 0, 0, 0),
+    };
     let sql = format!(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, taken_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
@@ -1751,6 +2106,12 @@ pub fn get_images(
            AND rating >= ?5
            AND (?6 = 0 OR embedding_status = 'failed')
            AND (?7 = 0 OR ai_tagger_error IS NOT NULL)
+           AND (?10 = 0 OR EXISTS (
+               SELECT 1 FROM image_colors c
+               WHERE c.image_id = images.id
+                 AND c.weight >= ?15
+                 AND ((c.r - ?11)*(c.r - ?11) + (c.g - ?12)*(c.g - ?12) + (c.b - ?13)*(c.b - ?13)) <= ?14
+           ))
          ORDER BY {order}
          LIMIT ?8 OFFSET ?9"
     );
@@ -1765,7 +2126,13 @@ pub fn get_images(
             embedding_failed_flag,
             tagging_failed_flag,
             limit,
-            offset
+            offset,
+            color_flag,
+            qr,
+            qg,
+            qb,
+            crate::color::MATCH_DISTANCE_SQ,
+            crate::color::MATCH_MIN_WEIGHT
         ],
         map_image_row,
     )?;
@@ -1782,12 +2149,17 @@ pub fn count_images(
     rating_min: i64,
     embedding_failed_only: bool,
     tagging_failed_only: bool,
+    color: Option<(u8, u8, u8)>,
 ) -> Result<i64> {
     let search_pattern = search.map(|value| format!("%{value}%"));
 
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
     let tagging_failed_flag = i64::from(tagging_failed_only);
+    let (color_flag, qr, qg, qb) = match color {
+        Some((r, g, b)) => (1i64, r as i64, g as i64, b as i64),
+        None => (0, 0, 0, 0),
+    };
     let count = conn.query_row(
         "SELECT COUNT(*) FROM images
          WHERE (?1 IS NULL OR folder_id = ?1)
@@ -1796,7 +2168,13 @@ pub fn count_images(
            AND (?4 = 0 OR favorite = 1)
            AND rating >= ?5
            AND (?6 = 0 OR embedding_status = 'failed')
-           AND (?7 = 0 OR ai_tagger_error IS NOT NULL)",
+           AND (?7 = 0 OR ai_tagger_error IS NOT NULL)
+           AND (?8 = 0 OR EXISTS (
+               SELECT 1 FROM image_colors c
+               WHERE c.image_id = images.id
+                 AND c.weight >= ?13
+                 AND ((c.r - ?9)*(c.r - ?9) + (c.g - ?10)*(c.g - ?10) + (c.b - ?11)*(c.b - ?11)) <= ?12
+           ))",
         params![
             folder_id,
             search_pattern,
@@ -1804,7 +2182,13 @@ pub fn count_images(
             favorites_flag,
             rating_min,
             embedding_failed_flag,
-            tagging_failed_flag
+            tagging_failed_flag,
+            color_flag,
+            qr,
+            qg,
+            qb,
+            crate::color::MATCH_DISTANCE_SQ,
+            crate::color::MATCH_MIN_WEIGHT
         ],
         |row| row.get(0),
     )?;
@@ -2336,6 +2720,35 @@ pub fn add_user_tag(conn: &Connection, image_id: i64, tag: &str) -> Result<Image
 pub fn remove_tag(conn: &Connection, tag_id: i64) -> Result<()> {
     conn.execute("DELETE FROM image_tags WHERE id = ?1", [tag_id])?;
     Ok(())
+}
+
+/// Rename a tag across the whole library, or merge it into an existing tag when
+/// `to` already exists. Images that already carry `to` keep a single instance
+/// (the colliding source row is dropped).
+pub fn rename_tag(conn: &Connection, from: &str, to: &str) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    // Move rows where the target tag isn't already on that image; UNIQUE
+    // collisions are skipped (OR IGNORE)…
+    tx.execute(
+        "UPDATE OR IGNORE image_tags SET tag = ?2 WHERE tag = ?1",
+        params![from, to],
+    )?;
+    // …then drop the now-duplicate leftovers still under the old name.
+    tx.execute("DELETE FROM image_tags WHERE tag = ?1", params![from])?;
+    // The tag-cloud cache keys on image-id hashes, not tag text, so a rename
+    // wouldn't invalidate it automatically — clear it.
+    tx.execute("DELETE FROM tag_cloud_cache", [])?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Delete a tag from every image in the library. Returns the number of rows removed.
+pub fn delete_tag(conn: &Connection, name: &str) -> Result<i64> {
+    let tx = conn.unchecked_transaction()?;
+    let removed = tx.execute("DELETE FROM image_tags WHERE tag = ?1", params![name])? as i64;
+    tx.execute("DELETE FROM tag_cloud_cache", [])?;
+    tx.commit()?;
+    Ok(removed)
 }
 
 pub fn enqueue_missing_tagging_jobs_for_folder(conn: &Connection, folder_id: i64) -> Result<usize> {

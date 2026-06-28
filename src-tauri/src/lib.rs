@@ -1,4 +1,5 @@
 mod captioner;
+mod color;
 mod commands;
 mod db;
 mod embedder;
@@ -122,6 +123,8 @@ pub fn run() {
             // Caption worker disabled — UI removed; keeping backend code intact for future use.
             // indexer::start_caption_worker(app.handle().clone(), pool.clone(), app_dir.clone());
             indexer::start_tagging_worker(app.handle().clone(), pool.clone(), app_dir.clone());
+            // Backfill color palettes for images indexed before color search existed.
+            indexer::start_color_backfill(app.handle().clone(), pool.clone());
 
             let watcher_handle = indexer::start_watcher(app.handle().clone(), pool.clone(), thumb_dir.clone());
 
@@ -185,6 +188,22 @@ pub fn run() {
             commands::get_image_tags,
             commands::add_user_tag,
             commands::remove_tag,
+            commands::rename_tag,
+            commands::delete_tag,
+            commands::get_image_exif,
+            commands::list_albums,
+            commands::create_album,
+            commands::rename_album,
+            commands::delete_album,
+            commands::delete_albums,
+            commands::reorder_albums,
+            commands::add_images_to_album,
+            commands::remove_images_from_album,
+            commands::get_album_images,
+            commands::bulk_update_details,
+            commands::bulk_add_tags,
+            commands::bulk_remove_tag,
+            commands::get_build_variant,
             commands::search_tags_autocomplete,
             commands::find_duplicates,
             commands::load_duplicate_scan_cache,
@@ -197,6 +216,8 @@ pub fn run() {
             commands::get_tagging_queue_folder_ids,
             commands::set_tagging_queue_folder_ids,
             commands::open_app_data_folder,
+            commands::open_map_location,
+            commands::open_changelog_url,
             commands::get_database_info,
             commands::vacuum_database,
             commands::rebuild_semantic_index,

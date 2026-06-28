@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useGalleryStore } from "../store";
 import { PhokusMark } from "./PhokusMark";
+import { Tooltip } from "./Tooltip";
 
 // SVG icons for window controls
 function MinimizeIcon() {
@@ -79,22 +80,18 @@ export function TitleBar() {
           up its focal point and the chip becomes a button that re-opens the prompt. */}
       <div className="flex items-center gap-2 pl-3 pr-4">
         {updatePending ? (
-          <div
-            className="group relative"
-            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-          >
-            <button
-              onClick={() => void installUpdate()}
-              aria-label={`Update available — click to update to Phokus v${updateVersion}`}
-              className="relative flex h-5 w-5 items-center justify-center rounded-md bg-white/8 overflow-hidden text-gray-300 transition-colors hover:bg-white/12"
-            >
-              <span className="pointer-events-none absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-400/60 animate-ping" />
-              <PhokusMark className="relative h-4 w-4" dotClassName="fill-amber-400" />
-            </button>
-            {/* Custom tooltip — fades in ~100ms instead of the native ~500ms delay. */}
-            <span className="pointer-events-none absolute left-0 top-full z-50 mt-1.5 whitespace-nowrap rounded-md border border-white/10 bg-gray-800 px-2 py-1 text-[11px] text-gray-200 opacity-0 shadow-lg transition-opacity duration-100 group-hover:opacity-100">
-              Click to update — v{updateVersion}
-            </span>
+          <div style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+            {/* Instant tooltip (delay 0) — this affordance should read immediately. */}
+            <Tooltip label={`Click to update — v${updateVersion}`} delay={0} align="start">
+              <button
+                onClick={() => void installUpdate()}
+                aria-label={`Update available — click to update to Phokus v${updateVersion}`}
+                className="relative flex h-5 w-5 items-center justify-center rounded-md bg-white/8 overflow-hidden text-gray-300 transition-colors hover:bg-white/12"
+              >
+                <span className="pointer-events-none absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-400/60 animate-ping" />
+                <PhokusMark className="relative h-4 w-4" dotClassName="fill-amber-400" />
+              </button>
+            </Tooltip>
           </div>
         ) : (
           <div className="flex h-5 w-5 items-center justify-center rounded-md bg-white/8 overflow-hidden text-gray-300">

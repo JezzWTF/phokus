@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState } fr
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ImageRecord, parseSearchValue, tileSizeForZoom, useGalleryStore } from "../store";
+import { BulkActionBar } from "./BulkActionBar";
+import { Tooltip } from "./Tooltip";
 
 const GAP = 6;
 
@@ -30,8 +32,7 @@ export function ContextMenu({
 }) {
   const openImage = useGalleryStore((state) => state.openImage);
   const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
-  const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
-  const similarScope = useGalleryStore((state) => state.similarScope);
+  const findSimilar = useGalleryStore((state) => state.findSimilar);
   const canFindSimilar = image.embedding_status === "ready";
 
   return (
@@ -59,9 +60,9 @@ export function ContextMenu({
             ? "text-gray-200 hover:bg-white/5 hover:text-white"
             : "text-gray-600 cursor-not-allowed"
         }`}
-        onClick={async () => {
+        onClick={() => {
           if (!canFindSimilar) return;
-          await loadSimilarImages(image.id, similarScope === "current_folder" ? image.folder_id : null, true, image.folder_id);
+          findSimilar(image.id, image.folder_id);
           onClose();
         }}
         disabled={!canFindSimilar}
@@ -112,24 +113,70 @@ export function ImageTile({
 }: {
   image: ImageRecord;
   onClick: () => void;
-  onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onContextMenu: (event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
   const [loaded, setLoaded] = useState(false);
   const [errored, setErrored] = useState(false);
-  const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
-  const similarScope = useGalleryStore((state) => state.similarScope);
+  const findSimilar = useGalleryStore((state) => state.findSimilar);
+  const selected = useGalleryStore((state) => state.gallerySelectedIds.has(image.id));
+  const selectionActive = useGalleryStore((state) => state.gallerySelectedIds.size > 0);
+  const toggleGallerySelected = useGalleryStore((state) => state.toggleGallerySelected);
   const canFindSimilar = image.embedding_status === "ready";
 
   const src = image.thumbnail_path ? convertFileSrc(image.thumbnail_path) : null;
 
   return (
-    <button
-      className="media-dark-surface group relative overflow-hidden rounded-xl bg-white/[0.04] text-left focus:outline-none"
+    <Tooltip label={image.filename} delay={500} block followCursor>
+    <div
+      className={`media-dark-surface group relative overflow-hidden rounded-xl bg-white/[0.04] text-left focus:outline-none transition-shadow ${
+        selected ? "ring-2 ring-inset ring-blue-400/80" : ""
+      }`}
       style={{ width: "100%", aspectRatio: "1 / 1" }}
-      onClick={onClick}
       onContextMenu={onContextMenu}
-      title={image.filename}
     >
+      {/* Full-tile click target — opens, or toggles selection while selecting.
+          A real button (over the non-interactive tile div) keeps it keyboard-
+          accessible without nesting buttons. */}
+      <button
+        type="button"
+        className="absolute inset-0 z-10 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80"
+        aria-label={`Open ${image.filename}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (selectionActive) toggleGallerySelected(image.id);
+          else onClick();
+        }}
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+      />
+      {/* Selection corner — a top-left zone that reveals the checkbox only when
+          hovered (not the whole tile) and toggles selection on click. The
+          checkbox stays visible once the item is selected. */}
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={selected}
+        aria-label={selected ? "Deselect" : "Select"}
+        className="group/cb absolute top-0 left-0 z-20 h-11 w-11 cursor-pointer"
+        onClick={(event) => {
+          event.stopPropagation();
+          toggleGallerySelected(image.id);
+        }}
+      >
+        <div
+          className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full border transition-all duration-150 ${
+            selected
+              ? "border-blue-400 bg-blue-500 text-white opacity-100"
+              : "border-white/70 bg-black/40 text-transparent opacity-0 backdrop-blur-sm group-hover/cb:opacity-100"
+          }`}
+        >
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+      </button>
       {/* Image / placeholder */}
       {src && !errored ? (
         <>
@@ -173,6 +220,17 @@ export function ImageTile({
 
       {/* Persistent badges — only shown when meaningful */}
       <div className="absolute top-2 right-2 flex flex-col items-end gap-1 pointer-events-none">
+        {image.embedding_status === "failed" && (
+          <div
+            className="flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 backdrop-blur-sm"
+            title={image.embedding_error ?? "Embedding failed"}
+          >
+            <svg className="h-2.5 w-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+                d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+          </div>
+        )}
         {image.favorite && (
           <div className="rounded-full bg-black/50 p-1 text-rose-400 backdrop-blur-sm">
             <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 20 20">
@@ -196,21 +254,6 @@ export function ImageTile({
         )}
       </div>
 
-      {/* Embedding failed badge — top-left */}
-      {image.embedding_status === "failed" && (
-        <div
-          className="absolute top-2 left-2 pointer-events-none"
-          title={image.embedding_error ?? "Embedding failed"}
-        >
-          <div className="flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 backdrop-blur-sm">
-            <svg className="h-2.5 w-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-                d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-            </svg>
-          </div>
-        </div>
-      )}
-
       {/* Hover overlay — slides up from bottom */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none" />
 
@@ -230,7 +273,7 @@ export function ImageTile({
             <span />
           )}
           <button
-            className={`rounded-md px-2 py-0.5 text-[10px] transition-colors pointer-events-auto backdrop-blur-sm ${
+            className={`relative z-20 rounded-md px-2 py-0.5 text-[10px] transition-colors pointer-events-auto backdrop-blur-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80 ${
               canFindSimilar
                 ? "bg-white/10 text-white/80 hover:bg-white/20 hover:text-white"
                 : "bg-white/5 text-white/30 cursor-not-allowed"
@@ -238,7 +281,7 @@ export function ImageTile({
             onClick={(event) => {
               event.stopPropagation();
               if (!canFindSimilar) return;
-              void loadSimilarImages(image.id, similarScope === "current_folder" ? image.folder_id : null, true, image.folder_id);
+              findSimilar(image.id, image.folder_id);
             }}
             disabled={!canFindSimilar}
           >
@@ -246,7 +289,8 @@ export function ImageTile({
           </button>
         </div>
       </div>
-    </button>
+    </div>
+    </Tooltip>
   );
 }
 
@@ -338,7 +382,8 @@ export function Gallery() {
   }, []);
 
   return (
-    <div ref={parentRef} className="relative flex-1 overflow-y-auto overflow-x-hidden min-h-0 bg-gray-950">
+    <div className="relative flex-1 min-h-0">
+    <div ref={parentRef} className="absolute inset-0 overflow-y-auto overflow-x-hidden bg-gray-950">
       {images.length === 0 && loadingImages ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
           <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8 min-w-72">
@@ -447,6 +492,11 @@ export function Gallery() {
           onClose={() => setContextMenu(null)}
         />
       ) : null}
+    </div>
+
+    {/* Pinned to the bottom of the gallery viewport — outside the scroll
+        container so it stays put while the grid scrolls. */}
+    <BulkActionBar />
     </div>
   );
 }

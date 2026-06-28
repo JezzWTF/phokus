@@ -53,7 +53,7 @@ export type CaptionDetail = "short" | "detailed" | "paragraph";
 export type TaggerAcceleration = "auto" | "cpu" | "directml";
 export type AiRating = "general" | "sensitive" | "questionable" | "explicit";
 export type TaggingQueueScope = "all" | "selected";
-export type SimilarScope = "all_media" | "current_folder";
+export type SimilarScope = "all_media" | "current_folder" | "current_album";
 export type ExploreMode = "visual" | "tags";
 export type AppTheme = "phokus" | "subtle-light" | "conventional-dark";
 
@@ -176,7 +176,31 @@ export interface ThumbnailBatch {
   images: ImageRecord[];
 }
 
-export type ActiveView = "gallery" | "explore" | "duplicates" | "timeline";
+export type ActiveView = "gallery" | "explore" | "duplicates" | "timeline" | "album";
+
+export interface Album {
+  id: number;
+  name: string;
+  cover_image_id: number | null;
+  cover_thumbnail_path: string | null;
+  image_count: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ImageExif {
+  make: string | null;
+  model: string | null;
+  lens: string | null;
+  iso: string | null;
+  f_number: string | null;
+  exposure_time: string | null;
+  focal_length: string | null;
+  datetime_original: string | null;
+  gps_lat: number | null;
+  gps_lon: number | null;
+}
 
 export interface TagCloudEntry {
   count: number;
@@ -330,11 +354,14 @@ interface GalleryState {
   minimumRating: number;
   failedEmbeddingsOnly: boolean;
   failedTaggingOnly: boolean;
+  colorFilter: [number, number, number] | null; // [r,g,b] dominant-color filter
+  colorBackfill: { processed: number; total: number; done: boolean } | null;
   zoomPreset: ZoomPreset;
   selectedImage: ImageRecord | null;
   collectionTitle: string | null;
   similarSourceImageId: number | null;
   similarSourceFolderId: number | null;
+  similarSourceAlbumId: number | null; // album a similar search was launched from (enables "Similar: Album")
   similarHasMore: boolean;
   similarScope: SimilarScope;
   similarFolderId: number | null;
@@ -374,6 +401,7 @@ interface GalleryState {
   workerPaused: Record<number, Record<WorkerKey, boolean>>;
 
   appVersion: string | null;
+  buildVariant: "cpu" | "cuda" | null;
   updateStatus: UpdateStatus;
   updateVersion: string | null;
   updateProgress: number | null; // 0..1 download progress, null while size unknown
@@ -411,6 +439,14 @@ interface GalleryState {
   duplicateLastScanned: number | null; // Unix timestamp (seconds)
   duplicateScanFolderId: number | null | undefined; // undefined = never scanned
 
+  // Gallery multi-select (Feature A)
+  gallerySelectedIds: Set<number>;
+
+  // Albums (Feature B)
+  albums: Album[];
+  albumsLoaded: boolean;
+  selectedAlbumId: number | null;
+
   loadFolders: () => Promise<void>;
   loadBackgroundJobProgress: () => Promise<void>;
   addFolder: (path: string) => Promise<void>;
@@ -435,6 +471,7 @@ interface GalleryState {
   setMinimumRating: (minimumRating: number) => void;
   setFailedEmbeddingsOnly: (failedEmbeddingsOnly: boolean) => void;
   setFailedTaggingOnly: (failedTaggingOnly: boolean) => void;
+  setColorFilter: (color: [number, number, number] | null) => void;
   showFailedTagging: (folderId: number) => void;
   setZoomPreset: (zoomPreset: ZoomPreset) => void;
   openImage: (image: ImageRecord) => void;
@@ -445,8 +482,11 @@ interface GalleryState {
   loadExploreTags: () => Promise<void>;
   showVisualCluster: (imageIds: number[]) => Promise<void>;
   searchForTag: (tag: string) => void;
-  loadSimilarImages: (imageId: number, folderId?: number | null, reset?: boolean, sourceFolderId?: number | null) => Promise<void>;
-  loadSimilarByRegion: (imageId: number, crop: { x: number; y: number; w: number; h: number }, folderId?: number | null, sourceFolderId?: number | null) => Promise<void>;
+  loadSimilarImages: (imageId: number, folderId?: number | null, reset?: boolean, sourceFolderId?: number | null, albumId?: number | null) => Promise<void>;
+  loadSimilarByRegion: (imageId: number, crop: { x: number; y: number; w: number; h: number }, folderId?: number | null, sourceFolderId?: number | null, albumId?: number | null) => Promise<void>;
+  // Entry points that decide scope (album when launched from an album, else folder/all per similarScope).
+  findSimilar: (imageId: number, sourceFolderId: number | null) => Promise<void>;
+  findSimilarByRegion: (imageId: number, crop: { x: number; y: number; w: number; h: number }, sourceFolderId: number | null) => Promise<void>;
   setSimilarScope: (scope: SimilarScope) => void;
   suggestImageTags: (imageId: number) => Promise<string[]>;
   loadCaptionModelStatus: () => Promise<void>;
@@ -531,6 +571,30 @@ interface GalleryState {
   getImageTags: (imageId: number) => Promise<ImageTag[]>;
   addUserTag: (imageId: number, tag: string) => Promise<ImageTag>;
   removeTag: (tagId: number) => Promise<void>;
+  getImageExif: (imageId: number) => Promise<ImageExif>;
+  renameTag: (from: string, to: string) => Promise<void>;
+  deleteTag: (tag: string) => Promise<number>;
+
+  // Gallery multi-select (Feature A)
+  toggleGallerySelected: (imageId: number) => void;
+  selectAllGallery: () => void;
+  clearGallerySelection: () => void;
+  bulkSetFavorite: (favorite: boolean) => Promise<void>;
+  bulkSetRating: (rating: number) => Promise<void>;
+  bulkAddTags: (tags: string[]) => Promise<void>;
+  bulkRemoveTag: (tag: string) => Promise<void>;
+  bulkDeleteSelected: () => Promise<number>;
+
+  // Albums (Feature B)
+  loadAlbums: () => Promise<void>;
+  createAlbum: (name: string) => Promise<Album>;
+  renameAlbum: (albumId: number, name: string) => Promise<void>;
+  deleteAlbum: (albumId: number) => Promise<void>;
+  deleteAlbums: (albumIds: number[]) => Promise<void>;
+  reorderAlbums: (albumIds: number[]) => Promise<void>;
+  addToAlbum: (albumId: number, imageIds: number[]) => Promise<number>;
+  removeFromAlbum: (albumId: number, imageIds: number[]) => Promise<void>;
+  viewAlbum: (albumId: number) => void;
 }
 
 const PAGE_SIZE = 200;
@@ -773,11 +837,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   minimumRating: 0,
   failedEmbeddingsOnly: false,
   failedTaggingOnly: false,
+  colorFilter: null,
+  colorBackfill: null,
   zoomPreset: "comfortable",
   selectedImage: null,
   collectionTitle: null,
   similarSourceImageId: null,
   similarSourceFolderId: null,
+  similarSourceAlbumId: null,
   similarHasMore: false,
   similarScope: "all_media",
   similarFolderId: null,
@@ -815,6 +882,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   workerPaused: {},
 
   appVersion: null,
+  buildVariant: null,
   updateStatus: "idle",
   updateVersion: null,
   updateProgress: null,
@@ -848,6 +916,12 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   duplicateSelectedIds: new Set(),
   duplicateLastScanned: null,
   duplicateScanFolderId: undefined,
+
+  gallerySelectedIds: new Set(),
+
+  albums: [],
+  albumsLoaded: false,
+  selectedAlbumId: null,
 
   setCacheDir: (cacheDir) => set({ cacheDir }),
 
@@ -957,7 +1031,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   selectFolder: (folderId) => {
-    set({ selectedFolderId: folderId, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, activeView: "gallery", failedEmbeddingsOnly: false, failedTaggingOnly: false, imageLoadError: null });
+    // Leaving any album: drop the album-origin scope so the Folder/All pills
+    // highlight correctly again.
+    const similarScope = get().similarScope === "current_album" ? "all_media" : get().similarScope;
+    set({ selectedFolderId: folderId, selectedAlbumId: null, similarSourceAlbumId: null, similarScope, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, activeView: "gallery", failedEmbeddingsOnly: false, failedTaggingOnly: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
@@ -990,12 +1067,38 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   loadImages: async (reset = false) => {
-    const { selectedFolderId, search, sort, loadedCount, mediaFilter, favoritesOnly, minimumRating, failedEmbeddingsOnly, failedTaggingOnly, activeView } = get();
+    const { selectedFolderId, search, sort, loadedCount, mediaFilter, favoritesOnly, minimumRating, failedEmbeddingsOnly, failedTaggingOnly, colorFilter, activeView } = get();
     const parsedSearch = parseSearchValue(search);
     const requestToken = ++galleryRequestToken;
-    set({ loadingImages: true, imageLoadError: null });
+    // Any fresh collection load invalidates a selection that referenced the
+    // previous set of visible images.
+    set({ loadingImages: true, imageLoadError: null, ...(reset ? { gallerySelectedIds: new Set<number>() } : {}) });
 
     try {
+      // Album view loads from the album membership, honoring sort changes from
+      // the Toolbar while staying within the album (ignores folder/search/filters).
+      if (activeView === "album") {
+        const albumId = get().selectedAlbumId;
+        if (albumId === null) {
+          set({ loadingImages: false });
+          return;
+        }
+        const offset = reset ? 0 : loadedCount;
+        const result = await invoke<{ images: ImageRecord[]; total: number; offset: number; limit: number }>("get_album_images", {
+          params: { album_id: albumId, sort, offset, limit: PAGE_SIZE },
+        });
+        if (requestToken !== galleryRequestToken) return;
+        const albumName = get().albums.find((entry) => entry.id === albumId)?.name ?? "Album";
+        set((state) => ({
+          images: reset ? result.images : [...state.images, ...result.images],
+          totalImages: result.total,
+          loadedCount: reset ? result.images.length : state.loadedCount + result.images.length,
+          loadingImages: false,
+          collectionTitle: albumName,
+        }));
+        return;
+      }
+
       if (parsedSearch.mode === "semantic" && parsedSearch.query) {
         const images = await invoke<ImageRecord[]>("semantic_search_images", {
           params: {
@@ -1078,6 +1181,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           rating_min: minimumRating > 0 ? minimumRating : null,
           embedding_failed_only: failedEmbeddingsOnly,
           tagging_failed_only: failedTaggingOnly,
+          color: colorFilter,
           sort,
           offset,
           limit: activeView === "timeline" ? TIMELINE_PAGE_SIZE : PAGE_SIZE,
@@ -1107,9 +1211,31 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     const { loadedCount, totalImages, loadingImages, collectionTitle, similarSourceImageId, similarHasMore, similarFolderId, similarCrop } = get();
     if (loadingImages || loadedCount >= totalImages) return;
     if (collectionTitle === "Explore Cluster") return;
+    const { activeView, selectedAlbumId, sort } = get();
+    if (activeView === "album" && selectedAlbumId !== null) {
+      const requestToken = ++galleryRequestToken;
+      set({ loadingImages: true });
+      try {
+        const result = await invoke<{ images: ImageRecord[]; total: number; offset: number; limit: number }>("get_album_images", {
+          params: { album_id: selectedAlbumId, sort, offset: loadedCount, limit: PAGE_SIZE },
+        });
+        if (requestToken !== galleryRequestToken) return;
+        set((state) => ({
+          images: [...state.images, ...result.images],
+          loadedCount: state.loadedCount + result.images.length,
+          totalImages: result.total,
+          loadingImages: false,
+        }));
+      } catch {
+        if (requestToken !== galleryRequestToken) return;
+        set({ loadingImages: false });
+      }
+      return;
+    }
+    const pageAlbumId = get().similarScope === "current_album" ? get().similarSourceAlbumId : null;
     if (collectionTitle === "Similar Images" && similarSourceImageId !== null) {
       if (!similarHasMore) return;
-      await get().loadSimilarImages(similarSourceImageId, similarFolderId, false, get().similarSourceFolderId ?? null);
+      await get().loadSimilarImages(similarSourceImageId, similarFolderId, false, get().similarSourceFolderId ?? null, pageAlbumId);
       return;
     }
     if (collectionTitle === "Region Search Results" && similarSourceImageId !== null && similarCrop !== null) {
@@ -1124,7 +1250,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
             crop_y: similarCrop.y,
             crop_w: similarCrop.w,
             crop_h: similarCrop.h,
-            folder_id: similarFolderId,
+            folder_id: pageAlbumId !== null ? null : similarFolderId,
+            album_id: pageAlbumId,
             offset: loadedCount,
             limit: PAGE_SIZE,
           },
@@ -1196,6 +1323,11 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     void get().loadImages(true);
   },
 
+  setColorFilter: (colorFilter) => {
+    set({ colorFilter, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
+    void get().loadImages(true);
+  },
+
   showFailedTagging: (folderId) => {
     set({
       selectedFolderId: folderId,
@@ -1225,8 +1357,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   closeImage: () => set({ selectedImage: null }),
 
   setView: (activeView) => {
+    // Leaving an album view drops the album-origin similar scope.
+    const similarScopeReset = get().similarScope === "current_album" ? "all_media" : get().similarScope;
     if (activeView === "timeline") {
-      set({ activeView, sort: "taken_asc", images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarSourceFolderId: null, similarFolderId: null, similarHasMore: false, similarCrop: null, imageLoadError: null });
+      set({ activeView, sort: "taken_asc", images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarSourceFolderId: null, similarSourceAlbumId: null, similarScope: similarScopeReset, similarFolderId: null, similarHasMore: false, similarCrop: null, imageLoadError: null });
       void get().loadImages(true);
       return;
     }
@@ -1244,7 +1378,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         return;
       }
     }
-    set({ activeView });
+    set({ activeView, similarSourceAlbumId: null, similarScope: similarScopeReset });
   },
 
   setExploreMode: (exploreMode) => set({ exploreMode }),
@@ -1305,6 +1439,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       similarSourceFolderId: null,
       similarHasMore: false,
       similarFolderId: null,
+      gallerySelectedIds: new Set<number>(),
+      selectedAlbumId: null,
       galleryScrollResetKey: state.galleryScrollResetKey + 1,
     }));
 
@@ -1339,10 +1475,12 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     void get().loadImages(true);
   },
 
-  loadSimilarImages: async (imageId, folderId = get().selectedFolderId, reset = true, sourceFolderId = folderId ?? null) => {
+  loadSimilarImages: async (imageId, folderId = get().selectedFolderId, reset = true, sourceFolderId = folderId ?? null, albumId = null) => {
     const requestToken = ++galleryRequestToken;
     const offset = reset ? 0 : get().loadedCount;
-    const similarScope = folderId === null ? "all_media" : "current_folder";
+    const similarScope: SimilarScope = albumId !== null ? "current_album" : folderId === null ? "all_media" : "current_folder";
+    // Album scope drives results off album membership, so the folder query is null.
+    const queryFolderId = albumId !== null ? null : folderId ?? null;
     set((state) => ({
       images: reset ? [] : state.images,
       loadedCount: reset ? 0 : state.loadedCount,
@@ -1351,8 +1489,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       imageLoadError: null,
       similarSourceImageId: imageId,
       similarSourceFolderId: sourceFolderId,
-      similarFolderId: folderId ?? null,
+      similarFolderId: queryFolderId,
       similarScope,
+      // Force the gallery grid so results (and the bulk bar) render regardless
+      // of which view the search was launched from.
+      activeView: "gallery",
+      gallerySelectedIds: reset ? new Set<number>() : state.gallerySelectedIds,
+      selectedAlbumId: null,
       galleryScrollResetKey: reset ? state.galleryScrollResetKey + 1 : state.galleryScrollResetKey,
     }));
 
@@ -1360,7 +1503,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const result = await invoke<SimilarImagesPage>("find_similar_images", {
         params: {
           image_id: imageId,
-          folder_id: folderId ?? null,
+          folder_id: queryFolderId,
+          album_id: albumId,
           offset,
           limit: PAGE_SIZE,
           threshold: SIMILAR_DISTANCE_THRESHOLD,
@@ -1382,7 +1526,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           similarSourceImageId: imageId,
           similarSourceFolderId: sourceFolderId,
           similarHasMore: result.has_more,
-          similarFolderId: folderId ?? null,
+          similarFolderId: queryFolderId,
           similarScope,
           selectedImage: reset ? null : state.selectedImage,
         };
@@ -1400,16 +1544,17 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         similarSourceImageId: imageId,
         similarSourceFolderId: sourceFolderId,
         similarHasMore: false,
-        similarFolderId: folderId ?? null,
+        similarFolderId: queryFolderId,
         similarScope,
         selectedImage: null,
       });
     }
   },
 
-  loadSimilarByRegion: async (imageId, crop, folderId = get().selectedFolderId, sourceFolderId = folderId ?? null) => {
+  loadSimilarByRegion: async (imageId, crop, folderId = get().selectedFolderId, sourceFolderId = folderId ?? null, albumId = null) => {
     const requestToken = ++galleryRequestToken;
-    const similarScope = folderId === null ? "all_media" : "current_folder";
+    const similarScope: SimilarScope = albumId !== null ? "current_album" : folderId === null ? "all_media" : "current_folder";
+    const queryFolderId = albumId !== null ? null : folderId ?? null;
     set((state) => ({
       images: [],
       loadedCount: 0,
@@ -1418,9 +1563,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       imageLoadError: null,
       similarSourceImageId: imageId,
       similarSourceFolderId: sourceFolderId,
-      similarFolderId: folderId ?? null,
+      similarFolderId: queryFolderId,
       similarCrop: crop,
       similarScope,
+      // Force the gallery grid so results (and the bulk bar) render regardless
+      // of which view the search was launched from.
+      activeView: "gallery",
+      gallerySelectedIds: new Set<number>(),
+      selectedAlbumId: null,
       galleryScrollResetKey: state.galleryScrollResetKey + 1,
       selectedImage: null,
     }));
@@ -1433,7 +1583,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           crop_y: crop.y,
           crop_w: crop.w,
           crop_h: crop.h,
-          folder_id: folderId ?? null,
+          folder_id: queryFolderId,
+          album_id: albumId,
           offset: 0,
           limit: PAGE_SIZE,
         },
@@ -1451,7 +1602,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         similarSourceImageId: imageId,
         similarSourceFolderId: sourceFolderId,
         similarHasMore: result.has_more,
-        similarFolderId: folderId ?? null,
+        similarFolderId: queryFolderId,
         similarCrop: crop,
         similarScope,
       });
@@ -1468,22 +1619,51 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         similarSourceImageId: imageId,
         similarSourceFolderId: sourceFolderId,
         similarHasMore: false,
-        similarFolderId: folderId ?? null,
+        similarFolderId: queryFolderId,
+        similarCrop: crop,
         similarScope,
         selectedImage: null,
       });
     }
   },
 
+  // Decide the scope at launch: album when triggered from an album, else the
+  // current folder/all preference. Sets similarSourceAlbumId so the "Similar:
+  // Album" pill and scope toggle work afterward.
+  findSimilar: (imageId, sourceFolderId) => {
+    const { activeView, selectedAlbumId, similarScope } = get();
+    const albumOrigin = activeView === "album" ? selectedAlbumId : null;
+    set({ similarSourceAlbumId: albumOrigin });
+    // Respect the chosen scope; album is the default in an album view but the
+    // user can override to Folder/All before searching.
+    if (similarScope === "current_album" && albumOrigin !== null) {
+      return get().loadSimilarImages(imageId, null, true, sourceFolderId, albumOrigin);
+    }
+    const folderId = similarScope === "current_folder" ? sourceFolderId : null;
+    return get().loadSimilarImages(imageId, folderId, true, sourceFolderId, null);
+  },
+
+  findSimilarByRegion: (imageId, crop, sourceFolderId) => {
+    const { activeView, selectedAlbumId, similarScope } = get();
+    const albumOrigin = activeView === "album" ? selectedAlbumId : null;
+    set({ similarSourceAlbumId: albumOrigin });
+    if (similarScope === "current_album" && albumOrigin !== null) {
+      return get().loadSimilarByRegion(imageId, crop, null, sourceFolderId, albumOrigin);
+    }
+    const folderId = similarScope === "current_folder" ? sourceFolderId : null;
+    return get().loadSimilarByRegion(imageId, crop, folderId, sourceFolderId, null);
+  },
+
   setSimilarScope: (similarScope) => {
     set({ similarScope });
-    const { similarSourceImageId, similarSourceFolderId, selectedFolderId, collectionTitle, similarCrop } = get();
+    const { similarSourceImageId, similarSourceFolderId, similarSourceAlbumId, selectedFolderId, collectionTitle, similarCrop } = get();
     if (similarSourceImageId === null) return;
+    const albumId = similarScope === "current_album" ? similarSourceAlbumId : null;
     const folderId = similarScope === "current_folder" ? (similarSourceFolderId ?? selectedFolderId) : null;
     if (collectionTitle === "Region Search Results" && similarCrop !== null) {
-      void get().loadSimilarByRegion(similarSourceImageId, similarCrop, folderId, similarSourceFolderId);
+      void get().loadSimilarByRegion(similarSourceImageId, similarCrop, folderId, similarSourceFolderId, albumId);
     } else {
-      void get().loadSimilarImages(similarSourceImageId, folderId, true, similarSourceFolderId);
+      void get().loadSimilarImages(similarSourceImageId, folderId, true, similarSourceFolderId, albumId);
     }
   },
 
@@ -1780,6 +1960,12 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       set({ appVersion: await getVersion() });
     } catch {
       // leave null; the UI falls back to a dash
+    }
+    try {
+      const variant = await invoke<string>("get_build_variant");
+      set({ buildVariant: variant === "cuda" ? "cuda" : "cpu" });
+    } catch {
+      // leave null; the badge is hidden until known
     }
   },
 
@@ -2097,6 +2283,280 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     set({ exploreTagsFolderId: undefined });
   },
 
+  getImageExif: async (imageId) => {
+    return invoke<ImageExif>("get_image_exif", { params: { image_id: imageId } });
+  },
+
+  renameTag: async (from, to) => {
+    await invoke("rename_tag", { params: { from, to } });
+    // Tag content changed — invalidate the explore-tags and tag-cloud caches.
+    set({
+      exploreTagsFolderId: undefined,
+      exploreTagEntries: [],
+      tagCloudFolderId: undefined,
+      tagCloudEntries: [],
+    });
+    const parsed = parseSearchValue(get().search);
+    if (parsed.mode === "tag" && parsed.query === from) {
+      // An active tag-search points at the old name — repoint it so the gallery
+      // refreshes instead of showing stale results for a tag that no longer exists.
+      get().setSearch(`/t ${to}`);
+    } else if (get().activeView === "explore") {
+      await get().loadExploreTags();
+    }
+  },
+
+  deleteTag: async (tag) => {
+    const removed = await invoke<number>("delete_tag", { params: { tag } });
+    set({
+      exploreTagsFolderId: undefined,
+      exploreTagEntries: [],
+      tagCloudFolderId: undefined,
+      tagCloudEntries: [],
+    });
+    const parsed = parseSearchValue(get().search);
+    if (parsed.mode === "tag" && parsed.query === tag) {
+      // The searched tag is gone — reload so the now-empty result is reflected.
+      void get().loadImages(true);
+    } else if (get().activeView === "explore") {
+      await get().loadExploreTags();
+    }
+    return removed;
+  },
+
+  // ── Gallery multi-select (Feature A) ──────────────────────────────────────
+
+  toggleGallerySelected: (imageId) => {
+    set((state) => {
+      const next = new Set(state.gallerySelectedIds);
+      if (next.has(imageId)) next.delete(imageId);
+      else next.add(imageId);
+      return { gallerySelectedIds: next };
+    });
+  },
+
+  selectAllGallery: () => {
+    set((state) => ({ gallerySelectedIds: new Set(state.images.map((image) => image.id)) }));
+  },
+
+  clearGallerySelection: () => set({ gallerySelectedIds: new Set() }),
+
+  bulkSetFavorite: async (favorite) => {
+    const ids = Array.from(get().gallerySelectedIds);
+    if (ids.length === 0) return;
+    const updated = await invoke<ImageRecord[]>("bulk_update_details", {
+      params: { image_ids: ids, favorite, rating: null },
+    });
+    set((state) => {
+      const match = state.selectedImage && updated.find((image) => image.id === state.selectedImage!.id);
+      // Derived collections keep their relevance order (replace in place); only
+      // the real sorted gallery re-sorts.
+      return {
+        images: isDerivedCollectionTitle(state.collectionTitle)
+          ? replaceExistingImages(state.images, updated)
+          : mergeImages(state.images, updated, state.sort),
+        selectedImage: match ?? state.selectedImage,
+      };
+    });
+  },
+
+  bulkSetRating: async (rating) => {
+    const ids = Array.from(get().gallerySelectedIds);
+    if (ids.length === 0) return;
+    const updated = await invoke<ImageRecord[]>("bulk_update_details", {
+      params: { image_ids: ids, favorite: null, rating },
+    });
+    set((state) => {
+      const match = state.selectedImage && updated.find((image) => image.id === state.selectedImage!.id);
+      return {
+        images: isDerivedCollectionTitle(state.collectionTitle)
+          ? replaceExistingImages(state.images, updated)
+          : mergeImages(state.images, updated, state.sort),
+        selectedImage: match ?? state.selectedImage,
+      };
+    });
+  },
+
+  bulkAddTags: async (tags) => {
+    const ids = Array.from(get().gallerySelectedIds);
+    const cleaned = tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0);
+    if (ids.length === 0 || cleaned.length === 0) return;
+    await invoke<void>("bulk_add_tags", { params: { image_ids: ids, tags: cleaned } });
+    // New tags landed — invalidate Explore tag caches.
+    set({ exploreTagsFolderId: undefined, tagCloudFolderId: undefined, tagCloudEntries: [] });
+  },
+
+  bulkRemoveTag: async (tag) => {
+    const ids = Array.from(get().gallerySelectedIds);
+    if (ids.length === 0 || !tag.trim()) return;
+    await invoke<void>("bulk_remove_tag", { params: { image_ids: ids, tag: tag.trim() } });
+    set({ exploreTagsFolderId: undefined, tagCloudFolderId: undefined, tagCloudEntries: [] });
+  },
+
+  bulkDeleteSelected: async () => {
+    const ids = Array.from(get().gallerySelectedIds);
+    if (ids.length === 0) return 0;
+    const affectedFolderIds = new Set<number>(
+      get().images.filter((image) => get().gallerySelectedIds.has(image.id)).map((image) => image.folder_id),
+    );
+    const succeededIds = await invoke<number[]>("delete_images_from_disk", { params: { image_ids: ids } });
+    const succeededSet = new Set(succeededIds);
+    set((state) => ({
+      // Only remove images confirmed deleted — failed files remain selected for retry.
+      images: state.images.filter((image) => !succeededSet.has(image.id)),
+      loadedCount: state.images.filter((image) => !succeededSet.has(image.id)).length,
+      totalImages: Math.max(0, state.totalImages - succeededIds.length),
+      gallerySelectedIds: new Set([...state.gallerySelectedIds].filter((id) => !succeededSet.has(id))),
+      // Deletion changes tag/duplicate/album aggregates.
+      tagCloudFolderId: undefined,
+      tagCloudEntries: [],
+      exploreTagsFolderId: undefined,
+    }));
+    // The DB cascade already removed these from album_images; refresh counts/covers.
+    void get().loadAlbums();
+    await invoke("invalidate_duplicate_scan_cache", { folderId: null });
+    for (const folderId of affectedFolderIds) {
+      await invoke("invalidate_duplicate_scan_cache", { folderId });
+    }
+    return succeededIds.length;
+  },
+
+  // ── Albums (Feature B) ────────────────────────────────────────────────────
+
+  loadAlbums: async () => {
+    const albums = await invoke<Album[]>("list_albums");
+    set({ albums, albumsLoaded: true });
+  },
+
+  createAlbum: async (name) => {
+    const album = await invoke<Album>("create_album", { params: { name } });
+    await get().loadAlbums();
+    return album;
+  },
+
+  renameAlbum: async (albumId, name) => {
+    await invoke("rename_album", { params: { album_id: albumId, new_name: name } });
+    await get().loadAlbums();
+  },
+
+  deleteAlbum: async (albumId) => {
+    await invoke("delete_album", { params: { album_id: albumId } });
+    // If the deleted album is being viewed, drop back to All Media.
+    if (get().activeView === "album" && get().selectedAlbumId === albumId) {
+      set({ activeView: "gallery", selectedAlbumId: null, collectionTitle: null });
+      void get().loadImages(true);
+    }
+    await get().loadAlbums();
+  },
+
+  deleteAlbums: async (albumIds) => {
+    if (albumIds.length === 0) return;
+    await invoke("delete_albums", { params: { album_ids: albumIds } });
+    // If a deleted album is being viewed, drop back to All Media.
+    if (get().activeView === "album" && get().selectedAlbumId !== null && albumIds.includes(get().selectedAlbumId!)) {
+      set({ activeView: "gallery", selectedAlbumId: null, collectionTitle: null });
+      void get().loadImages(true);
+    }
+    await get().loadAlbums();
+  },
+
+  reorderAlbums: async (albumIds) => {
+    const previous = get().albums;
+    const byId = new Map(previous.map((album) => [album.id, album]));
+    const albums = albumIds
+      .map((id, index) => {
+        const album = byId.get(id);
+        return album ? { ...album, sort_order: index + 1 } : null;
+      })
+      .filter((album): album is Album => album !== null);
+    set({ albums });
+    try {
+      await invoke("reorder_albums", { params: { album_ids: albumIds } });
+    } catch (error) {
+      set({ albums: previous });
+      throw error;
+    }
+  },
+
+  addToAlbum: async (albumId, imageIds) => {
+    if (imageIds.length === 0) return 0;
+    const added = await invoke<number>("add_images_to_album", {
+      params: { album_id: albumId, image_ids: imageIds },
+    });
+    await get().loadAlbums();
+    return added;
+  },
+
+  removeFromAlbum: async (albumId, imageIds) => {
+    if (imageIds.length === 0) return;
+    await invoke("remove_images_from_album", {
+      params: { album_id: albumId, image_ids: imageIds },
+    });
+    // If viewing this album, splice the removed images out immediately.
+    if (get().activeView === "album" && get().selectedAlbumId === albumId) {
+      const removed = new Set(imageIds);
+      set((state) => {
+        const nextImages = state.images.filter((image) => !removed.has(image.id));
+        // Decrement by what was actually on screen, not the requested count —
+        // some ids may live beyond the loaded page.
+        const removedFromView = state.images.length - nextImages.length;
+        return {
+          images: nextImages,
+          loadedCount: nextImages.length,
+          totalImages: Math.max(0, state.totalImages - removedFromView),
+          gallerySelectedIds: new Set([...state.gallerySelectedIds].filter((id) => !removed.has(id))),
+        };
+      });
+    }
+    await get().loadAlbums();
+  },
+
+  viewAlbum: (albumId) => {
+    const requestToken = ++galleryRequestToken;
+    const album = get().albums.find((entry) => entry.id === albumId);
+    const sort = get().sort;
+    set((state) => ({
+      activeView: "album",
+      selectedAlbumId: albumId,
+      search: "",
+      images: [],
+      totalImages: album?.image_count ?? 0,
+      loadedCount: 0,
+      loadingImages: true,
+      collectionTitle: album?.name ?? "Album",
+      imageLoadError: null,
+      similarSourceImageId: null,
+      similarSourceFolderId: null,
+      similarSourceAlbumId: albumId,
+      similarScope: "current_album",
+      similarHasMore: false,
+      similarFolderId: null,
+      similarCrop: null,
+      gallerySelectedIds: new Set<number>(),
+      galleryScrollResetKey: state.galleryScrollResetKey + 1,
+    }));
+
+    void (async () => {
+      try {
+        const result = await invoke<{ images: ImageRecord[]; total: number; offset: number; limit: number }>("get_album_images", {
+          params: { album_id: albumId, sort, offset: 0, limit: PAGE_SIZE },
+        });
+        if (requestToken !== galleryRequestToken) return;
+        set({
+          images: result.images,
+          totalImages: result.total,
+          loadedCount: result.images.length,
+          loadingImages: false,
+          imageLoadError: null,
+          collectionTitle: album?.name ?? "Album",
+        });
+      } catch (error) {
+        if (requestToken !== galleryRequestToken) return;
+        set({ images: [], totalImages: 0, loadedCount: 0, loadingImages: false, imageLoadError: String(error) });
+      }
+    })();
+  },
+
   loadDuplicateScanCache: async (folderId = null) => {
     interface CacheResult { groups: DuplicateGroup[]; scanned_at: number }
     const cached = await invoke<CacheResult | null>("load_duplicate_scan_cache", { folderId: folderId ?? null });
@@ -2219,7 +2679,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     });
 
     set((state) => ({
-      images: replaceImage(state.images, updatedImage, state.sort),
+      // Derived collections (similar / region / semantic / tag / album results)
+      // are ordered by relevance, not `state.sort` — re-sorting them on a
+      // favorite/rating change would scramble the results. Replace in place
+      // there; only the real sorted gallery re-sorts.
+      images: isDerivedCollectionTitle(state.collectionTitle)
+        ? replaceExistingImages(state.images, [updatedImage])
+        : replaceImage(state.images, updatedImage, state.sort),
       selectedImage: state.selectedImage?.id === updatedImage.id ? updatedImage : state.selectedImage,
     }));
   },
@@ -2350,7 +2816,15 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const batch = event.payload;
 
       set((state) => {
-        if (isDerivedCollectionTitle(state.collectionTitle) || state.activeView === "explore") {
+        // Album view holds a fixed membership set; newly-indexed files never
+        // auto-join it. Guarding on activeView also covers the brief window
+        // where collectionTitle is null mid sort-change in an album.
+        if (
+          isDerivedCollectionTitle(state.collectionTitle) ||
+          state.activeView === "explore" ||
+          state.activeView === "album" ||
+          state.colorFilter !== null
+        ) {
           return state;
         }
 
@@ -2386,12 +2860,22 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const batch = event.payload;
 
       set((state) => {
+        const selectedImageUpdate =
+          state.selectedImage && batch.images.some((image) => image.id === state.selectedImage?.id)
+            ? batch.images.find((image) => image.id === state.selectedImage?.id) ?? state.selectedImage
+            : state.selectedImage;
+
+        // Album view holds already-loaded images; paint thumbnail/metadata
+        // fills in place (without re-sorting) so tiles refresh while browsing.
+        if (state.activeView === "album") {
+          return {
+            images: replaceExistingImages(state.images, batch.images),
+            selectedImage: selectedImageUpdate,
+          };
+        }
+
         if (isDerivedCollectionTitle(state.collectionTitle) || state.activeView === "explore") {
-          const selectedImage =
-            state.selectedImage && batch.images.some((image) => image.id === state.selectedImage?.id)
-              ? batch.images.find((image) => image.id === state.selectedImage?.id) ?? state.selectedImage
-              : state.selectedImage;
-          return { selectedImage };
+          return { selectedImage: selectedImageUpdate };
         }
 
         const visibleImages = batch.images.filter((image) =>
@@ -2407,18 +2891,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           ),
         );
 
-        const selectedImage =
-          state.selectedImage && batch.images.some((image) => image.id === state.selectedImage?.id)
-            ? batch.images.find((image) => image.id === state.selectedImage?.id) ?? state.selectedImage
-            : state.selectedImage;
-
         if (visibleImages.length === 0) {
-          return { selectedImage };
+          return { selectedImage: selectedImageUpdate };
         }
 
         return {
           images: replaceExistingImages(state.images, visibleImages),
-          selectedImage,
+          selectedImage: selectedImageUpdate,
         };
       });
     });
@@ -2472,6 +2951,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       }
     });
 
+    const unlistenColorBackfill = await listen<{ processed: number; total: number; done: boolean }>(
+      "color-backfill-progress",
+      (event) => {
+        set({ colorBackfill: event.payload.done ? null : event.payload });
+      },
+    );
+
     return () => {
       unlistenProgress();
       unlistenMediaJobs();
@@ -2482,6 +2968,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       unlistenWatcherDeleted();
       unlistenFolderCounts();
       unlistenFfmpegProgress();
+      unlistenColorBackfill();
     };
   },
 }));
