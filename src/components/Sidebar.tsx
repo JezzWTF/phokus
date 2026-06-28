@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Reorder, useDragControls } from "framer-motion";
 import { open } from "@tauri-apps/plugin-dialog";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { useGalleryStore, Folder, Album, IndexProgress } from "../store";
 import { ThemedDropdown } from "./ThemedDropdown";
+import { mediaSrc } from "../lib/mediaSrc";
 
 interface ContextMenuState {
   folderId: number;
@@ -445,7 +445,7 @@ function AlbumItem({
     setRenaming(false);
   };
 
-  const cover = album.cover_thumbnail_path ? convertFileSrc(album.cover_thumbnail_path) : null;
+  const cover = mediaSrc(album.cover_thumbnail_path);
 
   const row = (
     <div

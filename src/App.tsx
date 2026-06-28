@@ -48,12 +48,16 @@ export default function App() {
     if (import.meta.env.PROD) {
       void checkForUpdates({ quiet: true });
     }
-    loadFolders().then(() => {
+    loadFolders().then(async () => {
       void loadBackgroundJobProgress();
       void loadCaptionModelStatus();
       void loadDuplicateScanCache();
-      void loadAlbums();
-      return loadImages(true);
+      await loadAlbums();
+      await loadImages(true);
+      if (import.meta.env.MODE === "ui") {
+        const { applyMockScenario } = await import("./dev/applyMockScenario");
+        applyMockScenario();
+      }
     });
     let unlisten: (() => void) | undefined;
     subscribeToProgress().then((fn) => {

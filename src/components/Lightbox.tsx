@@ -1,9 +1,10 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useGalleryStore, ImageTag, ImageExif, AiRating } from "../store";
 import { VideoPlayer } from "./VideoPlayer";
+import { mediaSrc } from "../lib/mediaSrc";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -475,12 +476,12 @@ export function Lightbox() {
                     transition={{ duration: 0.12 }}
                   >
                     {selectedImage.media_kind === "video" ? (
-                      <VideoPlayer src={convertFileSrc(selectedImage.path)} />
+                      <VideoPlayer src={mediaSrc(selectedImage.path) ?? ""} />
                     ) : (
                       <>
                         <img
                           ref={imgRef}
-                          src={convertFileSrc(selectedImage.path)}
+                          src={mediaSrc(selectedImage.path) ?? ""}
                           alt={selectedImage.filename}
                           className="max-w-full rounded-2xl shadow-2xl"
                           draggable={false}
