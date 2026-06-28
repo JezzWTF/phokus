@@ -17,13 +17,13 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   delete albums in one go. Deleting an album never touches your files — only the
   grouping is removed.
 - **Multi-select & bulk actions in the gallery** — hover a thumbnail's top-left
-  corner to reveal a selection checkbox (or click it to start selecting); while
+  corner to reveal a selection checkbox (click it to start selecting); while
   selecting, click tiles to toggle and double-click to open. A floating action
   bar then lets you tag (with autocomplete), rate, favorite, add to an album, or
   delete the whole selection at once. Works in similar-image, region, and album
   views too.
-- **Color search** — filter the gallery (and Timeline) by dominant color via a
-  collapsible swatch palette plus a custom color picker in the toolbar; existing
+- **Colour search** — filter the gallery (and Timeline) by dominant colour via a
+  collapsible swatch palette plus a custom colour picker in the toolbar; existing
   libraries are backfilled automatically in the background.
 - **Album-scoped similar search** — when finding visually similar images or
   searching by a selected region from an album, you can now keep results scoped
@@ -39,9 +39,7 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   without re-indexing.
 - **What's New** — after updating, Phokus now greets you with a "What's new"
   toast that opens an in-app release-notes screen for the new version, with the
-  changes grouped into collapsible Added / Changed / Fixed sections. It's
-  sourced from the bundled changelog (so it works offline) and can be reopened
-  any time from Settings → Updates → What's new.
+  changes grouped into collapsible Added / Changed / Fixed sections.
 - **Build badge in Settings** — the version line in Settings → Updates now shows
   whether the running build is the CPU or CUDA (GPU-accelerated) variant.
 
@@ -53,6 +51,14 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   click with no confirmation or warning.
 - The updater now shows a real download progress bar with a percentage in
   Settings → Updates (previously it only said "Downloading").
+- **Smaller-screen layout** — the toolbar adapts on narrow windows: the filter
+  chips scroll horizontally instead of squashing (so "Similar: Folder/All" no
+  longer stack), the search box shrinks, and the colour-search swatches now open
+  in a compact popover rather than expanding inline and running off-screen. The
+  sidebar and the lightbox info panel also narrow to give the gallery more room.
+- **Explore cluster layout** — clusters are now sized by image count (busier
+  clusters are larger and stack on top) and repositioned to avoid overlapping, so
+  every cluster stays viewable and clickable even in dense libraries.
 
 ### Fixed
 
@@ -66,6 +72,27 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Subtle Light theme — fixed several surfaces and buttons that stayed dark or
   became unreadable on hover, including new dialogs and the green action buttons
   across the updater and onboarding.
+- **Endless self-indexing loop** — adding a folder that contains Phokus's own
+  app-data directory (for example, your whole user profile) no longer makes the
+  app index its own thumbnail cache, generate thumbnails of those thumbnails, and
+  loop forever. That directory is now skipped by both the folder scanner and the
+  filesystem watcher.
+- **Background tasks now lead with the active folder** — when one folder's
+  workers are paused while another is actively processing, the active folder
+  takes the main slot in the background-tasks bar instead of the paused one.
+- **Oversized window on smaller screens** — on a fresh install the window opened
+  at a fixed size that was taller than the usable area on displays like
+  1366×768, leaving part of it off-screen. It now clamps to the monitor's work
+  area (excluding the taskbar) and centres there when it would overflow; larger
+  displays and any remembered size/position are left untouched.
+- **Explore readability in Subtle Light** — fixed washed-out and unreadable
+  elements in the Explore view on the light theme. Cluster cards now use a soft
+  dark caption scrim (the previous cream overlay fogged the photos), with a
+  legible label, count, and "Open" button; Tag Cloud words use darker accents and
+  a higher opacity floor instead of near-invisible pale text.
+- **Explore polish** — the Tag Cloud now uses the in-app tooltip instead of the
+  native browser one (and reads "1 image", not "1 images"), and the folder-scope
+  dropdown no longer opens behind the cluster cards.
 
 ## [0.1.1] — 2026-06-23
 
