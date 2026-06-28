@@ -46,6 +46,32 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            // Fresh installs open at the fixed config size (1280×800) because the
+            // window-state plugin has nothing saved yet — too tall for laptops
+            // like 1366×768. Clamp the window to the monitor's work area (which
+            // already excludes the taskbar) and re-center it there, but only when
+            // it actually overflows, so a restored size/position on a roomier
+            // display is left untouched. Sizes are physical pixels on both sides,
+            // so this stays correct across display scaling.
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(Some(monitor)) = window.current_monitor() {
+                    let area = monitor.work_area();
+                    let max_w = area.size.width.saturating_sub(32);
+                    let max_h = area.size.height.saturating_sub(32);
+                    if let Ok(size) = window.outer_size() {
+                        if size.width > max_w || size.height > max_h {
+                            let new_w = size.width.min(max_w);
+                            let new_h = size.height.min(max_h);
+                            let _ = window.set_size(tauri::PhysicalSize::new(new_w, new_h));
+                            let _ = window.set_position(tauri::PhysicalPosition::new(
+                                area.position.x + (area.size.width as i32 - new_w as i32) / 2,
+                                area.position.y + (area.size.height as i32 - new_h as i32) / 2,
+                            ));
+                        }
+                    }
+                }
+            }
+
             let app_dir = app
                 .path()
                 .app_data_dir()
