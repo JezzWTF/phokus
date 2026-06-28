@@ -5,7 +5,6 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build:app": "tauri build",
     "build:app:cpu": "tauri build -- --no-default-features",
     "build:app:cuda": "tauri build --config src-tauri/tauri.cuda.conf.json",
     "build:vite": "tsc && vite build",

@@ -109,8 +109,11 @@ pnpm dev:app
 # Frontend only
 pnpm dev:vite
 
-# Production build
-pnpm build:app
+# Production build (CPU)
+pnpm build:app:cpu
+
+# Production build (CUDA / GPU-accelerated)
+pnpm build:app:cuda
 
 # Type-check the frontend
 pnpm build:vite
