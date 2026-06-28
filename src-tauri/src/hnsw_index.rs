@@ -92,6 +92,7 @@ pub fn find_similar_image_matches(
     conn: &Connection,
     image_id: i64,
     folder_id: Option<i64>,
+    album_id: Option<i64>,
     threshold: f32,
     offset: usize,
     limit: usize,
@@ -103,10 +104,17 @@ pub fn find_similar_image_matches(
         None => return Ok(Vec::new()),
     };
 
-    // Fetch folder image IDs *before* acquiring the read lock so we don't hold
+    // Build the allowed-id set *before* acquiring the read lock so we don't hold
     // the lock across a potentially slow SQLite query, which would delay any
-    // concurrent ensure_index call waiting for a write lock.
-    let folder_image_ids: Option<Vec<i64>> = if let Some(folder_id) = folder_id {
+    // concurrent ensure_index call waiting for a write lock. Album scope takes
+    // precedence over folder scope; both reuse the HNSW filtered search.
+    let allowed_image_ids: Option<Vec<i64>> = if let Some(album_id) = album_id {
+        let mut stmt = conn.prepare("SELECT image_id FROM album_images WHERE album_id = ?1")?;
+        let ids = stmt
+            .query_map([album_id], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Some(ids)
+    } else if let Some(folder_id) = folder_id {
         let ids = vector::get_all_image_embeddings_with_ids(conn, Some(folder_id))?
             .into_iter()
             .map(|(id, _)| id)
@@ -122,7 +130,7 @@ pub fn find_similar_image_matches(
     };
 
     let knbn = (offset + limit).max(limit).saturating_add(32);
-    let neighbours: Vec<Neighbour> = if let Some(image_ids) = folder_image_ids {
+    let neighbours: Vec<Neighbour> = if let Some(image_ids) = allowed_image_ids {
         let mut allowed_ids = image_ids
             .into_iter()
             .filter_map(|allowed_image_id| {

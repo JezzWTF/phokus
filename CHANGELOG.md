@@ -35,6 +35,9 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   whole library.
 - **Reorderable albums** — drag albums in the sidebar (hover the row for the
   drag handle) to set their order, which persists across sessions.
+- **Album-scoped similar search** — when finding visually similar images or
+  searching by a selected region from an album, you can now keep results scoped
+  to that album, switch back to the source folder, or search all media.
 - **What's New** — after updating, Phokus now greets you with a "What's new"
   toast that opens an in-app release-notes screen for the new version, with the
   changes grouped into collapsible Added / Changed / Fixed sections. It's

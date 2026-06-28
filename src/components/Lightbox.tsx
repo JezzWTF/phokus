@@ -144,9 +144,8 @@ export function Lightbox() {
   const closeImage = useGalleryStore((state) => state.closeImage);
   const images = useGalleryStore((state) => state.images);
   const openImage = useGalleryStore((state) => state.openImage);
-  const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
-  const loadSimilarByRegion = useGalleryStore((state) => state.loadSimilarByRegion);
-  const similarScope = useGalleryStore((state) => state.similarScope);
+  const findSimilar = useGalleryStore((state) => state.findSimilar);
+  const findSimilarByRegion = useGalleryStore((state) => state.findSimilarByRegion);
   const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
   const getImageTags = useGalleryStore((state) => state.getImageTags);
   const addUserTag = useGalleryStore((state) => state.addUserTag);
@@ -384,12 +383,10 @@ export function Lightbox() {
       exitRegionMode();
       setRegionSearching(true);
 
-      const folderId =
-        similarScope === "current_folder" ? selectedImage.folder_id : null;
-      void loadSimilarByRegion(selectedImage.id, crop, folderId, selectedImage.folder_id)
+      void findSimilarByRegion(selectedImage.id, crop, selectedImage.folder_id)
         .finally(() => setRegionSearching(false));
     },
-    [isPanning, isDragging, dragRect, selectedImage, similarScope, loadSimilarByRegion, exitRegionMode],
+    [isPanning, isDragging, dragRect, selectedImage, findSimilarByRegion, exitRegionMode],
   );
 
   // Build the CSS rect for the selection overlay (viewport-relative)
@@ -543,7 +540,7 @@ export function Lightbox() {
                       }`}
                       onClick={() => {
                         if (!canFindSimilar) return;
-                        void loadSimilarImages(selectedImage.id, similarScope === "current_folder" ? selectedImage.folder_id : null, true, selectedImage.folder_id);
+                        void findSimilar(selectedImage.id, selectedImage.folder_id);
                       }}
                       disabled={!canFindSimilar}
                     >

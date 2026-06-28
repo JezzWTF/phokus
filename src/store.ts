@@ -53,7 +53,7 @@ export type CaptionDetail = "short" | "detailed" | "paragraph";
 export type TaggerAcceleration = "auto" | "cpu" | "directml";
 export type AiRating = "general" | "sensitive" | "questionable" | "explicit";
 export type TaggingQueueScope = "all" | "selected";
-export type SimilarScope = "all_media" | "current_folder";
+export type SimilarScope = "all_media" | "current_folder" | "current_album";
 export type ExploreMode = "visual" | "tags";
 export type AppTheme = "phokus" | "subtle-light" | "conventional-dark";
 
@@ -359,6 +359,7 @@ interface GalleryState {
   collectionTitle: string | null;
   similarSourceImageId: number | null;
   similarSourceFolderId: number | null;
+  similarSourceAlbumId: number | null; // album a similar search was launched from (enables "Similar: Album")
   similarHasMore: boolean;
   similarScope: SimilarScope;
   similarFolderId: number | null;
@@ -478,8 +479,11 @@ interface GalleryState {
   loadExploreTags: () => Promise<void>;
   showVisualCluster: (imageIds: number[]) => Promise<void>;
   searchForTag: (tag: string) => void;
-  loadSimilarImages: (imageId: number, folderId?: number | null, reset?: boolean, sourceFolderId?: number | null) => Promise<void>;
-  loadSimilarByRegion: (imageId: number, crop: { x: number; y: number; w: number; h: number }, folderId?: number | null, sourceFolderId?: number | null) => Promise<void>;
+  loadSimilarImages: (imageId: number, folderId?: number | null, reset?: boolean, sourceFolderId?: number | null, albumId?: number | null) => Promise<void>;
+  loadSimilarByRegion: (imageId: number, crop: { x: number; y: number; w: number; h: number }, folderId?: number | null, sourceFolderId?: number | null, albumId?: number | null) => Promise<void>;
+  // Entry points that decide scope (album when launched from an album, else folder/all per similarScope).
+  findSimilar: (imageId: number, sourceFolderId: number | null) => Promise<void>;
+  findSimilarByRegion: (imageId: number, crop: { x: number; y: number; w: number; h: number }, sourceFolderId: number | null) => Promise<void>;
   setSimilarScope: (scope: SimilarScope) => void;
   suggestImageTags: (imageId: number) => Promise<string[]>;
   loadCaptionModelStatus: () => Promise<void>;
@@ -835,6 +839,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   collectionTitle: null,
   similarSourceImageId: null,
   similarSourceFolderId: null,
+  similarSourceAlbumId: null,
   similarHasMore: false,
   similarScope: "all_media",
   similarFolderId: null,
@@ -1021,7 +1026,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   selectFolder: (folderId) => {
-    set({ selectedFolderId: folderId, selectedAlbumId: null, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, activeView: "gallery", failedEmbeddingsOnly: false, failedTaggingOnly: false, imageLoadError: null });
+    // Leaving any album: drop the album-origin scope so the Folder/All pills
+    // highlight correctly again.
+    const similarScope = get().similarScope === "current_album" ? "all_media" : get().similarScope;
+    set({ selectedFolderId: folderId, selectedAlbumId: null, similarSourceAlbumId: null, similarScope, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, activeView: "gallery", failedEmbeddingsOnly: false, failedTaggingOnly: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
@@ -1218,9 +1226,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       }
       return;
     }
+    const pageAlbumId = get().similarScope === "current_album" ? get().similarSourceAlbumId : null;
     if (collectionTitle === "Similar Images" && similarSourceImageId !== null) {
       if (!similarHasMore) return;
-      await get().loadSimilarImages(similarSourceImageId, similarFolderId, false, get().similarSourceFolderId ?? null);
+      await get().loadSimilarImages(similarSourceImageId, similarFolderId, false, get().similarSourceFolderId ?? null, pageAlbumId);
       return;
     }
     if (collectionTitle === "Region Search Results" && similarSourceImageId !== null && similarCrop !== null) {
@@ -1235,7 +1244,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
             crop_y: similarCrop.y,
             crop_w: similarCrop.w,
             crop_h: similarCrop.h,
-            folder_id: similarFolderId,
+            folder_id: pageAlbumId !== null ? null : similarFolderId,
+            album_id: pageAlbumId,
             offset: loadedCount,
             limit: PAGE_SIZE,
           },
@@ -1336,8 +1346,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   closeImage: () => set({ selectedImage: null }),
 
   setView: (activeView) => {
+    // Leaving an album view drops the album-origin similar scope.
+    const similarScopeReset = get().similarScope === "current_album" ? "all_media" : get().similarScope;
     if (activeView === "timeline") {
-      set({ activeView, sort: "taken_asc", images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarSourceFolderId: null, similarFolderId: null, similarHasMore: false, similarCrop: null, imageLoadError: null });
+      set({ activeView, sort: "taken_asc", images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarSourceFolderId: null, similarSourceAlbumId: null, similarScope: similarScopeReset, similarFolderId: null, similarHasMore: false, similarCrop: null, imageLoadError: null });
       void get().loadImages(true);
       return;
     }
@@ -1355,7 +1367,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         return;
       }
     }
-    set({ activeView });
+    set({ activeView, similarSourceAlbumId: null, similarScope: similarScopeReset });
   },
 
   setExploreMode: (exploreMode) => set({ exploreMode }),
@@ -1452,10 +1464,12 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     void get().loadImages(true);
   },
 
-  loadSimilarImages: async (imageId, folderId = get().selectedFolderId, reset = true, sourceFolderId = folderId ?? null) => {
+  loadSimilarImages: async (imageId, folderId = get().selectedFolderId, reset = true, sourceFolderId = folderId ?? null, albumId = null) => {
     const requestToken = ++galleryRequestToken;
     const offset = reset ? 0 : get().loadedCount;
-    const similarScope = folderId === null ? "all_media" : "current_folder";
+    const similarScope: SimilarScope = albumId !== null ? "current_album" : folderId === null ? "all_media" : "current_folder";
+    // Album scope drives results off album membership, so the folder query is null.
+    const queryFolderId = albumId !== null ? null : folderId ?? null;
     set((state) => ({
       images: reset ? [] : state.images,
       loadedCount: reset ? 0 : state.loadedCount,
@@ -1464,7 +1478,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       imageLoadError: null,
       similarSourceImageId: imageId,
       similarSourceFolderId: sourceFolderId,
-      similarFolderId: folderId ?? null,
+      similarFolderId: queryFolderId,
       similarScope,
       // Force the gallery grid so results (and the bulk bar) render regardless
       // of which view the search was launched from.
@@ -1478,7 +1492,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const result = await invoke<SimilarImagesPage>("find_similar_images", {
         params: {
           image_id: imageId,
-          folder_id: folderId ?? null,
+          folder_id: queryFolderId,
+          album_id: albumId,
           offset,
           limit: PAGE_SIZE,
           threshold: SIMILAR_DISTANCE_THRESHOLD,
@@ -1500,7 +1515,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           similarSourceImageId: imageId,
           similarSourceFolderId: sourceFolderId,
           similarHasMore: result.has_more,
-          similarFolderId: folderId ?? null,
+          similarFolderId: queryFolderId,
           similarScope,
           selectedImage: reset ? null : state.selectedImage,
         };
@@ -1518,16 +1533,17 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         similarSourceImageId: imageId,
         similarSourceFolderId: sourceFolderId,
         similarHasMore: false,
-        similarFolderId: folderId ?? null,
+        similarFolderId: queryFolderId,
         similarScope,
         selectedImage: null,
       });
     }
   },
 
-  loadSimilarByRegion: async (imageId, crop, folderId = get().selectedFolderId, sourceFolderId = folderId ?? null) => {
+  loadSimilarByRegion: async (imageId, crop, folderId = get().selectedFolderId, sourceFolderId = folderId ?? null, albumId = null) => {
     const requestToken = ++galleryRequestToken;
-    const similarScope = folderId === null ? "all_media" : "current_folder";
+    const similarScope: SimilarScope = albumId !== null ? "current_album" : folderId === null ? "all_media" : "current_folder";
+    const queryFolderId = albumId !== null ? null : folderId ?? null;
     set((state) => ({
       images: [],
       loadedCount: 0,
@@ -1536,7 +1552,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       imageLoadError: null,
       similarSourceImageId: imageId,
       similarSourceFolderId: sourceFolderId,
-      similarFolderId: folderId ?? null,
+      similarFolderId: queryFolderId,
       similarCrop: crop,
       similarScope,
       // Force the gallery grid so results (and the bulk bar) render regardless
@@ -1556,7 +1572,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           crop_y: crop.y,
           crop_w: crop.w,
           crop_h: crop.h,
-          folder_id: folderId ?? null,
+          folder_id: queryFolderId,
+          album_id: albumId,
           offset: 0,
           limit: PAGE_SIZE,
         },
@@ -1574,7 +1591,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         similarSourceImageId: imageId,
         similarSourceFolderId: sourceFolderId,
         similarHasMore: result.has_more,
-        similarFolderId: folderId ?? null,
+        similarFolderId: queryFolderId,
         similarCrop: crop,
         similarScope,
       });
@@ -1591,22 +1608,51 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         similarSourceImageId: imageId,
         similarSourceFolderId: sourceFolderId,
         similarHasMore: false,
-        similarFolderId: folderId ?? null,
+        similarFolderId: queryFolderId,
+        similarCrop: crop,
         similarScope,
         selectedImage: null,
       });
     }
   },
 
+  // Decide the scope at launch: album when triggered from an album, else the
+  // current folder/all preference. Sets similarSourceAlbumId so the "Similar:
+  // Album" pill and scope toggle work afterward.
+  findSimilar: (imageId, sourceFolderId) => {
+    const { activeView, selectedAlbumId, similarScope } = get();
+    const albumOrigin = activeView === "album" ? selectedAlbumId : null;
+    set({ similarSourceAlbumId: albumOrigin });
+    // Respect the chosen scope; album is the default in an album view but the
+    // user can override to Folder/All before searching.
+    if (similarScope === "current_album" && albumOrigin !== null) {
+      return get().loadSimilarImages(imageId, null, true, sourceFolderId, albumOrigin);
+    }
+    const folderId = similarScope === "current_folder" ? sourceFolderId : null;
+    return get().loadSimilarImages(imageId, folderId, true, sourceFolderId, null);
+  },
+
+  findSimilarByRegion: (imageId, crop, sourceFolderId) => {
+    const { activeView, selectedAlbumId, similarScope } = get();
+    const albumOrigin = activeView === "album" ? selectedAlbumId : null;
+    set({ similarSourceAlbumId: albumOrigin });
+    if (similarScope === "current_album" && albumOrigin !== null) {
+      return get().loadSimilarByRegion(imageId, crop, null, sourceFolderId, albumOrigin);
+    }
+    const folderId = similarScope === "current_folder" ? sourceFolderId : null;
+    return get().loadSimilarByRegion(imageId, crop, folderId, sourceFolderId, null);
+  },
+
   setSimilarScope: (similarScope) => {
     set({ similarScope });
-    const { similarSourceImageId, similarSourceFolderId, selectedFolderId, collectionTitle, similarCrop } = get();
+    const { similarSourceImageId, similarSourceFolderId, similarSourceAlbumId, selectedFolderId, collectionTitle, similarCrop } = get();
     if (similarSourceImageId === null) return;
+    const albumId = similarScope === "current_album" ? similarSourceAlbumId : null;
     const folderId = similarScope === "current_folder" ? (similarSourceFolderId ?? selectedFolderId) : null;
     if (collectionTitle === "Region Search Results" && similarCrop !== null) {
-      void get().loadSimilarByRegion(similarSourceImageId, similarCrop, folderId, similarSourceFolderId);
+      void get().loadSimilarByRegion(similarSourceImageId, similarCrop, folderId, similarSourceFolderId, albumId);
     } else {
-      void get().loadSimilarImages(similarSourceImageId, folderId, true, similarSourceFolderId);
+      void get().loadSimilarImages(similarSourceImageId, folderId, true, similarSourceFolderId, albumId);
     }
   },
 
@@ -2470,6 +2516,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       imageLoadError: null,
       similarSourceImageId: null,
       similarSourceFolderId: null,
+      similarSourceAlbumId: albumId,
+      similarScope: "current_album",
       similarHasMore: false,
       similarFolderId: null,
       similarCrop: null,

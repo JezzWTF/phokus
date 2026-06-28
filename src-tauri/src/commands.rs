@@ -58,6 +58,9 @@ pub struct UpdateImageDetailsParams {
 pub struct FindSimilarImagesParams {
     pub image_id: i64,
     pub folder_id: Option<i64>,
+    /// When set, restrict results to images in this album (takes precedence
+    /// over `folder_id`). Used by the "Similar: Album" scope.
+    pub album_id: Option<i64>,
     pub offset: Option<usize>,
     pub limit: Option<usize>,
     pub threshold: Option<f32>,
@@ -72,6 +75,8 @@ pub struct FindSimilarByRegionParams {
     pub crop_w: f32,
     pub crop_h: f32,
     pub folder_id: Option<i64>,
+    /// Restrict to an album (takes precedence over `folder_id`).
+    pub album_id: Option<i64>,
     pub offset: Option<usize>,
     pub limit: Option<usize>,
 }
@@ -704,6 +709,7 @@ pub async fn find_similar_images(
         &conn,
         params.image_id,
         params.folder_id,
+        params.album_id,
         threshold,
         offset,
         limit + 1,
@@ -749,8 +755,19 @@ pub async fn find_similar_by_region(
         )
         .map_err(|e| e.to_string())?;
 
-    // Search for similar images using the crop embedding
-    let image_ids = match params.folder_id {
+    // Search for similar images using the crop embedding. Album scope takes
+    // precedence over folder scope.
+    let image_ids = if let Some(album_id) = params.album_id {
+        vector::search_image_ids_by_embedding_in_album(
+            &conn,
+            &embedding,
+            album_id,
+            Some(params.image_id),
+            offset + limit + 1,
+        )
+        .map_err(|e| e.to_string())?
+    } else {
+        match params.folder_id {
         Some(folder_id) => vector::search_image_ids_by_embedding_in_folder(
             &conn,
             &embedding,
@@ -767,6 +784,7 @@ pub async fn find_similar_by_region(
                     .map_err(|e| e.to_string())?;
             ids.retain(|&id| id != params.image_id);
             ids
+        }
         }
     };
 

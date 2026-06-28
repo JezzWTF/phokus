@@ -31,8 +31,7 @@ export function ContextMenu({
 }) {
   const openImage = useGalleryStore((state) => state.openImage);
   const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
-  const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
-  const similarScope = useGalleryStore((state) => state.similarScope);
+  const findSimilar = useGalleryStore((state) => state.findSimilar);
   const canFindSimilar = image.embedding_status === "ready";
 
   return (
@@ -60,9 +59,9 @@ export function ContextMenu({
             ? "text-gray-200 hover:bg-white/5 hover:text-white"
             : "text-gray-600 cursor-not-allowed"
         }`}
-        onClick={async () => {
+        onClick={() => {
           if (!canFindSimilar) return;
-          await loadSimilarImages(image.id, similarScope === "current_folder" ? image.folder_id : null, true, image.folder_id);
+          findSimilar(image.id, image.folder_id);
           onClose();
         }}
         disabled={!canFindSimilar}
@@ -117,8 +116,7 @@ export function ImageTile({
 }) {
   const [loaded, setLoaded] = useState(false);
   const [errored, setErrored] = useState(false);
-  const loadSimilarImages = useGalleryStore((state) => state.loadSimilarImages);
-  const similarScope = useGalleryStore((state) => state.similarScope);
+  const findSimilar = useGalleryStore((state) => state.findSimilar);
   const selected = useGalleryStore((state) => state.gallerySelectedIds.has(image.id));
   const selectionActive = useGalleryStore((state) => state.gallerySelectedIds.size > 0);
   const toggleGallerySelected = useGalleryStore((state) => state.toggleGallerySelected);
@@ -274,7 +272,7 @@ export function ImageTile({
             onClick={(event) => {
               event.stopPropagation();
               if (!canFindSimilar) return;
-              void loadSimilarImages(image.id, similarScope === "current_folder" ? image.folder_id : null, true, image.folder_id);
+              findSimilar(image.id, image.folder_id);
             }}
             disabled={!canFindSimilar}
           >
