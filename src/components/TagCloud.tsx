@@ -209,19 +209,17 @@ function CloudCard({ node, onOpen, animated }: { node: PlacedNode; onOpen: (imag
       />
       <div className="absolute inset-x-0 bottom-0 p-3">
         <div className="explore-cluster-rule mb-2 h-px rounded-full" style={{ background: `linear-gradient(to right, ${accent}80, transparent)` }} />
-        <div className="flex items-end justify-between gap-2">
-          <div>
-            <p className="explore-cluster-label text-[9px] uppercase tracking-[0.18em] text-white/35">Cluster</p>
-            <p className="explore-cluster-count text-base font-semibold leading-none text-white">{node.entry.count.toLocaleString()}</p>
-          </div>
-          <span
-            className="explore-cluster-open rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.1em] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-            style={{ borderColor: `${accent}50`, color: accent, backgroundColor: `${accent}12` }}
-          >
-            Open
-          </span>
-        </div>
+        <p className="explore-cluster-label text-[9px] uppercase tracking-[0.18em] text-white/35">Cluster</p>
+        <p className="explore-cluster-count text-base font-semibold leading-none text-white">{node.entry.count.toLocaleString()}</p>
       </div>
+      {/* Anchored to the card corner (not in the count's flex row) so a wide
+          count can't push it past the edge on small cards. */}
+      <span
+        className="explore-cluster-open absolute bottom-3 right-3 rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.1em] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+        style={{ borderColor: `${accent}50`, color: accent, backgroundColor: `${accent}12` }}
+      >
+        Open
+      </span>
     </motion.button>
   );
 }
