@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use walkdir::WalkDir;
 
 const IMAGE_EXTENSIONS: &[&str] = &[
@@ -354,7 +354,51 @@ pub fn start_tagging_worker(app: AppHandle, pool: DbPool, app_data_dir: PathBuf)
     });
 }
 
+/// True when `path` lives inside Phokus's own app-data directory (thumbnail
+/// cache, database, downloaded models). If a user indexes an ancestor of this
+/// directory — e.g. their whole `Users` folder — the app would otherwise index
+/// its own thumbnails, generate thumbnails of those thumbnails, and loop
+/// forever. The whole subtree is pruned from folder scans and ignored by the
+/// watcher to break that cycle.
+///
+/// Comparison is component-aware (so a sibling like `…/phokus-backup` never
+/// matches) and case-insensitive on Windows — the indexed root may report a
+/// different casing than `app_data_dir` (e.g. `c:\users\…` vs `C:\Users\…`),
+/// and a case-sensitive prefix check there would silently let the loop back in.
+fn is_within_app_data(path: &Path, app_data_dir: Option<&Path>) -> bool {
+    let Some(dir) = app_data_dir else {
+        return false;
+    };
+    let mut base = dir.components();
+    let mut target = path.components();
+    loop {
+        let Some(base_component) = base.next() else {
+            // Consumed every component of the app-data dir while still matching →
+            // `path` is the app-data dir itself or a descendant.
+            return true;
+        };
+        let Some(target_component) = target.next() else {
+            // `path` is shorter than the app-data dir, so it cannot be inside it.
+            return false;
+        };
+        let matches = if cfg!(windows) {
+            base_component
+                .as_os_str()
+                .eq_ignore_ascii_case(target_component.as_os_str())
+        } else {
+            base_component == target_component
+        };
+        if !matches {
+            return false;
+        }
+    }
+}
+
 fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf) -> Result<()> {
+    // Resolve our own app-data directory so the walk can skip it (see
+    // `is_within_app_data`). Resolution failure is non-fatal — we just lose the
+    // guard, which only matters when indexing an ancestor of the app data dir.
+    let app_data_dir = app.path().app_data_dir().ok();
     let existing_entries = {
         let conn = pool.get()?;
         db::get_folder_media_index(&conn, folder_id)?
@@ -371,6 +415,9 @@ fn do_index(app: AppHandle, pool: &DbPool, folder_id: i64, folder_path: PathBuf)
     let media_paths: Vec<PathBuf> = WalkDir::new(&folder_path)
         .follow_links(true)
         .into_iter()
+        // Prune our own app-data subtree before descending into it, so we never
+        // scan (and re-thumbnail) the thumbnail cache.
+        .filter_entry(|entry| !is_within_app_data(entry.path(), app_data_dir.as_deref()))
         .filter_map(|entry| match entry {
             Ok(e) if e.file_type().is_file() && is_supported_media(e.path()) => {
                 Some(e.path().to_path_buf())
@@ -1597,6 +1644,10 @@ pub fn start_watcher(app: AppHandle, pool: DbPool, thumb_dir: PathBuf) -> Watche
 
     // Spawn the debounce loop on its own thread.
     let folder_map_thread = Arc::clone(&folder_map);
+    // `thumb_dir` is `<app data>/thumbnails`; its parent is the app-data root.
+    // Watched roots can be ancestors of it (e.g. a whole user profile), so we
+    // drop any event inside that subtree to avoid re-indexing our own cache.
+    let app_data_dir = thumb_dir.parent().map(Path::to_path_buf);
     std::thread::spawn(move || {
         // path → deadline: the earliest instant at which this path should be processed.
         let mut pending: HashMap<PathBuf, Instant> = HashMap::new();
@@ -1639,7 +1690,22 @@ pub fn start_watcher(app: AppHandle, pool: DbPool, thumb_dir: PathBuf) -> Watche
                     {
                         let old = event.paths[0].clone();
                         let new = event.paths[1].clone();
-                        if is_supported_media(&old) || is_supported_media(&new) {
+                        let old_in_app = is_within_app_data(&old, app_data_dir.as_deref());
+                        let new_in_app = is_within_app_data(&new, app_data_dir.as_deref());
+                        if old_in_app && new_in_app {
+                            // Internal app-data churn (e.g. thumbnail cache) — ignore.
+                        } else if old_in_app || new_in_app {
+                            // Only one side is app-data, so the rename pairing is
+                            // meaningless (we don't track app-data files). Handle the
+                            // legitimate side as an independent create/delete via the
+                            // normal debounce queue: a file moved out of app-data is
+                            // indexed as a create; one moved in is processed as a
+                            // delete (process_watcher_path sees it no longer exists).
+                            let legit = if old_in_app { new } else { old };
+                            if is_supported_media(&legit) {
+                                pending.insert(legit, now + WATCHER_DEBOUNCE);
+                            }
+                        } else if is_supported_media(&old) || is_supported_media(&new) {
                             // Remove either side from regular pending so it isn't
                             // processed as an independent delete/create.
                             pending.remove(&old);
@@ -1648,7 +1714,9 @@ pub fn start_watcher(app: AppHandle, pool: DbPool, thumb_dir: PathBuf) -> Watche
                         }
                     } else {
                         for path in event.paths {
-                            if is_supported_media(&path) {
+                            if is_supported_media(&path)
+                                && !is_within_app_data(&path, app_data_dir.as_deref())
+                            {
                                 pending.insert(path, now + WATCHER_DEBOUNCE);
                             }
                         }
