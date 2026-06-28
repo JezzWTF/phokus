@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { DuplicateGroup, useGalleryStore } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
+import { mediaSrc } from "../lib/mediaSrc";
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
@@ -68,7 +68,7 @@ function DuplicateGroupCard({ group }: { group: DuplicateGroup }) {
       <div className="flex flex-wrap gap-3">
         {group.images.map((image) => {
           const isSelected = selectedIds.has(image.id);
-          const src = image.thumbnail_path ? convertFileSrc(image.thumbnail_path) : null;
+          const src = mediaSrc(image.thumbnail_path);
           return (
             <button
               key={image.id}

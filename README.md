@@ -109,6 +109,9 @@ pnpm dev:app
 # Frontend only
 pnpm dev:vite
 
+# Browser-only UI Lab with mocked Tauri APIs
+pnpm dev:ui
+
 # Production build (CPU)
 pnpm build:app:cpu
 
@@ -118,6 +121,9 @@ pnpm build:app:cuda
 # Type-check the frontend
 pnpm build:vite
 ```
+
+For visual frontend work without launching Tauri or the Rust backend, see
+[Phokus UI Lab](docs/ui-lab.md).
 
 ## How it works
 

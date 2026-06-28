@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { ImageRecord, parseSearchValue, tileSizeForZoom, useGalleryStore } from "../store";
 import { BulkActionBar } from "./BulkActionBar";
 import { Tooltip } from "./Tooltip";
+import { mediaSrc } from "../lib/mediaSrc";
 
 const GAP = 6;
 
@@ -123,7 +123,7 @@ export function ImageTile({
   const toggleGallerySelected = useGalleryStore((state) => state.toggleGallerySelected);
   const canFindSimilar = image.embedding_status === "ready";
 
-  const src = image.thumbnail_path ? convertFileSrc(image.thumbnail_path) : null;
+  const src = mediaSrc(image.thumbnail_path);
 
   return (
     <Tooltip label={image.filename} delay={500} block followCursor>

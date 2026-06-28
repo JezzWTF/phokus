@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { ExploreTagEntry, TagCloudEntry, useGalleryStore } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
 import { Tooltip } from "./Tooltip";
+import { mediaSrc } from "../lib/mediaSrc";
 
 const ACCENTS = [
   "#60a5fa",
@@ -148,7 +148,7 @@ function buildCloud(entries: TagCloudEntry[], containerW: number, containerH: nu
 }
 
 function CloudCard({ node, onOpen, animated }: { node: PlacedNode; onOpen: (imageIds: number[]) => void; animated: boolean }) {
-  const src = node.entry.thumbnail_path ? convertFileSrc(node.entry.thumbnail_path) : null;
+  const src = mediaSrc(node.entry.thumbnail_path);
   const { w, h, accent } = node;
   const driftTransition = {
     duration: node.driftDuration,
