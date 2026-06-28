@@ -190,29 +190,27 @@ html[data-theme="subtle-light"] .explore-cluster-card:hover {
 }
 
 html[data-theme="subtle-light"] .explore-cluster-overlay {
+  /* A cream wash over the photo read as a faded, foggy haze. Use a gentle dark
+     scrim instead — the same natural "photo caption" vignette the dark theme
+     uses — with light text on top (label/count rules below). */
   background: linear-gradient(
     to top,
-    rgb(251 250 246 / 0.9),
-    rgb(251 250 246 / 0.52) 34%,
-    rgb(251 250 246 / 0.06) 68%,
-    transparent
+    rgb(17 18 22 / 0.82),
+    rgb(17 18 22 / 0.34) 38%,
+    transparent 66%
   ) !important;
 }
 
 html[data-theme="subtle-light"] .explore-cluster-label {
-  color: #6b6257 !important;
+  color: rgb(255 255 255 / 0.62) !important;
 }
 
 html[data-theme="subtle-light"] .explore-cluster-count {
-  color: #111827 !important;
+  color: #ffffff !important;
 }
 
 html[data-theme="subtle-light"] .explore-tag-word:hover {
   background: #e8e2d6 !important;
-}
-
-html[data-theme="subtle-light"] .explore-tag-word span:first-child {
-  color: #374151 !important;
 }
 
 html[data-theme="subtle-light"] .explore-spinner {

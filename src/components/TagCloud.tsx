@@ -3,6 +3,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ExploreTagEntry, TagCloudEntry, useGalleryStore } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
+import { Tooltip } from "./Tooltip";
 
 const ACCENTS = [
   "#60a5fa",
@@ -15,6 +16,21 @@ const ACCENTS = [
   "#a78bfa",
   "#34d399",
   "#f87171",
+];
+
+// Darker variants of each accent for the light theme — the bright originals are
+// tuned for dark cards and wash out on the cream background.
+const LIGHT_ACCENTS = [
+  "#2563eb",
+  "#9333ea",
+  "#16a34a",
+  "#d97706",
+  "#db2777",
+  "#0d9488",
+  "#ea580c",
+  "#7c3aed",
+  "#059669",
+  "#dc2626",
 ];
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -31,6 +47,7 @@ interface PlacedNode {
   y: number;
   w: number;
   h: number;
+  zIndex: number;
   accent: string;
   driftX: number;
   driftY: number;
@@ -44,17 +61,34 @@ function buildCloud(entries: TagCloudEntry[], containerW: number, containerH: nu
   const maxCount = Math.max(...entries.map((e) => e.count));
   const cx = containerW / 2;
   const cy = containerH / 2;
-  // Spread ellipse shrinks slightly to leave room for card half-widths at the edges
-  const spreadX = containerW * 0.42;
-  const spreadY = containerH * 0.36;
   const n = entries.length;
+  const ASPECT = 0.72;
+  const PAD = 18;
 
-  // 1. Build initial positions using phyllotaxis spiral
+  // Card width scales with image count; the sub-linear exponent (< 1) widens the
+  // gap so the busiest clusters read as clearly larger and more prominent.
+  const rawWidth = (count: number) => {
+    const ratio = Math.max(count / maxCount, 0.05);
+    return 92 + Math.pow(ratio, 0.65) * 158; // ~92–250px before fit scaling
+  };
+
+  // Shrink every card uniformly when their padded footprint can't fit the
+  // canvas, so overlap resolution can actually pull them apart instead of
+  // settling into a pile. (0.6 leaves headroom for imperfect packing.)
+  const totalArea = entries.reduce((sum, e) => {
+    const w = rawWidth(e.count);
+    return sum + (w + PAD) * (w * ASPECT + PAD);
+  }, 0);
+  const usableArea = containerW * containerH * 0.6;
+  const fit = totalArea > usableArea ? Math.sqrt(usableArea / totalArea) : 1;
+
+  const spreadX = containerW * 0.44;
+  const spreadY = containerH * 0.4;
+
+  // 1. Seed positions on a phyllotaxis spiral, sized by count.
   const nodes: PlacedNode[] = entries.map((entry, i) => {
-    const ratio = Math.max(entry.count / maxCount, 0.08);
-    // Cards scale from 110px to 230px wide; height is 3/4 of width
-    const w = 110 + Math.sqrt(ratio) * 120;
-    const h = w * 0.75;
+    const w = rawWidth(entry.count) * fit;
+    const h = w * ASPECT;
     const radialRatio = Math.sqrt((i + 0.5) / n);
     const angle = i * GOLDEN_ANGLE;
 
@@ -65,6 +99,9 @@ function buildCloud(entries: TagCloudEntry[], containerW: number, containerH: nu
       y: cy + Math.sin(angle) * radialRatio * spreadY,
       w,
       h,
+      // Bigger (busier) clusters stack above smaller ones, so they stay
+      // clickable even if a sliver of overlap survives.
+      zIndex: Math.round(w),
       accent: ACCENTS[i % ACCENTS.length],
       driftX: (seeded(i + 11) - 0.5) * 18,
       driftY: (seeded(i + 17) - 0.5) * 14,
@@ -73,9 +110,12 @@ function buildCloud(entries: TagCloudEntry[], containerW: number, containerH: nu
     };
   });
 
-  // 2. Iterative overlap resolution — no physics, just push apart
-  const PAD = 24;
-  for (let iter = 0; iter < 80; iter++) {
+  // 2. Resolve overlaps by pushing pairs apart, clamping inside the canvas every
+  //    pass so edge cards settle in-bounds instead of being shoved out and
+  //    re-overlapping there.
+  const marginX = 14;
+  const marginY = 14;
+  for (let iter = 0; iter < 160; iter++) {
     for (let a = 0; a < nodes.length; a++) {
       const na = nodes[a];
       for (let b = a + 1; b < nodes.length; b++) {
@@ -85,29 +125,26 @@ function buildCloud(entries: TagCloudEntry[], containerW: number, containerH: nu
         const overlapX = (na.w + nb.w) / 2 + PAD - Math.abs(dx);
         const overlapY = (na.h + nb.h) / 2 + PAD - Math.abs(dy);
         if (overlapX <= 0 || overlapY <= 0) continue;
-        // Push along the smaller overlap axis
+        // Push along the smaller overlap axis (ternary yields ±1 so coincident
+        // cards still separate rather than stalling at a zero push).
         if (overlapX < overlapY) {
-          const push = overlapX * 0.5 * (dx >= 0 ? 1 : -1);
+          const push = (overlapX / 2) * (dx >= 0 ? 1 : -1);
           nb.x += push;
           na.x -= push;
         } else {
-          const push = overlapY * 0.5 * (dy >= 0 ? 1 : -1);
+          const push = (overlapY / 2) * (dy >= 0 ? 1 : -1);
           nb.y += push;
           na.y -= push;
         }
       }
-      // Pull gently back toward anchor to prevent runaway drift
-      na.x += (cx + Math.cos(na.index * GOLDEN_ANGLE) * Math.sqrt((na.index + 0.5) / n) * spreadX - na.x) * 0.05;
-      na.y += (cy + Math.sin(na.index * GOLDEN_ANGLE) * Math.sqrt((na.index + 0.5) / n) * spreadY - na.y) * 0.05;
+    }
+    for (const node of nodes) {
+      node.x = Math.min(Math.max(node.x, node.w / 2 + marginX), containerW - node.w / 2 - marginX);
+      node.y = Math.min(Math.max(node.y, node.h / 2 + marginY), containerH - node.h / 2 - marginY);
     }
   }
 
-  // 3. Clamp so cards never poke outside the container
-  return nodes.map((node) => ({
-    ...node,
-    x: Math.min(Math.max(node.x, node.w / 2 + 16), containerW - node.w / 2 - 16),
-    y: Math.min(Math.max(node.y, node.h / 2 + 16), containerH - node.h / 2 - 16),
-  }));
+  return nodes;
 }
 
 function CloudCard({ node, onOpen, animated }: { node: PlacedNode; onOpen: (imageIds: number[]) => void; animated: boolean }) {
@@ -124,7 +161,7 @@ function CloudCard({ node, onOpen, animated }: { node: PlacedNode; onOpen: (imag
   return (
     <motion.button
       className="explore-cluster-card group absolute overflow-hidden rounded-2xl border border-white/8 bg-white/[0.04] text-left shadow-[0_8px_28px_rgba(0,0,0,0.38)] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-      style={{ width: w, height: h, left: node.x - w / 2, top: node.y - h / 2 }}
+      style={{ width: w, height: h, left: node.x - w / 2, top: node.y - h / 2, zIndex: node.zIndex }}
       initial={animated ? { opacity: 0, scale: 0.82, rotate: node.rotateSeed } : { opacity: 0, scale: 0.96 }}
       animate={
         animated
@@ -148,9 +185,9 @@ function CloudCard({ node, onOpen, animated }: { node: PlacedNode; onOpen: (imag
             }
           : { opacity: { duration: 0.18, delay: Math.min(node.index * 0.016, 0.28) }, scale: { duration: 0.18, delay: Math.min(node.index * 0.016, 0.28) } }
       }
-      whileHover={{ scale: 1.06, rotate: 0, transition: { duration: 0.18 } }}
+      whileHover={{ scale: 1.06, rotate: 0, zIndex: 500, transition: { duration: 0.18 } }}
       onClick={() => onOpen(node.entry.image_ids)}
-      title={`Open cluster — ${node.entry.count.toLocaleString()} images`}
+      title={`Open cluster — ${node.entry.count.toLocaleString()} ${node.entry.count === 1 ? "image" : "images"}`}
     >
       {src ? (
         <img
@@ -178,7 +215,7 @@ function CloudCard({ node, onOpen, animated }: { node: PlacedNode; onOpen: (imag
             <p className="explore-cluster-count text-base font-semibold leading-none text-white">{node.entry.count.toLocaleString()}</p>
           </div>
           <span
-            className="rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.1em] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+            className="explore-cluster-open rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.1em] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
             style={{ borderColor: `${accent}50`, color: accent, backgroundColor: `${accent}12` }}
           >
             Open
@@ -203,35 +240,45 @@ function TagWord({
   logRange: number;
   onSearch: (tag: string) => void;
 }) {
+  const theme = useGalleryStore((state) => state.theme);
+  const isLight = theme === "subtle-light";
   const ratio = logRange > 0 ? (Math.log(Math.max(entry.count, 1)) - logMin) / logRange : 0.5;
   const fontSize = 11 + ratio * 28; // 11px – 39px
-  const accent = ACCENTS[index % ACCENTS.length];
+  const accent = (isLight ? LIGHT_ACCENTS : ACCENTS)[index % ACCENTS.length];
   const tilt = (seeded(index + 5) - 0.5) * 7;
+  // Faint low-frequency words read fine as subtle white-on-dark, but the same low
+  // opacity is unreadable on the light theme's cream, so raise the floor there.
+  const minOpacity = isLight ? 0.6 : 0.4;
 
   return (
-    <motion.button
-      initial={{ opacity: 0, scale: 0.6 }}
-      animate={{ opacity: 0.4 + ratio * 0.6, scale: 1 }}
-      transition={{ delay: Math.min(index * 0.008, 0.55), duration: 0.22 }}
-      whileHover={{ scale: 1.2, opacity: 1, rotate: 0, transition: { duration: 0.14 } }}
-      className="explore-tag-word group inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-white/[0.07]"
-      style={{ fontSize, rotate: tilt }}
-      onClick={() => onSearch(entry.tag)}
-      title={`${entry.tag} — ${entry.count.toLocaleString()} images`}
+    <Tooltip
+      label={`${entry.tag} — ${entry.count.toLocaleString()} ${entry.count === 1 ? "image" : "images"}`}
+      followCursor
+      delay={250}
     >
-      <span
-        className="font-medium leading-none"
-        style={{ color: ratio > 0.55 ? accent : "rgba(255,255,255,0.82)" }}
+      <motion.button
+        initial={{ opacity: 0, scale: 0.6 }}
+        animate={{ opacity: minOpacity + ratio * (1 - minOpacity), scale: 1 }}
+        transition={{ delay: Math.min(index * 0.008, 0.55), duration: 0.22 }}
+        whileHover={{ scale: 1.2, opacity: 1, rotate: 0, transition: { duration: 0.14 } }}
+        className="explore-tag-word group inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:bg-white/[0.07]"
+        style={{ fontSize, rotate: tilt }}
+        onClick={() => onSearch(entry.tag)}
       >
-        {entry.tag}
-      </span>
-      <span
-        className="rounded-full px-1.5 py-0.5 text-[9px] tabular-nums opacity-0 transition-opacity group-hover:opacity-100"
-        style={{ backgroundColor: `${accent}22`, color: accent }}
-      >
-        {entry.count.toLocaleString()}
-      </span>
-    </motion.button>
+        <span
+          className="font-medium leading-none"
+          style={{ color: ratio > 0.55 ? accent : isLight ? "#4b5563" : "rgba(255,255,255,0.82)" }}
+        >
+          {entry.tag}
+        </span>
+        <span
+          className="rounded-full px-1.5 py-0.5 text-[9px] tabular-nums opacity-0 transition-opacity group-hover:opacity-100"
+          style={{ backgroundColor: `${accent}22`, color: accent }}
+        >
+          {entry.count.toLocaleString()}
+        </span>
+      </motion.button>
+    </Tooltip>
   );
 }
 
@@ -278,7 +325,7 @@ function ClusterCloud({
   );
 
   return (
-    <div ref={canvasRef} className="relative min-h-0 flex-1 overflow-hidden">
+    <div ref={canvasRef} className="relative isolate min-h-0 flex-1 overflow-hidden">
       <div className="explore-cluster-grid pointer-events-none absolute inset-0 opacity-[0.07] [background-image:radial-gradient(circle,rgba(255,255,255,0.6)_1px,transparent_1px)] [background-size:28px_28px]" />
       {nodes.map((node) => (
         <CloudCard
@@ -484,8 +531,9 @@ export function TagCloud() {
 
   return (
     <div className="explore-view flex min-h-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(59,130,246,0.08),transparent_50%),radial-gradient(ellipse_at_80%_75%,rgba(168,85,247,0.07),transparent_40%),#07080f]">
-      {/* Header */}
-      <div className="explore-header shrink-0 border-b border-white/[0.05] px-6 py-4">
+      {/* Header — `relative z-10` keeps the folder-scope dropdown above the
+          cluster canvas, whose cards use a high z-index of their own. */}
+      <div className="explore-header relative z-10 shrink-0 border-b border-white/[0.05] px-6 py-4">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
             <h2 className="explore-title text-[15px] font-semibold text-white">Explore</h2>
