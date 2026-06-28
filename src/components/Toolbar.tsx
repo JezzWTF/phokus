@@ -161,6 +161,8 @@ export function Toolbar() {
   const setFailedEmbeddingsOnly = useGalleryStore((state) => state.setFailedEmbeddingsOnly);
   const failedTaggingOnly = useGalleryStore((state) => state.failedTaggingOnly);
   const setFailedTaggingOnly = useGalleryStore((state) => state.setFailedTaggingOnly);
+  const colorFilter = useGalleryStore((state) => state.colorFilter);
+  const setColorFilter = useGalleryStore((state) => state.setColorFilter);
   const similarScope = useGalleryStore((state) => state.similarScope);
   const setSimilarScope = useGalleryStore((state) => state.setSimilarScope);
   const similarSourceAlbumId = useGalleryStore((state) => state.similarSourceAlbumId);
@@ -452,7 +454,7 @@ export function Toolbar() {
 
       {/* Filter row */}
       <div className="flex items-center gap-1 px-4 pb-1.5">
-        <FilterPill label="All" active={mediaFilter === "all" && !favoritesOnly && !failedEmbeddingsOnly && !failedTaggingOnly && minimumRating === 0} onClick={() => { setMediaFilter("all"); setFavoritesOnly(false); setMinimumRating(0); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); }} />
+        <FilterPill label="All" active={mediaFilter === "all" && !favoritesOnly && !failedEmbeddingsOnly && !failedTaggingOnly && minimumRating === 0 && colorFilter === null} onClick={() => { setMediaFilter("all"); setFavoritesOnly(false); setMinimumRating(0); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); setColorFilter(null); }} />
         <FilterPill label="Images" active={mediaFilter === "image" && !favoritesOnly && !failedEmbeddingsOnly && !failedTaggingOnly} onClick={() => { setMediaFilter("image"); setFavoritesOnly(false); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); }} />
         <FilterPill label="Videos" active={mediaFilter === "video" && !favoritesOnly && !failedEmbeddingsOnly && !failedTaggingOnly} onClick={() => { setMediaFilter("video"); setFavoritesOnly(false); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); }} />
         <FilterPill label="Favorites" active={favoritesOnly} onClick={() => { setFavoritesOnly(!favoritesOnly); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); }} />

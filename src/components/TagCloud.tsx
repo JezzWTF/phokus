@@ -327,9 +327,9 @@ function TagManageRow({
     setBusy(true);
     try {
       await onRename(entry.tag, next);
+      setEditing(false);
     } finally {
       setBusy(false);
-      setEditing(false);
     }
   };
 
@@ -382,7 +382,7 @@ function TagManageRow({
         <div className="flex shrink-0 items-center gap-1">
           <button
             className="rounded-md bg-red-500/20 px-2 py-1 text-[11px] text-red-300 transition-colors hover:bg-red-500/30 disabled:opacity-50"
-            onClick={async () => { setBusy(true); try { await onDelete(entry.tag); } finally { setBusy(false); setConfirming(false); } }}
+            onClick={async () => { setBusy(true); try { await onDelete(entry.tag); setConfirming(false); } finally { setBusy(false); } }}
             disabled={busy}
           >
             Delete
@@ -396,16 +396,16 @@ function TagManageRow({
           </button>
         </div>
       ) : (
-        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           <button
-            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/60 transition-colors hover:bg-white/8 hover:text-white"
+            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/60 transition-colors hover:bg-white/8 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80"
             onClick={() => setEditing(true)}
             title="Rename or merge into another tag"
           >
             Rename
           </button>
           <button
-            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/60 transition-colors hover:bg-red-500/10 hover:text-red-300"
+            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/60 transition-colors hover:bg-red-500/10 hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/80"
             onClick={() => setConfirming(true)}
           >
             Delete

@@ -376,7 +376,8 @@ function AlbumContextMenu({
           ? "text-red-400 hover:bg-red-500/15 hover:text-red-300"
           : "text-gray-300 hover:bg-white/8 hover:text-white"
       }`}
-      onClick={() => {
+      onClick={(event) => {
+        event.stopPropagation();
         onClick();
         onClose();
       }}
@@ -448,6 +449,10 @@ function AlbumItem({
 
   const row = (
     <div
+      role={manageMode ? "checkbox" : "button"}
+      tabIndex={renaming ? -1 : 0}
+      aria-checked={manageMode ? selectedForManage : undefined}
+      aria-current={!manageMode && selected ? "page" : undefined}
       className={`group relative flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer transition-all duration-150 ${
         selectedForManage
           ? "bg-blue-500/10 text-white ring-1 ring-inset ring-blue-400/50"
@@ -459,6 +464,16 @@ function AlbumItem({
         if (manageMode) {
           onToggleManage?.();
         } else if (!renaming) {
+          viewAlbum(album.id);
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (renaming || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        if (manageMode) {
+          onToggleManage?.();
+        } else {
           viewAlbum(album.id);
         }
       }}
@@ -603,6 +618,7 @@ export function Sidebar() {
   const deleteAlbums = useGalleryStore((state) => state.deleteAlbums);
   const reorderAlbums = useGalleryStore((state) => state.reorderAlbums);
   const [creatingAlbum, setCreatingAlbum] = useState(false);
+  const [createAlbumPending, setCreateAlbumPending] = useState(false);
   const [newAlbumName, setNewAlbumName] = useState("");
   const newAlbumInputRef = useRef<HTMLInputElement>(null);
   const [manageAlbums, setManageAlbums] = useState(false);
@@ -634,6 +650,15 @@ export function Sidebar() {
     const nextIds = orderedAlbumsRef.current.map((album) => album.id);
     // Read live store order (not the render-time closure) in case albums changed.
     const currentIds = useGalleryStore.getState().albums.map((album) => album.id);
+    const snapshotIds = albums.map((album) => album.id);
+    if (
+      snapshotIds.length !== currentIds.length ||
+      snapshotIds.some((id, index) => id !== currentIds[index])
+    ) {
+      orderedAlbumsRef.current = useGalleryStore.getState().albums;
+      setOrderedAlbums(orderedAlbumsRef.current);
+      return;
+    }
     if (
       nextIds.length !== currentIds.length ||
       nextIds.some((id, index) => id !== currentIds[index])
@@ -768,10 +793,16 @@ export function Sidebar() {
       setCreatingAlbum(false);
       return;
     }
-    const album = await createAlbum(name);
-    setNewAlbumName("");
-    setCreatingAlbum(false);
-    useGalleryStore.getState().viewAlbum(album.id);
+    if (createAlbumPending) return;
+    setCreateAlbumPending(true);
+    try {
+      const album = await createAlbum(name);
+      setNewAlbumName("");
+      setCreatingAlbum(false);
+      useGalleryStore.getState().viewAlbum(album.id);
+    } finally {
+      setCreateAlbumPending(false);
+    }
   };
 
   const exitManageAlbums = () => {
@@ -1041,7 +1072,9 @@ export function Sidebar() {
                 placeholder="Album name…"
                 value={newAlbumName}
                 onChange={(e) => setNewAlbumName(e.target.value)}
+                disabled={createAlbumPending}
                 onKeyDown={(e) => {
+                  if (createAlbumPending) return;
                   if (e.key === "Escape") {
                     setCreatingAlbum(false);
                     setNewAlbumName("");

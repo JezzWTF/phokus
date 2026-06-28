@@ -2822,7 +2822,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         if (
           isDerivedCollectionTitle(state.collectionTitle) ||
           state.activeView === "explore" ||
-          state.activeView === "album"
+          state.activeView === "album" ||
+          state.colorFilter !== null
         ) {
           return state;
         }

@@ -216,6 +216,8 @@ pub fn run() {
             commands::get_tagging_queue_folder_ids,
             commands::set_tagging_queue_folder_ids,
             commands::open_app_data_folder,
+            commands::open_map_location,
+            commands::open_changelog_url,
             commands::get_database_info,
             commands::vacuum_database,
             commands::rebuild_semantic_index,

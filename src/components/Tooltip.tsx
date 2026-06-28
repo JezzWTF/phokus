@@ -77,7 +77,7 @@ export function Tooltip({
     if (frame.current !== undefined) cancelAnimationFrame(frame.current);
     frame.current = undefined;
   };
-  const show = (event: MouseEvent<HTMLSpanElement>) => {
+  const show = (event: MouseEvent<HTMLElement>) => {
     clear();
     if (followCursor) place(event.clientX, event.clientY);
     if (delay <= 0) {
@@ -90,7 +90,7 @@ export function Tooltip({
     clear();
     setVisible(false);
   };
-  const move = (event: MouseEvent<HTMLSpanElement>) => {
+  const move = (event: MouseEvent<HTMLElement>) => {
     if (!followCursor) return;
     const { clientX, clientY } = event;
     if (frame.current !== undefined) cancelAnimationFrame(frame.current);
@@ -102,8 +102,10 @@ export function Tooltip({
 
   useEffect(() => clear, []);
 
+  const Wrapper = block ? "div" : "span";
+
   return (
-    <span
+    <Wrapper
       className={`${block ? "relative block w-full" : "relative inline-flex"} ${className}`}
       onMouseEnter={show}
       onMouseMove={followCursor ? move : undefined}
@@ -115,6 +117,7 @@ export function Tooltip({
         <motion.span
           ref={tooltipRef}
           role="tooltip"
+          aria-hidden={!visible}
           // Fixed (so the scroll container's overflow doesn't clip it) and
           // positioned by `place()` near the cursor with viewport-edge flipping.
           className={`fixed ${BASE_CLASSES}`}
@@ -131,11 +134,12 @@ export function Tooltip({
       ) : (
         <span
           role="tooltip"
+          aria-hidden={!visible}
           className={`absolute ${STATIC_CLASSES} ${positionClasses(side, align)} ${visible ? "opacity-100" : "opacity-0"}`}
         >
           {label}
         </span>
       )}
-    </span>
+    </Wrapper>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { revealItemInDir, openUrl } from "@tauri-apps/plugin-opener";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useGalleryStore, ImageTag, ImageExif, AiRating } from "../store";
 import { VideoPlayer } from "./VideoPlayer";
 
@@ -177,6 +177,7 @@ export function Lightbox() {
   const [albumMenuOpen, setAlbumMenuOpen] = useState(false);
   const [albumAddedTo, setAlbumAddedTo] = useState<number | null>(null);
   const [newAlbumName, setNewAlbumName] = useState("");
+  const [albumAdding, setAlbumAdding] = useState(false);
   const [regionSelectMode, setRegionSelectMode] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragRect, setDragRect] = useState<DragRect | null>(null);
@@ -821,9 +822,14 @@ export function Lightbox() {
                                 key={album.id}
                                 className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-xs text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
                                 onClick={() => {
-                                  void addToAlbum(album.id, [selectedImage.id]);
-                                  setAlbumAddedTo(album.id);
+                                  if (albumAdding) return;
+                                  setAlbumAdding(true);
+                                  void addToAlbum(album.id, [selectedImage.id])
+                                    .then(() => setAlbumAddedTo(album.id))
+                                    .catch(() => undefined)
+                                    .finally(() => setAlbumAdding(false));
                                 }}
+                                disabled={albumAdding}
                               >
                                 <span className="truncate">{album.name}</span>
                                 {albumAddedTo === album.id ? (
@@ -840,12 +846,16 @@ export function Lightbox() {
                           onSubmit={(e) => {
                             e.preventDefault();
                             const name = newAlbumName.trim();
-                            if (!name) return;
-                            void createAlbum(name).then((album) => {
-                              void addToAlbum(album.id, [selectedImage.id]);
-                              setAlbumAddedTo(album.id);
-                            });
-                            setNewAlbumName("");
+                            if (!name || albumAdding) return;
+                            setAlbumAdding(true);
+                            void createAlbum(name)
+                              .then(async (album) => {
+                                await addToAlbum(album.id, [selectedImage.id]);
+                                setAlbumAddedTo(album.id);
+                                setNewAlbumName("");
+                              })
+                              .catch(() => undefined)
+                              .finally(() => setAlbumAdding(false));
                           }}
                         >
                           <input
@@ -853,11 +863,12 @@ export function Lightbox() {
                             placeholder="New album…"
                             value={newAlbumName}
                             onChange={(e) => setNewAlbumName(e.target.value)}
+                            disabled={albumAdding}
                           />
                           <button
                             type="submit"
                             className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
-                            disabled={!newAlbumName.trim()}
+                            disabled={albumAdding || !newAlbumName.trim()}
                           >
                             Add
                           </button>
@@ -897,9 +908,9 @@ export function Lightbox() {
                             className="inline-flex items-center gap-1 text-xs text-sky-400 transition-colors hover:text-sky-300"
                             title="Open location in your browser"
                             onClick={() =>
-                              void openUrl(
-                                `https://www.openstreetmap.org/?mlat=${imageExif.gps_lat}&mlon=${imageExif.gps_lon}#map=15/${imageExif.gps_lat}/${imageExif.gps_lon}`,
-                              )
+                              void invoke("open_map_location", {
+                                params: { lat: imageExif.gps_lat, lon: imageExif.gps_lon },
+                              })
                             }
                           >
                             {imageExif.gps_lat.toFixed(5)}, {imageExif.gps_lon.toFixed(5)}

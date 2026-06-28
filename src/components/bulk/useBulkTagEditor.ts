@@ -15,25 +15,31 @@ export function useBulkTagEditor() {
   const [appliedTags, setAppliedTags] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const requestRef = useRef(0);
 
   useEffect(() => {
     const query = input.trim();
     if (!query) {
+      requestRef.current += 1;
       setSuggestions([]);
       return;
     }
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    const requestId = ++requestRef.current;
     debounceRef.current = setTimeout(async () => {
       try {
         const results = await invoke<ExploreTagEntry[]>("search_tags_autocomplete", {
           params: { query, folder_id: selectedFolderId ?? null, limit: 8 },
         });
+        if (requestId !== requestRef.current) return;
         setSuggestions(results);
       } catch {
+        if (requestId !== requestRef.current) return;
         setSuggestions([]);
       }
     }, 120);
     return () => {
+      requestRef.current += 1;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [input, selectedFolderId]);

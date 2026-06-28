@@ -23,6 +23,7 @@ export function BulkActionBar() {
 
   const [panel, setPanel] = useState<Panel>(null);
   const [deleting, setDeleting] = useState(false);
+  const [creatingAlbum, setCreatingAlbum] = useState(false);
   const [newAlbumName, setNewAlbumName] = useState("");
   const barRef = useRef<HTMLDivElement>(null);
 
@@ -67,11 +68,16 @@ export function BulkActionBar() {
 
   const handleCreateAlbum = async () => {
     const name = newAlbumName.trim();
-    if (!name) return;
-    const album = await createAlbum(name);
-    await addToAlbum(album.id, ids);
-    setNewAlbumName("");
-    setPanel(null);
+    if (!name || creatingAlbum) return;
+    setCreatingAlbum(true);
+    try {
+      const album = await createAlbum(name);
+      await addToAlbum(album.id, ids);
+      setNewAlbumName("");
+      setPanel(null);
+    } finally {
+      setCreatingAlbum(false);
+    }
   };
 
   const btn = "rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors";
@@ -187,11 +193,12 @@ export function BulkActionBar() {
                 placeholder="New album…"
                 value={newAlbumName}
                 onChange={(event) => setNewAlbumName(event.target.value)}
+                disabled={creatingAlbum}
               />
               <button
                 type="submit"
                 className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
-                disabled={!newAlbumName.trim()}
+                disabled={creatingAlbum || !newAlbumName.trim()}
               >
                 Add
               </button>

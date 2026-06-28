@@ -1,9 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { invoke } from "@tauri-apps/api/core";
 import { useGalleryStore } from "../store";
 import { getChangelogForVersion, type ChangelogSection } from "../changelog";
+import { Tooltip } from "./Tooltip";
 
+// Shown in the tooltip so the user can see the link's destination before
+// clicking. The actual navigation is handled by the open_changelog_url command.
 const CHANGELOG_URL = "https://github.com/JezzWTF/phokus/blob/main/CHANGELOG.md";
 
 // Per-section accent. These all use the standard colour scale, which the
@@ -175,13 +178,15 @@ export function WhatsNewModal() {
             </div>
 
             <div className="flex items-center justify-between gap-4 border-t border-white/[0.07] px-6 py-4">
-              <button
-                type="button"
-                onClick={() => void openUrl(CHANGELOG_URL)}
-                className="text-xs text-gray-500 transition-colors hover:text-gray-300"
-              >
-                Full changelog ↗
-              </button>
+              <Tooltip label={CHANGELOG_URL} side="top" align="start">
+                <button
+                  type="button"
+                  onClick={() => void invoke("open_changelog_url")}
+                  className="text-xs text-gray-500 transition-colors hover:text-gray-300"
+                >
+                  Full changelog ↗
+                </button>
+              </Tooltip>
               <button
                 className="rounded-md border border-emerald-400/35 bg-emerald-500/15 px-3.5 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25"
                 onClick={closeWhatsNew}

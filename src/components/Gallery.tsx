@@ -113,7 +113,7 @@ export function ImageTile({
 }: {
   image: ImageRecord;
   onClick: () => void;
-  onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onContextMenu: (event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
   const [loaded, setLoaded] = useState(false);
   const [errored, setErrored] = useState(false);
@@ -127,27 +127,35 @@ export function ImageTile({
 
   return (
     <Tooltip label={image.filename} delay={500} block followCursor>
-    <button
+    <div
       className={`media-dark-surface group relative overflow-hidden rounded-xl bg-white/[0.04] text-left focus:outline-none transition-shadow ${
         selected ? "ring-2 ring-inset ring-blue-400/80" : ""
       }`}
       style={{ width: "100%", aspectRatio: "1 / 1" }}
-      onClick={() => {
-        // In selection mode a plain click toggles; otherwise it opens.
-        if (selectionActive) toggleGallerySelected(image.id);
-        else onClick();
-      }}
-      onDoubleClick={(event) => {
-        // Double-click always opens, even in selection mode.
-        event.stopPropagation();
-        onClick();
-      }}
       onContextMenu={onContextMenu}
     >
+      {/* Full-tile click target — opens, or toggles selection while selecting.
+          A real button (over the non-interactive tile div) keeps it keyboard-
+          accessible without nesting buttons. */}
+      <button
+        type="button"
+        className="absolute inset-0 z-10 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80"
+        aria-label={`Open ${image.filename}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (selectionActive) toggleGallerySelected(image.id);
+          else onClick();
+        }}
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+      />
       {/* Selection corner — a top-left zone that reveals the checkbox only when
           hovered (not the whole tile) and toggles selection on click. The
           checkbox stays visible once the item is selected. */}
-      <div
+      <button
+        type="button"
         role="checkbox"
         aria-checked={selected}
         aria-label={selected ? "Deselect" : "Select"}
@@ -168,7 +176,7 @@ export function ImageTile({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
           </svg>
         </div>
-      </div>
+      </button>
       {/* Image / placeholder */}
       {src && !errored ? (
         <>
@@ -265,7 +273,7 @@ export function ImageTile({
             <span />
           )}
           <button
-            className={`rounded-md px-2 py-0.5 text-[10px] transition-colors pointer-events-auto backdrop-blur-sm ${
+            className={`relative z-20 rounded-md px-2 py-0.5 text-[10px] transition-colors pointer-events-auto backdrop-blur-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80 ${
               canFindSimilar
                 ? "bg-white/10 text-white/80 hover:bg-white/20 hover:text-white"
                 : "bg-white/5 text-white/30 cursor-not-allowed"
@@ -281,7 +289,7 @@ export function ImageTile({
           </button>
         </div>
       </div>
-    </button>
+    </div>
     </Tooltip>
   );
 }

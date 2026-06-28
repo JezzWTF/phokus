@@ -1702,25 +1702,37 @@ pub struct ImageExif {
 }
 
 fn gps_coord(exif: &exif::Exif, coord: exif::Tag, reference: exif::Tag) -> Option<f64> {
+    let (max_abs, positive_ref, negative_ref) = match (coord, reference) {
+        (exif::Tag::GPSLatitude, exif::Tag::GPSLatitudeRef) => (90.0, b'N', b'S'),
+        (exif::Tag::GPSLongitude, exif::Tag::GPSLongitudeRef) => (180.0, b'E', b'W'),
+        _ => return None,
+    };
     let field = exif.get_field(coord, exif::In::PRIMARY)?;
     if let exif::Value::Rational(ref parts) = field.value {
         if parts.len() >= 3 {
             let degrees = parts[0].to_f64() + parts[1].to_f64() / 60.0 + parts[2].to_f64() / 3600.0;
+            if !degrees.is_finite() || degrees < 0.0 || degrees > max_abs {
+                return None;
+            }
             // Read the hemisphere straight from the ref tag's ASCII bytes
             // ("N"/"S"/"E"/"W") rather than its formatted display string.
-            let negative = exif
-                .get_field(reference, exif::In::PRIMARY)
-                .map(|f| match &f.value {
-                    exif::Value::Ascii(values) => values
-                        .iter()
-                        .flatten()
-                        .next()
-                        .map(|&byte| byte == b'S' || byte == b'W')
-                        .unwrap_or(false),
-                    _ => false,
-                })
-                .unwrap_or(false);
-            return Some(if negative { -degrees } else { degrees });
+            let ref_byte =
+                exif.get_field(reference, exif::In::PRIMARY)
+                    .and_then(|f| match &f.value {
+                        exif::Value::Ascii(values) => values.iter().flatten().next().copied(),
+                        _ => None,
+                    })?;
+            if ref_byte != positive_ref && ref_byte != negative_ref {
+                return None;
+            }
+            let signed = if ref_byte == negative_ref {
+                -degrees
+            } else {
+                degrees
+            };
+            return signed
+                .is_finite()
+                .then_some(signed.clamp(-max_abs, max_abs));
         }
     }
     None
@@ -2497,6 +2509,47 @@ pub async fn open_app_data_folder(app: AppHandle) -> Result<(), String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     app.opener()
         .open_path(app_dir.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Deserialize)]
+pub struct OpenMapLocationParams {
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[tauri::command]
+pub async fn open_map_location(
+    app: AppHandle,
+    params: OpenMapLocationParams,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if !params.lat.is_finite()
+        || !params.lon.is_finite()
+        || !(-90.0..=90.0).contains(&params.lat)
+        || !(-180.0..=180.0).contains(&params.lon)
+    {
+        return Err("Invalid map coordinates".to_string());
+    }
+
+    let url = format!(
+        "https://www.openstreetmap.org/?mlat={lat:.6}&mlon={lon:.6}#map=15/{lat:.6}/{lon:.6}",
+        lat = params.lat,
+        lon = params.lon,
+    );
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn open_changelog_url(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(
+            "https://github.com/JezzWTF/phokus/blob/main/CHANGELOG.md",
+            None::<&str>,
+        )
         .map_err(|e| e.to_string())
 }
 
