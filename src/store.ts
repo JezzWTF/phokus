@@ -354,6 +354,8 @@ interface GalleryState {
   minimumRating: number;
   failedEmbeddingsOnly: boolean;
   failedTaggingOnly: boolean;
+  colorFilter: [number, number, number] | null; // [r,g,b] dominant-color filter
+  colorBackfill: { processed: number; total: number; done: boolean } | null;
   zoomPreset: ZoomPreset;
   selectedImage: ImageRecord | null;
   collectionTitle: string | null;
@@ -469,6 +471,7 @@ interface GalleryState {
   setMinimumRating: (minimumRating: number) => void;
   setFailedEmbeddingsOnly: (failedEmbeddingsOnly: boolean) => void;
   setFailedTaggingOnly: (failedTaggingOnly: boolean) => void;
+  setColorFilter: (color: [number, number, number] | null) => void;
   showFailedTagging: (folderId: number) => void;
   setZoomPreset: (zoomPreset: ZoomPreset) => void;
   openImage: (image: ImageRecord) => void;
@@ -834,6 +837,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   minimumRating: 0,
   failedEmbeddingsOnly: false,
   failedTaggingOnly: false,
+  colorFilter: null,
+  colorBackfill: null,
   zoomPreset: "comfortable",
   selectedImage: null,
   collectionTitle: null,
@@ -1062,7 +1067,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   },
 
   loadImages: async (reset = false) => {
-    const { selectedFolderId, search, sort, loadedCount, mediaFilter, favoritesOnly, minimumRating, failedEmbeddingsOnly, failedTaggingOnly, activeView } = get();
+    const { selectedFolderId, search, sort, loadedCount, mediaFilter, favoritesOnly, minimumRating, failedEmbeddingsOnly, failedTaggingOnly, colorFilter, activeView } = get();
     const parsedSearch = parseSearchValue(search);
     const requestToken = ++galleryRequestToken;
     // Any fresh collection load invalidates a selection that referenced the
@@ -1176,6 +1181,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
           rating_min: minimumRating > 0 ? minimumRating : null,
           embedding_failed_only: failedEmbeddingsOnly,
           tagging_failed_only: failedTaggingOnly,
+          color: colorFilter,
           sort,
           offset,
           limit: activeView === "timeline" ? TIMELINE_PAGE_SIZE : PAGE_SIZE,
@@ -1314,6 +1320,11 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   setFailedTaggingOnly: (failedTaggingOnly) => {
     set({ failedTaggingOnly, failedEmbeddingsOnly: failedTaggingOnly ? false : get().failedEmbeddingsOnly, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
+    void get().loadImages(true);
+  },
+
+  setColorFilter: (colorFilter) => {
+    set({ colorFilter, images: [], loadedCount: 0, collectionTitle: null, similarSourceImageId: null, similarHasMore: false, imageLoadError: null });
     void get().loadImages(true);
   },
 
@@ -2939,6 +2950,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       }
     });
 
+    const unlistenColorBackfill = await listen<{ processed: number; total: number; done: boolean }>(
+      "color-backfill-progress",
+      (event) => {
+        set({ colorBackfill: event.payload.done ? null : event.payload });
+      },
+    );
+
     return () => {
       unlistenProgress();
       unlistenMediaJobs();
@@ -2949,6 +2967,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       unlistenWatcherDeleted();
       unlistenFolderCounts();
       unlistenFfmpegProgress();
+      unlistenColorBackfill();
     };
   },
 }));

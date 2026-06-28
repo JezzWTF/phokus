@@ -12,6 +12,9 @@ pub struct GeneratedThumbnail {
     pub path: PathBuf,
     pub width: Option<i64>,
     pub height: Option<i64>,
+    /// Dominant-color palette `(r, g, b, weight)` sampled while resizing. Empty
+    /// when the thumbnail already existed (the color backfill handles those).
+    pub palette: Vec<(u8, u8, u8, f32)>,
 }
 
 pub fn generate_image_thumbnail(image_path: &Path, cache_dir: &Path) -> Result<GeneratedThumbnail> {
@@ -28,6 +31,7 @@ pub fn generate_image_thumbnail(image_path: &Path, cache_dir: &Path) -> Result<G
             path: out_path,
             width: original_dimensions.0,
             height: original_dimensions.1,
+            palette: Vec::new(),
         });
     }
 
@@ -47,6 +51,12 @@ pub fn generate_image_thumbnail(image_path: &Path, cache_dir: &Path) -> Result<G
     let thumb = image::RgbImage::from_raw(dst_width, dst_height, dst.buffer().to_vec())
         .ok_or_else(|| anyhow!("failed to construct resized thumbnail buffer"))?;
 
+    // Sample the dominant-color palette from the resized buffer before encoding.
+    let palette = crate::color::extract_palette(&thumb, crate::color::PALETTE_SIZE)
+        .into_iter()
+        .map(|color| (color.r, color.g, color.b, color.weight))
+        .collect();
+
     if let Some(parent) = out_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -58,6 +68,7 @@ pub fn generate_image_thumbnail(image_path: &Path, cache_dir: &Path) -> Result<G
         path: out_path,
         width: original_dimensions.0,
         height: original_dimensions.1,
+        palette,
     })
 }
 
@@ -166,6 +177,7 @@ pub fn generate_video_thumbnail(
             path: out_path,
             width: None,
             height: None,
+            palette: Vec::new(),
         });
     }
 
@@ -231,6 +243,7 @@ pub fn generate_video_thumbnail(
                 path: out_path,
                 width: None,
                 height: None,
+                palette: Vec::new(),
             });
         }
         last_error = String::from_utf8_lossy(&output.stderr).to_string();
@@ -255,6 +268,7 @@ pub fn generate_avif_thumbnail(
             path: out_path,
             width: original_dimensions.0,
             height: original_dimensions.1,
+            palette: Vec::new(),
         });
     }
 
@@ -282,10 +296,19 @@ pub fn generate_avif_thumbnail(
         .output()?;
 
     if output.status.success() && out_path.exists() {
+        // AVIF is decoded by FFmpeg, so there's no in-memory RGB buffer here;
+        // sample the palette by reading the JPEG thumbnail we just wrote.
+        let palette =
+            crate::color::extract_palette_from_file(&out_path, crate::color::PALETTE_SIZE)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|color| (color.r, color.g, color.b, color.weight))
+                .collect();
         return Ok(GeneratedThumbnail {
             path: out_path,
             width: original_dimensions.0,
             height: original_dimensions.1,
+            palette,
         });
     }
 

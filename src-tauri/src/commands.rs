@@ -42,6 +42,9 @@ pub struct GetImagesParams {
     pub rating_min: Option<i64>,
     pub embedding_failed_only: Option<bool>,
     pub tagging_failed_only: Option<bool>,
+    /// Optional `[r, g, b]` color filter — matches images whose palette contains
+    /// a prominent color near this one.
+    pub color: Option<[u8; 3]>,
     pub sort: Option<String>,
     pub offset: Option<i64>,
     pub limit: Option<i64>,
@@ -564,6 +567,7 @@ pub async fn get_images(
     let rating_min = params.rating_min.unwrap_or(0);
     let embedding_failed_only = params.embedding_failed_only.unwrap_or(false);
     let tagging_failed_only = params.tagging_failed_only.unwrap_or(false);
+    let color = params.color.map(|[r, g, b]| (r, g, b));
 
     let total = db::count_images(
         &conn,
@@ -574,6 +578,7 @@ pub async fn get_images(
         rating_min,
         embedding_failed_only,
         tagging_failed_only,
+        color,
     )
     .map_err(|e| e.to_string())?;
 
@@ -586,6 +591,7 @@ pub async fn get_images(
         rating_min,
         embedding_failed_only,
         tagging_failed_only,
+        color,
         sort,
         offset,
         limit,
@@ -768,23 +774,23 @@ pub async fn find_similar_by_region(
         .map_err(|e| e.to_string())?
     } else {
         match params.folder_id {
-        Some(folder_id) => vector::search_image_ids_by_embedding_in_folder(
-            &conn,
-            &embedding,
-            folder_id,
-            Some(params.image_id),
-            offset + limit + 1,
-        )
-        .map_err(|e| e.to_string())?,
-        None => {
-            // Fetch one extra candidate to compensate for the source image that
-            // will be removed, so has_more is accurate and results span multiple pages.
-            let mut ids =
-                vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 2)
-                    .map_err(|e| e.to_string())?;
-            ids.retain(|&id| id != params.image_id);
-            ids
-        }
+            Some(folder_id) => vector::search_image_ids_by_embedding_in_folder(
+                &conn,
+                &embedding,
+                folder_id,
+                Some(params.image_id),
+                offset + limit + 1,
+            )
+            .map_err(|e| e.to_string())?,
+            None => {
+                // Fetch one extra candidate to compensate for the source image that
+                // will be removed, so has_more is accurate and results span multiple pages.
+                let mut ids =
+                    vector::search_image_ids_by_embedding(&conn, &embedding, offset + limit + 2)
+                        .map_err(|e| e.to_string())?;
+                ids.retain(|&id| id != params.image_id);
+                ids
+            }
         }
     };
 
@@ -2268,7 +2274,10 @@ pub async fn list_albums(db: State<'_, DbState>) -> Result<Vec<Album>, String> {
 }
 
 #[tauri::command]
-pub async fn create_album(db: State<'_, DbState>, params: CreateAlbumParams) -> Result<Album, String> {
+pub async fn create_album(
+    db: State<'_, DbState>,
+    params: CreateAlbumParams,
+) -> Result<Album, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     let name = params.name.trim();
     if name.is_empty() {
@@ -2294,13 +2303,19 @@ pub async fn delete_album(db: State<'_, DbState>, params: DeleteAlbumParams) -> 
 }
 
 #[tauri::command]
-pub async fn reorder_albums(db: State<'_, DbState>, params: ReorderAlbumsParams) -> Result<(), String> {
+pub async fn reorder_albums(
+    db: State<'_, DbState>,
+    params: ReorderAlbumsParams,
+) -> Result<(), String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     db::reorder_albums(&conn, &params.album_ids).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn delete_albums(db: State<'_, DbState>, params: DeleteAlbumsParams) -> Result<(), String> {
+pub async fn delete_albums(
+    db: State<'_, DbState>,
+    params: DeleteAlbumsParams,
+) -> Result<(), String> {
     let conn = db.get().map_err(|e| e.to_string())?;
     db::delete_albums(&conn, &params.album_ids).map_err(|e| e.to_string())
 }

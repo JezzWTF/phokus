@@ -1,4 +1,5 @@
 mod captioner;
+mod color;
 mod commands;
 mod db;
 mod embedder;
@@ -122,6 +123,8 @@ pub fn run() {
             // Caption worker disabled — UI removed; keeping backend code intact for future use.
             // indexer::start_caption_worker(app.handle().clone(), pool.clone(), app_dir.clone());
             indexer::start_tagging_worker(app.handle().clone(), pool.clone(), app_dir.clone());
+            // Backfill color palettes for images indexed before color search existed.
+            indexer::start_color_backfill(app.handle().clone(), pool.clone());
 
             let watcher_handle = indexer::start_watcher(app.handle().clone(), pool.clone(), thumb_dir.clone());
 

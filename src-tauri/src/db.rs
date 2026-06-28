@@ -321,6 +321,17 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_album_images_album ON album_images(album_id);
         CREATE INDEX IF NOT EXISTS idx_album_images_image ON album_images(image_id);
+
+        CREATE TABLE IF NOT EXISTS image_colors (
+            image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+            idx      INTEGER NOT NULL,
+            r        INTEGER NOT NULL,
+            g        INTEGER NOT NULL,
+            b        INTEGER NOT NULL,
+            weight   REAL NOT NULL,
+            PRIMARY KEY (image_id, idx)
+        );
+        CREATE INDEX IF NOT EXISTS idx_image_colors_image ON image_colors(image_id);
         ",
     )?;
 
@@ -1741,11 +1752,7 @@ pub fn add_images_to_album(conn: &Connection, album_id: i64, image_ids: &[i64]) 
     Ok(added)
 }
 
-pub fn remove_images_from_album(
-    conn: &Connection,
-    album_id: i64,
-    image_ids: &[i64],
-) -> Result<()> {
+pub fn remove_images_from_album(conn: &Connection, album_id: i64, image_ids: &[i64]) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     for image_id in image_ids {
         tx.execute(
@@ -1870,6 +1877,63 @@ pub fn bulk_remove_tag_by_name(conn: &Connection, image_ids: &[i64], tag: &str) 
     }
     tx.commit()?;
     Ok(())
+}
+
+// ── Color palettes (color search) ──────────────────────────────────────────────
+
+/// Replace an image's stored color palette. `colors` is `(r, g, b, weight)`.
+pub fn replace_image_colors(
+    conn: &Connection,
+    image_id: i64,
+    colors: &[(u8, u8, u8, f32)],
+) -> Result<()> {
+    conn.execute("DELETE FROM image_colors WHERE image_id = ?1", [image_id])?;
+    for (idx, (r, g, b, weight)) in colors.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO image_colors (image_id, idx, r, g, b, weight)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                image_id,
+                idx as i64,
+                *r as i64,
+                *g as i64,
+                *b as i64,
+                *weight as f64
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Images (with thumbnails) that have no stored palette yet — the backfill set.
+/// Returns `(image_id, thumbnail_path)`.
+pub fn get_images_missing_colors(conn: &Connection, limit: i64) -> Result<Vec<(i64, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT i.id, i.thumbnail_path
+         FROM images i
+         WHERE i.media_kind = 'image'
+           AND i.thumbnail_path IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM image_colors c WHERE c.image_id = i.id)
+         LIMIT ?1",
+    )?;
+    let rows = stmt.query_map([limit], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Count of images still awaiting palette extraction (for backfill progress).
+pub fn count_images_missing_colors(conn: &Connection) -> Result<i64> {
+    let count = conn.query_row(
+        "SELECT COUNT(*)
+         FROM images i
+         WHERE i.media_kind = 'image'
+           AND i.thumbnail_path IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM image_colors c WHERE c.image_id = i.id)",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count)
 }
 
 pub fn repair_deferred_embedding_jobs(conn: &Connection) -> Result<usize> {
@@ -1999,6 +2063,7 @@ pub fn get_images(
     rating_min: i64,
     embedding_failed_only: bool,
     tagging_failed_only: bool,
+    color: Option<(u8, u8, u8)>,
     sort: &str,
     offset: i64,
     limit: i64,
@@ -2023,6 +2088,10 @@ pub fn get_images(
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
     let tagging_failed_flag = i64::from(tagging_failed_only);
+    let (color_flag, qr, qg, qb) = match color {
+        Some((r, g, b)) => (1i64, r as i64, g as i64, b as i64),
+        None => (0, 0, 0, 0),
+    };
     let sql = format!(
         "SELECT id, folder_id, path, filename, thumbnail_path, width, height, file_size, created_at, modified_at, taken_at, mime_type,
                 media_kind, duration_ms, video_codec, audio_codec, metadata_updated_at, metadata_error,
@@ -2037,6 +2106,12 @@ pub fn get_images(
            AND rating >= ?5
            AND (?6 = 0 OR embedding_status = 'failed')
            AND (?7 = 0 OR ai_tagger_error IS NOT NULL)
+           AND (?10 = 0 OR EXISTS (
+               SELECT 1 FROM image_colors c
+               WHERE c.image_id = images.id
+                 AND c.weight >= ?15
+                 AND ((c.r - ?11)*(c.r - ?11) + (c.g - ?12)*(c.g - ?12) + (c.b - ?13)*(c.b - ?13)) <= ?14
+           ))
          ORDER BY {order}
          LIMIT ?8 OFFSET ?9"
     );
@@ -2051,7 +2126,13 @@ pub fn get_images(
             embedding_failed_flag,
             tagging_failed_flag,
             limit,
-            offset
+            offset,
+            color_flag,
+            qr,
+            qg,
+            qb,
+            crate::color::MATCH_DISTANCE_SQ,
+            crate::color::MATCH_MIN_WEIGHT
         ],
         map_image_row,
     )?;
@@ -2068,12 +2149,17 @@ pub fn count_images(
     rating_min: i64,
     embedding_failed_only: bool,
     tagging_failed_only: bool,
+    color: Option<(u8, u8, u8)>,
 ) -> Result<i64> {
     let search_pattern = search.map(|value| format!("%{value}%"));
 
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
     let tagging_failed_flag = i64::from(tagging_failed_only);
+    let (color_flag, qr, qg, qb) = match color {
+        Some((r, g, b)) => (1i64, r as i64, g as i64, b as i64),
+        None => (0, 0, 0, 0),
+    };
     let count = conn.query_row(
         "SELECT COUNT(*) FROM images
          WHERE (?1 IS NULL OR folder_id = ?1)
@@ -2082,7 +2168,13 @@ pub fn count_images(
            AND (?4 = 0 OR favorite = 1)
            AND rating >= ?5
            AND (?6 = 0 OR embedding_status = 'failed')
-           AND (?7 = 0 OR ai_tagger_error IS NOT NULL)",
+           AND (?7 = 0 OR ai_tagger_error IS NOT NULL)
+           AND (?8 = 0 OR EXISTS (
+               SELECT 1 FROM image_colors c
+               WHERE c.image_id = images.id
+                 AND c.weight >= ?13
+                 AND ((c.r - ?9)*(c.r - ?9) + (c.g - ?10)*(c.g - ?10) + (c.b - ?11)*(c.b - ?11)) <= ?12
+           ))",
         params![
             folder_id,
             search_pattern,
@@ -2090,7 +2182,13 @@ pub fn count_images(
             favorites_flag,
             rating_min,
             embedding_failed_flag,
-            tagging_failed_flag
+            tagging_failed_flag,
+            color_flag,
+            qr,
+            qg,
+            qb,
+            crate::color::MATCH_DISTANCE_SQ,
+            crate::color::MATCH_MIN_WEIGHT
         ],
         |row| row.get(0),
     )?;

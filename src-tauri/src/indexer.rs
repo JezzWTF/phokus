@@ -191,6 +191,13 @@ pub struct MediaUpdateBatch {
 }
 
 #[derive(Clone, Serialize)]
+pub struct ColorBackfillProgress {
+    pub processed: i64,
+    pub total: i64,
+    pub done: bool,
+}
+
+#[derive(Clone, Serialize)]
 pub struct MediaJobProgressEvent {
     pub progress: Vec<FolderJobProgress>,
 }
@@ -737,6 +744,13 @@ fn persist_thumbnail_results(
                     width,
                     height,
                 )?);
+
+                // Store the dominant-color palette sampled during resizing.
+                if let Some(thumb) = &generated {
+                    if !thumb.palette.is_empty() {
+                        db::replace_image_colors(&tx, image_id, &thumb.palette)?;
+                    }
+                }
             }
 
             tx.commit()?;
@@ -765,6 +779,76 @@ fn is_avif_path(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("avif"))
+}
+
+/// One-shot background pass that samples a color palette from the (already
+/// generated) thumbnails of images indexed before color search existed. New
+/// images get their palette during thumbnail generation, so this only fills the
+/// historical gap. Emits `color-backfill-progress` so the UI can show a count.
+pub fn start_color_backfill(app: AppHandle, pool: DbPool) {
+    std::thread::spawn(move || {
+        let total = match pool.get() {
+            Ok(conn) => db::count_images_missing_colors(&conn).unwrap_or(0),
+            Err(_) => return,
+        };
+        if total == 0 {
+            return;
+        }
+        log::info!("Color backfill: sampling palettes for {total} images.");
+
+        let mut processed: i64 = 0;
+        loop {
+            let batch = match pool.get() {
+                Ok(conn) => db::get_images_missing_colors(&conn, 64).unwrap_or_default(),
+                Err(_) => break,
+            };
+            if batch.is_empty() {
+                break;
+            }
+
+            for (image_id, thumbnail_path) in batch {
+                let palette = crate::color::extract_palette_from_file(
+                    Path::new(&thumbnail_path),
+                    crate::color::PALETTE_SIZE,
+                );
+                let colors: Vec<(u8, u8, u8, f32)> = match palette {
+                    Some(colors) if !colors.is_empty() => colors
+                        .into_iter()
+                        .map(|c| (c.r, c.g, c.b, c.weight))
+                        .collect(),
+                    // Unreadable thumbnail: store a zero-weight sentinel so the
+                    // image isn't reprocessed forever (it just won't match).
+                    _ => vec![(0, 0, 0, 0.0)],
+                };
+                let _ = with_db_write_lock(|| {
+                    let conn = pool.get()?;
+                    db::replace_image_colors(&conn, image_id, &colors)
+                });
+                processed += 1;
+            }
+
+            let _ = app.emit(
+                "color-backfill-progress",
+                ColorBackfillProgress {
+                    processed,
+                    total,
+                    done: false,
+                },
+            );
+            // Yield so the backfill stays in the background under active use.
+            std::thread::sleep(Duration::from_millis(15));
+        }
+
+        log::info!("Color backfill complete: {processed} images sampled.");
+        let _ = app.emit(
+            "color-backfill-progress",
+            ColorBackfillProgress {
+                processed,
+                total,
+                done: true,
+            },
+        );
+    });
 }
 
 /// Returns `Ok(true)` if a batch was claimed and processed, `Ok(false)` if

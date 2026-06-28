@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ImageRecord, parseSearchValue, tileSizeForZoom, useGalleryStore } from "../store";
 import { BulkActionBar } from "./BulkActionBar";
+import { Tooltip } from "./Tooltip";
 
 const GAP = 6;
 
@@ -125,6 +126,7 @@ export function ImageTile({
   const src = image.thumbnail_path ? convertFileSrc(image.thumbnail_path) : null;
 
   return (
+    <Tooltip label={image.filename} delay={500} block followCursor>
     <button
       className={`media-dark-surface group relative overflow-hidden rounded-xl bg-white/[0.04] text-left focus:outline-none transition-shadow ${
         selected ? "ring-2 ring-inset ring-blue-400/80" : ""
@@ -141,7 +143,6 @@ export function ImageTile({
         onClick();
       }}
       onContextMenu={onContextMenu}
-      title={image.filename}
     >
       {/* Selection corner — a top-left zone that reveals the checkbox only when
           hovered (not the whole tile) and toggles selection on click. The
@@ -281,6 +282,7 @@ export function ImageTile({
         </div>
       </div>
     </button>
+    </Tooltip>
   );
 }
 

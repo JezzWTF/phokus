@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { tileSizeForZoom, useGalleryStore, SortOrder, MediaFilter, SearchCommand, parseSearchValue, searchModeLabel, ExploreTagEntry } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
+import { ColorFilter } from "./ColorFilter";
 
 const BASE_SORT_OPTIONS: { value: SortOrder; label: string }[] = [
   { value: "date_desc", label: "Newest first" },
@@ -478,6 +479,7 @@ export function Toolbar() {
             onClick={() => setFailedTaggingOnly(!failedTaggingOnly)}
           />
         ) : null}
+        <ColorFilter />
         {isSimilarResults ? <span className="ml-2 text-[11px] text-gray-500">Current similar scope: {similarScope === "current_album" ? "this album" : similarScope === "current_folder" ? "current folder" : "all media"}</span> : null}
       </div>
     </div>

@@ -9,6 +9,9 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Color search** — filter the gallery (and Timeline) by dominant color via a
+  collapsible swatch palette plus a custom color picker in the toolbar; existing
+  libraries are backfilled automatically in the background.
 - **Albums** — curate your own collections. A new Albums section in the sidebar
   (with cover thumbnails, kept visually distinct from Libraries) lets you create,
   rename, and open albums; albums can span multiple folders. Add images from the
