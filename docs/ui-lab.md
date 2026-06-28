@@ -79,14 +79,17 @@ src/dev/mockScenarios.ts
 src/dev/applyMockScenario.ts
 ```
 
-Happy-path fixture media is imported from the existing onboarding assets in:
+Happy-path fixture media is generated from existing onboarding images and
+website screenshots into:
 
 ```text
-src/assets/onboarding/
+public/dev-media/fixture-*.webp
 ```
 
-Synthetic or deliberately broken fixture paths can still use the `mock://`
-scheme described below.
+The pack is deliberately small and deterministic, but varied enough for browser
+screenshots: square, portrait, landscape, monochrome, tinted, framed, and
+interface-like crops. Synthetic or deliberately broken fixture paths can still
+use the `mock://` scheme described below.
 
 ## Mock Media
 
@@ -100,9 +103,8 @@ const src = mediaSrc(image.thumbnail_path);
 ```
 
 In normal Tauri modes, `mediaSrc` delegates to `convertFileSrc`. In UI Lab,
-already-resolved Vite asset URLs are returned as-is, so fixtures can reuse
-existing imported assets. Paths beginning with `mock://` are served from
-`public/dev-media`:
+root-relative asset URLs such as `/dev-media/fixture-01.webp` are returned
+as-is. Paths beginning with `mock://` are also served from `public/dev-media`:
 
 ```text
 mock://thumb-1.svg -> /dev-media/thumb-1.svg

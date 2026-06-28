@@ -12,21 +12,7 @@ import type {
   TagCloudEntry,
 } from "../store";
 import type { MockScenario } from "./mockScenarios";
-import alpineLake from "../assets/onboarding/alpinelake.webp";
-import architecture from "../assets/onboarding/architecture.webp";
-import balloon from "../assets/onboarding/balloon.webp";
-import beach from "../assets/onboarding/beach.webp";
-import cat from "../assets/onboarding/cat.webp";
-import cityNight from "../assets/onboarding/citynight.webp";
-import cozy from "../assets/onboarding/cozy.webp";
-import dunes from "../assets/onboarding/dunes.webp";
-import flower from "../assets/onboarding/flower.webp";
-import forest from "../assets/onboarding/forest.webp";
-import landscape1 from "../assets/onboarding/landscape1.webp";
-import landscape2 from "../assets/onboarding/landscape2.webp";
-import sunset from "../assets/onboarding/sunset.webp";
-import sunsetCoast from "../assets/onboarding/sunsetcoast.webp";
-import sunsetLake from "../assets/onboarding/sunsetlake.webp";
+import { fixtureMediaPath } from "./mockMedia";
 
 export interface MockDb {
   scenario: MockScenario;
@@ -72,23 +58,6 @@ const tags = [
   "select",
 ];
 const aiRatings: AiRating[] = ["general", "sensitive", "questionable"];
-const fixtureAssets = [
-  alpineLake,
-  architecture,
-  balloon,
-  beach,
-  cat,
-  cityNight,
-  cozy,
-  dunes,
-  flower,
-  forest,
-  landscape1,
-  landscape2,
-  sunset,
-  sunsetCoast,
-  sunsetLake,
-];
 
 function daysAgo(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString();
@@ -99,7 +68,7 @@ function mockPath(folder: number, name: string, index: number, ext: string): str
 }
 
 function mockThumb(index: number): string {
-  return fixtureAssets[index % fixtureAssets.length];
+  return fixtureMediaPath(index);
 }
 
 function makeImage(index: number, folderId: number, scenario: MockScenario): ImageRecord {
