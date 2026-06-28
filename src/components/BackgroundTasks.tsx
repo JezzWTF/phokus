@@ -21,6 +21,7 @@ interface Task {
   id: number;
   name: string;
   stages: TaskStage[];
+  isActive: boolean;
   hasFailedEmbeddings: boolean;
   hasFailedTagging: boolean;
   hasFailedCaptions: boolean;
@@ -156,6 +157,18 @@ export function BackgroundTasks() {
         const captionReady = jobs?.caption_ready ?? 0;
         const captionFailed = jobs?.caption_failed ?? 0;
 
+        // A folder is "actively processing" when something is genuinely moving:
+        // an in-progress scan, or pending work on a worker that isn't paused.
+        // Captions have no per-folder pause toggle, so any caption work counts.
+        const paused = workerPaused[folder.id];
+        const isActive =
+          (!!index && !index.done) ||
+          (thumbnailPending > 0 && !(paused?.thumbnail ?? false)) ||
+          (metadataPending > 0 && !(paused?.metadata ?? false)) ||
+          (embeddingPending > 0 && !(paused?.embedding ?? false)) ||
+          (taggingPending > 0 && !(paused?.tagging ?? false)) ||
+          captionPending > 0;
+
         const pendingMediaWork = thumbnailPending + metadataPending + embeddingPending + taggingPending + captionPending;
         const embeddingProcessed = embeddingReady + embeddingFailed;
         const embeddingTotal = embeddingProcessed + embeddingPending;
@@ -262,6 +275,7 @@ export function BackgroundTasks() {
           id: folder.id,
           name: folder.name,
           stages,
+          isActive,
           hasFailedEmbeddings,
           hasFailedTagging,
           hasFailedCaptions,
@@ -273,8 +287,12 @@ export function BackgroundTasks() {
         };
       })
       .filter((t): t is Task => t !== null)
-      .filter((t) => dismissed[t.id] !== t.snapshot);
-  }, [folders, indexingProgress, mediaJobProgress, dismissed]);
+      .filter((t) => dismissed[t.id] !== t.snapshot)
+      // Surface actively-processing folders first so a paused folder never holds
+      // the primary (collapsed) slot while another is genuinely working. Array
+      // sort is stable, so folders within each group keep their existing order.
+      .sort((a, b) => Number(b.isActive) - Number(a.isActive));
+  }, [folders, indexingProgress, mediaJobProgress, workerPaused, dismissed]);
 
   // Synthetic task for duplicate scanning — negative id so dismiss/retry are suppressed
   const duplicateScanTask: Task | null = duplicateScanning ? {
@@ -294,6 +312,7 @@ export function BackgroundTasks() {
         : null,
       failed: false,
     }],
+    isActive: true,
     hasFailedEmbeddings: false,
     hasFailedTagging: false,
     hasFailedCaptions: false,
