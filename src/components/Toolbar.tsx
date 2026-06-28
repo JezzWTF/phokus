@@ -111,7 +111,7 @@ function FilterPill({
       : "bg-white/10 text-white light-theme:bg-gray-900 light-theme:text-white";
   return (
     <button
-      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-150 ${
+      className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-150 ${
         active
           ? activeClass
           : "text-gray-500 hover:text-gray-200 hover:bg-white/5 light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
@@ -268,10 +268,10 @@ export function Toolbar() {
   return (
     <div className="relative z-20 shrink-0 border-b border-white/[0.06] bg-gray-950/80 backdrop-blur-xl">
       {/* Primary row */}
-      <div className="flex items-center gap-3 px-5 h-12">
+      <div className="flex items-center gap-2 px-3 h-12 lg:gap-3 lg:px-5">
         {/* Title + count */}
         <div className="flex items-baseline gap-2.5 min-w-0 shrink-0">
-          <h2 className="text-[15px] font-semibold text-white truncate max-w-48">{title}</h2>
+          <h2 className="text-[15px] font-semibold text-white truncate max-w-32 lg:max-w-48">{title}</h2>
           <span className="text-xs text-gray-600 shrink-0">
             {loadedCount < totalImages
               ? `${loadedCount.toLocaleString()} / ${totalImages.toLocaleString()}`
@@ -322,7 +322,7 @@ export function Toolbar() {
                 }}
                 onFocus={() => setSearchPanelOpen(true)}
                 placeholder="Search files, or use /s /t"
-                className={`w-64 bg-transparent py-1.5 pr-9 text-sm text-white placeholder:text-gray-600 focus:outline-none transition-colors ${searchCommand !== null ? "pl-16" : "pl-8"}`}
+                className={`w-40 bg-transparent py-1.5 pr-9 text-sm text-white placeholder:text-gray-600 focus:outline-none transition-colors lg:w-52 xl:w-64 ${searchCommand !== null ? "pl-16" : "pl-8"}`}
               />
               {searchCommand !== null ? (
                 <div className="absolute left-8 top-1/2 -translate-y-1/2">
@@ -452,8 +452,10 @@ export function Toolbar() {
         </div>
       </div>
 
-      {/* Filter row */}
+      {/* Filter row — pills scroll horizontally on narrow widths so they never
+          squash or stack; the color filter stays pinned to the right. */}
       <div className="flex items-center gap-1 px-4 pb-1.5">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <FilterPill label="All" active={mediaFilter === "all" && !favoritesOnly && !failedEmbeddingsOnly && !failedTaggingOnly && minimumRating === 0 && colorFilter === null} onClick={() => { setMediaFilter("all"); setFavoritesOnly(false); setMinimumRating(0); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); setColorFilter(null); }} />
         <FilterPill label="Images" active={mediaFilter === "image" && !favoritesOnly && !failedEmbeddingsOnly && !failedTaggingOnly} onClick={() => { setMediaFilter("image"); setFavoritesOnly(false); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); }} />
         <FilterPill label="Videos" active={mediaFilter === "video" && !favoritesOnly && !failedEmbeddingsOnly && !failedTaggingOnly} onClick={() => { setMediaFilter("video"); setFavoritesOnly(false); setFailedEmbeddingsOnly(false); setFailedTaggingOnly(false); }} />
@@ -481,8 +483,9 @@ export function Toolbar() {
             onClick={() => setFailedTaggingOnly(!failedTaggingOnly)}
           />
         ) : null}
+        {isSimilarResults ? <span className="ml-2 shrink-0 whitespace-nowrap text-[11px] text-gray-500">Current similar scope: {similarScope === "current_album" ? "this album" : similarScope === "current_folder" ? "current folder" : "all media"}</span> : null}
+        </div>
         <ColorFilter />
-        {isSimilarResults ? <span className="ml-2 text-[11px] text-gray-500">Current similar scope: {similarScope === "current_album" ? "this album" : similarScope === "current_folder" ? "current folder" : "all media"}</span> : null}
       </div>
     </div>
   );

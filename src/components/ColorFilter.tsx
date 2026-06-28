@@ -56,7 +56,7 @@ export function ColorFilter() {
   }, [open]);
 
   return (
-    <div ref={ref} className="ml-1 flex items-center border-l border-white/[0.06] pl-2">
+    <div ref={ref} className="relative ml-1 flex shrink-0 items-center border-l border-white/[0.06] pl-2">
       {/* Trigger — a single palette icon; shows the active color as a dot when a
           filter is applied so the collapsed state still communicates it. */}
       <Tooltip label={isActive ? "Color filter active" : "Filter by color"} delay={400}>
@@ -85,70 +85,74 @@ export function ColorFilter() {
 
       <AnimatePresence initial={false}>
         {open ? (
+          // Right-aligned popover so it never widens the toolbar row or gets
+          // pushed off-screen on narrow windows. Swatches wrap into a compact
+          // grid instead of a single long horizontal strip.
           <motion.div
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: "auto", opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            // Horizontal/vertical padding gives the active swatch's ring + scale
-            // room inside the overflow-hidden clip box (needed for the width slide).
-            // py-1 keeps the panel shorter than the always-present filter pills so
-            // opening it never changes the row height (no 1px toolbar shift).
-            className="flex items-center gap-1 overflow-hidden whitespace-nowrap px-1.5 py-1"
+            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+            transition={{ duration: 0.14, ease: "easeOut" }}
+            className="absolute right-0 top-full z-30 mt-2 w-max rounded-xl border border-white/10 bg-gray-950/98 p-2.5 shadow-2xl backdrop-blur light-theme:border-gray-700/50"
           >
-            {SWATCHES.map((swatch) => {
-              const active = rgbEquals(colorFilter, swatch.rgb);
-              return (
-                <button
-                  key={swatch.name}
-                  title={swatch.name}
-                  aria-label={`Filter by ${swatch.name}`}
-                  className={`h-4 w-4 shrink-0 rounded-full border transition-transform ${
-                    active ? "scale-110 border-white/40 ring-2 ring-white/70" : "border-white/15 hover:scale-110"
-                  }`}
-                  style={{ backgroundColor: toHex(swatch.rgb) }}
-                  onClick={() => setColorFilter(active ? null : swatch.rgb)}
+            <div className="grid grid-cols-7 gap-1.5">
+              {SWATCHES.map((swatch) => {
+                const active = rgbEquals(colorFilter, swatch.rgb);
+                return (
+                  <button
+                    key={swatch.name}
+                    title={swatch.name}
+                    aria-label={`Filter by ${swatch.name}`}
+                    className={`h-5 w-5 shrink-0 rounded-full border transition-transform ${
+                      active ? "scale-110 border-white/40 ring-2 ring-white/70" : "border-white/15 hover:scale-110"
+                    }`}
+                    style={{ backgroundColor: toHex(swatch.rgb) }}
+                    onClick={() => setColorFilter(active ? null : swatch.rgb)}
+                  />
+                );
+              })}
+
+              {/* Custom color picker — rainbow until a custom color is chosen. */}
+              <label
+                title="Custom color"
+                className={`relative h-5 w-5 shrink-0 cursor-pointer overflow-hidden rounded-full border ${
+                  isCustom ? "border-white/40 ring-2 ring-white/70" : "border-white/15 hover:scale-110"
+                }`}
+                style={
+                  isCustom
+                    ? { backgroundColor: toHex(colorFilter as Rgb) }
+                    : { background: "conic-gradient(red, orange, yellow, lime, cyan, blue, magenta, red)" }
+                }
+              >
+                <input
+                  type="color"
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                  value={colorFilter ? toHex(colorFilter) : "#3b7dd8"}
+                  onChange={(event) => setColorFilter(fromHex(event.target.value))}
                 />
-              );
-            })}
+              </label>
+            </div>
 
-            {/* Custom color picker — rainbow until a custom color is chosen. */}
-            <label
-              title="Custom color"
-              className={`relative h-4 w-4 shrink-0 cursor-pointer overflow-hidden rounded-full border ${
-                isCustom ? "border-white/40 ring-2 ring-white/70" : "border-white/15 hover:scale-110"
-              }`}
-              style={
-                isCustom
-                  ? { backgroundColor: toHex(colorFilter as Rgb) }
-                  : { background: "conic-gradient(red, orange, yellow, lime, cyan, blue, magenta, red)" }
-              }
-            >
-              <input
-                type="color"
-                className="absolute inset-0 cursor-pointer opacity-0"
-                value={colorFilter ? toHex(colorFilter) : "#3b7dd8"}
-                onChange={(event) => setColorFilter(fromHex(event.target.value))}
-              />
-            </label>
-
-            {isActive ? (
-              <button
-                className="ml-0.5 shrink-0 rounded px-1 text-[11px] text-gray-500 transition-colors hover:text-gray-200"
-                onClick={() => setColorFilter(null)}
-                title="Clear color filter"
-              >
-                Clear
-              </button>
-            ) : null}
-
-            {colorBackfill && colorBackfill.total > 0 ? (
-              <span
-                className="ml-0.5 shrink-0 text-[10px] text-gray-600"
-                title="Sampling colors from existing thumbnails — color search fills in as this runs"
-              >
-                sampling {colorBackfill.processed.toLocaleString()}/{colorBackfill.total.toLocaleString()}
-              </span>
+            {isActive || (colorBackfill && colorBackfill.total > 0) ? (
+              <div className="mt-2 flex items-center justify-between gap-3 border-t border-white/[0.06] pt-2 light-theme:border-gray-700/40">
+                {colorBackfill && colorBackfill.total > 0 ? (
+                  <span
+                    className="text-[10px] text-gray-600"
+                    title="Sampling colors from existing thumbnails — color search fills in as this runs"
+                  >
+                    sampling {colorBackfill.processed.toLocaleString()}/{colorBackfill.total.toLocaleString()}
+                  </span>
+                ) : <span />}
+                {isActive ? (
+                  <button
+                    className="shrink-0 rounded px-1 text-[11px] text-gray-500 transition-colors hover:text-gray-200"
+                    onClick={() => setColorFilter(null)}
+                    title="Clear color filter"
+                  >
+                    Clear
+                  </button>
+                ) : null}
+              </div>
             ) : null}
           </motion.div>
         ) : null}

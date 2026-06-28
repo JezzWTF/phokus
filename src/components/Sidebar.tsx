@@ -829,7 +829,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="w-60 shrink-0 flex flex-col bg-gray-950 border-r border-white/[0.06]">
+    <aside className="w-52 shrink-0 flex flex-col bg-gray-950 border-r border-white/[0.06] lg:w-60">
       {/* Header */}
       <div className="flex items-center justify-between px-4 h-12 border-b border-white/[0.06] shrink-0">
         <span className="text-[13px] font-semibold text-white/80 tracking-wide">Phokus</span>

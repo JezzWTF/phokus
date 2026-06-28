@@ -517,7 +517,7 @@ export function Lightbox() {
                 </AnimatePresence>
               </div>
 
-              <div className="lightbox-panel flex w-72 shrink-0 flex-col border-l border-white/5 bg-gray-900/95">
+              <div className="lightbox-panel flex w-64 shrink-0 flex-col border-l border-white/5 bg-gray-900/95 lg:w-72">
                 <div className="flex shrink-0 items-center justify-between px-5 pt-5 pb-4">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-white">{selectedImage.filename}</p>
@@ -534,7 +534,7 @@ export function Lightbox() {
                       </svg>
                     </button>
                     <button
-                      className={`rounded-full border px-3 py-1.5 text-xs ${
+                      className={`flex items-center gap-1.5 rounded-full border px-2 py-1.5 text-xs lg:px-3 ${
                         canFindSimilar
                           ? "border-white/10 bg-white/5 text-gray-300 hover:text-white"
                           : "border-white/5 bg-white/[0.03] text-gray-600 cursor-not-allowed"
@@ -544,8 +544,15 @@ export function Lightbox() {
                         void findSimilar(selectedImage.id, selectedImage.folder_id);
                       }}
                       disabled={!canFindSimilar}
+                      title={canFindSimilar ? "Find similar images" : "Embeddings not ready"}
                     >
-                      {canFindSimilar ? "Similar" : "Embeddings not ready"}
+                      <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6}
+                          d="M13 3l1.55 4.65L19 9.2l-4.45 1.55L13 15.4l-1.55-4.65L7 9.2l4.45-1.55L13 3z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6}
+                          d="M5.5 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2L2.5 17.5l2.2-.8.8-2.2z" />
+                      </svg>
+                      <span className="hidden lg:inline">{canFindSimilar ? "Similar" : "Embeddings not ready"}</span>
                     </button>
                   </div>
                   <button className="rounded p-1 text-gray-400 hover:text-white" onClick={closeImage}>
@@ -949,7 +956,7 @@ export function Lightbox() {
           </div>
 
           <button
-            className="absolute right-80 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white transition-colors hover:bg-white/20 disabled:opacity-20"
+            className="absolute right-72 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white transition-colors hover:bg-white/20 disabled:opacity-20 lg:right-80"
             disabled={currentIndex >= images.length - 1 || regionSelectMode}
             onClick={(event) => {
               event.stopPropagation();
