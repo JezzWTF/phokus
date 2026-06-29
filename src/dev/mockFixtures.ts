@@ -57,6 +57,68 @@ const tags = [
   "blue hour",
   "select",
 ];
+
+const hugeTagThemes = [
+  "alpine",
+  "archive",
+  "botanical",
+  "cinematic",
+  "coastal",
+  "editorial",
+  "industrial",
+  "interior",
+  "macro",
+  "night",
+  "portrait",
+  "street",
+  "travel",
+  "urban",
+  "wildlife",
+  "workspace",
+];
+
+const hugeTagSubjects = [
+  "glass",
+  "steel",
+  "water",
+  "stone",
+  "mist",
+  "foliage",
+  "market",
+  "signage",
+  "neon",
+  "shadow",
+  "reflection",
+  "texture",
+  "silhouette",
+  "motion",
+  "symmetry",
+  "detail",
+  "warm light",
+  "blue hour",
+  "gold accent",
+  "soft focus",
+  "hard light",
+  "negative space",
+  "foreground",
+  "background",
+  "wide angle",
+  "close crop",
+  "environment",
+  "still life",
+  "natural light",
+  "available light",
+];
+
+const hugeTags = [
+  ...tags,
+  ...Array.from({ length: hugeTagThemes.length * hugeTagSubjects.length }, (_, index) => {
+    const theme = hugeTagThemes[index % hugeTagThemes.length];
+    const subject = hugeTagSubjects[Math.floor(index / hugeTagThemes.length) % hugeTagSubjects.length];
+    return `${theme} ${subject}`;
+  }),
+  ...Array.from({ length: 320 }, (_, index) => `fixture concept ${String(index + 1).padStart(3, "0")}`),
+];
 const aiRatings: AiRating[] = ["general", "sensitive", "questionable"];
 
 function daysAgo(days: number): string {
@@ -136,17 +198,23 @@ function makeImages(scenario: MockScenario, folders: Folder[]): ImageRecord[] {
   return images;
 }
 
-function makeTags(images: ImageRecord[]): Record<number, ImageTag[]> {
+function tagVocabularyForScenario(scenario: MockScenario): string[] {
+  return scenario === "huge" ? hugeTags : tags;
+}
+
+function makeTags(images: ImageRecord[], scenario: MockScenario): Record<number, ImageTag[]> {
+  const vocabulary = tagVocabularyForScenario(scenario);
+  const tagCount = scenario === "huge" ? 9 : 3;
   return Object.fromEntries(
     images.map((image, index) => [
       image.id,
-      [0, 1, 2].map((offset) => ({
+      Array.from({ length: tagCount }, (_, offset) => ({
         id: image.id * 10 + offset,
         image_id: image.id,
-        tag: tags[(index + offset) % tags.length],
+        tag: vocabulary[(index * (offset + 3) + offset * 29) % vocabulary.length],
         source: offset === 0 ? "user" : "ai",
         ai_model: offset === 0 ? null : "wd-vit-tagger-v3",
-        confidence: offset === 0 ? null : 0.72 + offset * 0.07,
+        confidence: offset === 0 ? null : Math.min(0.99, 0.72 + offset * 0.03),
         created_at: daysAgo(index + offset),
       })),
     ]),
@@ -197,16 +265,18 @@ function makeTagCloud(images: ImageRecord[]): TagCloudEntry[] {
   });
 }
 
-function makeExploreTags(images: ImageRecord[]): ExploreTagEntry[] {
-  return tags.map((tag, index) => {
+function makeExploreTags(images: ImageRecord[], scenario: MockScenario): ExploreTagEntry[] {
+  const vocabulary = tagVocabularyForScenario(scenario);
+  return vocabulary.map((tag, index) => {
     const representative = images[index % Math.max(images.length, 1)];
+    const divisor = scenario === "huge" ? 2 + Math.pow(index + 1, 0.58) : index + 3;
     return {
       tag,
-      count: Math.max(3, Math.round(images.length / (index + 3))),
+      count: Math.max(1, Math.round(images.length / divisor)),
       representative_image_id: representative?.id ?? index + 1,
       thumbnail_path: representative?.thumbnail_path ?? null,
     };
-  });
+  }).sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag));
 }
 
 function makeDuplicateGroups(images: ImageRecord[], scenario: MockScenario): DuplicateGroup[] {
@@ -234,9 +304,9 @@ export function createMockDb(scenario: MockScenario): MockDb {
     images,
     albums,
     albumImageIds,
-    tagsByImageId: makeTags(images),
+    tagsByImageId: makeTags(images, scenario),
     tagCloud: makeTagCloud(images),
-    exploreTags: makeExploreTags(images),
+    exploreTags: makeExploreTags(images, scenario),
     backgroundJobs: makeProgress(folders, scenario),
     duplicateGroups: makeDuplicateGroups(images, scenario),
     duplicateScannedAt: scenario === "duplicates" ? Math.floor(Date.now() / 1000) - 420 : null,

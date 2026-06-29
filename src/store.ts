@@ -217,6 +217,11 @@ export interface ExploreTagEntry {
   thumbnail_path: string | null;
 }
 
+export interface RelatedTagEntry {
+  tag: string;
+  shared_count: number;
+}
+
 export interface DuplicateGroup {
   file_hash: string;
   file_size: number;
@@ -376,6 +381,7 @@ interface GalleryState {
   exploreTagEntries: ExploreTagEntry[];
   exploreTagLoading: boolean;
   exploreTagsFolderId: number | null | undefined;
+  relatedTagsByKey: Record<string, RelatedTagEntry[]>;
   indexingProgress: Record<number, IndexProgress>;
   mediaJobProgress: Record<number, FolderJobProgress>;
   cacheDir: string;
@@ -480,8 +486,9 @@ interface GalleryState {
   closeImage: () => void;
   setView: (view: ActiveView) => void;
   setExploreMode: (mode: ExploreMode) => void;
-  loadTagCloud: () => Promise<void>;
-  loadExploreTags: () => Promise<void>;
+  loadTagCloud: (options?: { force?: boolean }) => Promise<void>;
+  loadExploreTags: (options?: { force?: boolean }) => Promise<void>;
+  loadRelatedTags: (tag: string) => Promise<RelatedTagEntry[]>;
   showVisualCluster: (imageIds: number[]) => Promise<void>;
   searchForTag: (tag: string) => void;
   loadSimilarImages: (imageId: number, folderId?: number | null, reset?: boolean, sourceFolderId?: number | null, albumId?: number | null) => Promise<void>;
@@ -615,6 +622,7 @@ const SIMILAR_DISTANCE_THRESHOLD = 0.24;
 let galleryRequestToken = 0;
 let tagCloudRequestToken = 0;
 let exploreTagRequestToken = 0;
+let exploreTagRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 function initialAiCaptionsEnabled(): boolean {
   if (typeof window === "undefined") return false;
@@ -862,6 +870,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   exploreTagEntries: [],
   exploreTagLoading: false,
   exploreTagsFolderId: undefined,
+  relatedTagsByKey: {},
   indexingProgress: {},
   mediaJobProgress: {},
   cacheDir: "",
@@ -1388,10 +1397,11 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   setExploreMode: (exploreMode) => set({ exploreMode }),
 
-  loadTagCloud: async () => {
+  loadTagCloud: async (options) => {
     const { selectedFolderId, tagCloudFolderId, tagCloudLoading } = get();
+    const force = options?.force ?? false;
     // Skip if already loaded for this folder and not currently loading
-    if (!tagCloudLoading && tagCloudFolderId !== undefined && tagCloudFolderId === selectedFolderId) {
+    if (!force && !tagCloudLoading && tagCloudFolderId !== undefined && tagCloudFolderId === selectedFolderId) {
       return;
     }
     const requestToken = ++tagCloudRequestToken;
@@ -1409,19 +1419,20 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     }
   },
 
-  loadExploreTags: async () => {
+  loadExploreTags: async (options) => {
     const { selectedFolderId, exploreTagsFolderId, exploreTagLoading } = get();
-    if (!exploreTagLoading && exploreTagsFolderId !== undefined && exploreTagsFolderId === selectedFolderId) {
+    const force = options?.force ?? false;
+    if (!force && !exploreTagLoading && exploreTagsFolderId !== undefined && exploreTagsFolderId === selectedFolderId) {
       return;
     }
     const requestToken = ++exploreTagRequestToken;
     set({ exploreTagLoading: true, exploreTagsFolderId: selectedFolderId });
     try {
       const entries = await invoke<ExploreTagEntry[]>("get_explore_tags", {
-        params: { folder_id: selectedFolderId, limit: 48 },
+        params: { folder_id: selectedFolderId, limit: 180 },
       });
       if (requestToken !== exploreTagRequestToken) return;
-      set({ exploreTagEntries: entries, exploreTagLoading: false });
+      set({ exploreTagEntries: entries, exploreTagLoading: false, relatedTagsByKey: {} });
     } catch (error) {
       if (requestToken !== exploreTagRequestToken) return;
       console.error("Failed to load explore tags:", error);
@@ -1886,6 +1897,28 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   setNotificationsPaused: (paused) => {
     set({ notificationsPaused: paused });
     void invoke("set_notifications_paused", { paused }).catch(() => {});
+  },
+
+  loadRelatedTags: async (tag) => {
+    const trimmed = tag.trim();
+    if (!trimmed) return [];
+
+    const { selectedFolderId, relatedTagsByKey } = get();
+    const key = `${selectedFolderId ?? "all"}:${trimmed}`;
+    if (relatedTagsByKey[key]) {
+      return relatedTagsByKey[key];
+    }
+
+    const entries = await invoke<RelatedTagEntry[]>("get_related_tags", {
+      params: { tag: trimmed, folder_id: selectedFolderId, limit: 18 },
+    });
+    set((state) => ({
+      relatedTagsByKey: {
+        ...state.relatedTagsByKey,
+        [key]: entries,
+      },
+    }));
+    return entries;
   },
 
   setTheme: (theme) => {
@@ -2887,6 +2920,18 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
     const unlistenThumbnails = await listen<ThumbnailBatch>("media-updated", (event) => {
       const batch = event.payload;
+      const taggingUpdated = batch.images.some((image) => image.ai_tagged_at !== null || image.ai_tagger_error !== null);
+      if (taggingUpdated) {
+        set({ exploreTagsFolderId: undefined });
+        if (get().activeView === "explore") {
+          if (!exploreTagRefreshTimer) {
+            exploreTagRefreshTimer = setTimeout(() => {
+              exploreTagRefreshTimer = null;
+              void get().loadExploreTags({ force: true });
+            }, 700);
+          }
+        }
+      }
 
       set((state) => {
         const selectedImageUpdate =

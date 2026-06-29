@@ -2436,6 +2436,34 @@ pub fn get_explore_tags(
     Ok(rows)
 }
 
+pub fn get_related_tags(
+    conn: &Connection,
+    tag: &str,
+    folder_id: Option<i64>,
+    limit: usize,
+) -> Result<Vec<(String, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT other.tag, COUNT(DISTINCT other.image_id) AS shared_count
+         FROM image_tags base
+         JOIN image_tags other ON other.image_id = base.image_id
+         JOIN images i ON i.id = base.image_id
+         WHERE base.tag = ?1
+           AND other.tag != base.tag
+           AND (?2 IS NULL OR i.folder_id = ?2)
+         GROUP BY other.tag
+         ORDER BY shared_count DESC, other.tag ASC
+         LIMIT ?3",
+    )?;
+
+    let rows = stmt
+        .query_map(params![tag, folder_id, limit as i64], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok(rows)
+}
+
 type FailedEmbeddingRow = (i64, String, String, Option<String>);
 
 pub fn get_failed_embedding_images(

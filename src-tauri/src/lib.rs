@@ -197,6 +197,7 @@ pub fn run() {
             commands::get_worker_states,
             commands::get_tag_cloud,
             commands::get_explore_tags,
+            commands::get_related_tags,
             commands::get_images_by_ids,
             commands::get_failed_embedding_images,
             commands::get_failed_tagging_images,

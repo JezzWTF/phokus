@@ -181,6 +181,19 @@ pub struct GetExploreTagsParams {
 }
 
 #[derive(Deserialize)]
+pub struct GetRelatedTagsParams {
+    pub tag: String,
+    pub folder_id: Option<i64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct RelatedTagEntry {
+    pub tag: String,
+    pub shared_count: i64,
+}
+
+#[derive(Deserialize)]
 pub struct SearchTagsAutocompleteParams {
     pub query: String,
     pub folder_id: Option<i64>,
@@ -1277,7 +1290,28 @@ pub async fn get_explore_tags(
     params: GetExploreTagsParams,
 ) -> Result<Vec<ExploreTagEntry>, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
-    db::get_explore_tags(&conn, params.folder_id, params.limit.unwrap_or(48))
+    db::get_explore_tags(&conn, params.folder_id, params.limit.unwrap_or(180))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_related_tags(
+    db: State<'_, DbState>,
+    params: GetRelatedTagsParams,
+) -> Result<Vec<RelatedTagEntry>, String> {
+    let tag = params.tag.trim();
+    if tag.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::get_related_tags(&conn, tag, params.folder_id, params.limit.unwrap_or(16))
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|(tag, shared_count)| RelatedTagEntry { tag, shared_count })
+                .collect()
+        })
         .map_err(|e| e.to_string())
 }
 

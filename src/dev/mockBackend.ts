@@ -241,7 +241,21 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
     case "get_tag_cloud":
       return db.scenario === "empty" ? [] : db.tagCloud;
     case "get_explore_tags":
-      return db.scenario === "empty" ? [] : db.exploreTags.slice(0, Number(p.limit ?? 48));
+      return db.scenario === "empty" ? [] : db.exploreTags.slice(0, Number(p.limit ?? 180));
+    case "get_related_tags": {
+      const relatedCounts = new Map<string, number>();
+      for (const imageTags of Object.values(db.tagsByImageId)) {
+        if (!imageTags.some((tag) => tag.tag === p.tag)) continue;
+        for (const tag of imageTags) {
+          if (tag.tag === p.tag) continue;
+          relatedCounts.set(tag.tag, (relatedCounts.get(tag.tag) ?? 0) + 1);
+        }
+      }
+      return Array.from(relatedCounts.entries())
+        .map(([tag, shared_count]) => ({ tag, shared_count }))
+        .sort((left, right) => right.shared_count - left.shared_count || left.tag.localeCompare(right.tag))
+        .slice(0, Number(p.limit ?? 18));
+    }
     case "suggest_image_tags":
       return ["select", "warm light"];
     case "rename_tag":
