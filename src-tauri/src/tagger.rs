@@ -987,15 +987,13 @@ fn create_tagger_session(path: &Path, acceleration: TaggerAcceleration) -> Resul
 
     let mut builder = match acceleration {
         TaggerAcceleration::Cpu => {
-            log::info!(
-                "WD tagger: using CPU execution provider ({intra_threads} intra-op threads)"
-            );
+            log::info!("Tagger: using CPU execution provider ({intra_threads} intra-op threads)");
             builder
         }
         TaggerAcceleration::Auto => builder
             .with_execution_providers([ep::DirectML::default().build().fail_silently()])
             .unwrap_or_else(|error| {
-                log::info!("WD tagger: DirectML unavailable, falling back to CPU");
+                log::info!("Tagger: DirectML unavailable, falling back to CPU");
                 error.recover()
             }),
         TaggerAcceleration::Directml => builder

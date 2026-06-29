@@ -344,6 +344,9 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
       return 12;
     case "get_tagger_model_status":
       return { model_id: "SmilingWolf/wd-vit-tagger-v3", model_name: "WD ViT Tagger", local_dir: "mock://models/tagger", ready: true, missing_files: [] };
+    case "get_tagger_model":
+    case "set_tagger_model":
+      return p.model ?? "wd";
     case "get_tagger_acceleration":
     case "set_tagger_acceleration":
       return p.acceleration ?? "auto";

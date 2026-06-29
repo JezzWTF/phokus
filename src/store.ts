@@ -2166,7 +2166,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   loadTaggerModel: async () => {
     try {
       const taggerModel = await invoke<TaggerModel>("get_tagger_model");
-      set({ taggerModel });
+      // Never clobber the valid default with a missing/blank backend response.
+      if (taggerModel) set({ taggerModel });
     } catch (error) {
       set({ taggerModelError: String(error) });
     }

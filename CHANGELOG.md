@@ -42,6 +42,12 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   changes grouped into collapsible Added / Changed / Fixed sections.
 - **Build badge in Settings** — the version line in Settings → Updates now shows
   whether the running build is the CPU or CUDA (GPU-accelerated) variant.
+- **Choose your tagging model** — Settings → AI Workspace now lets you switch the
+  AI tagger between the WD tagger (anime-focused) and **JoyTag**, which also
+  handles photographic content and is stronger on NSFW concepts — a better fit
+  for real-photo libraries. Each model downloads on demand, and tags are
+  attributed to the model that produced them. JoyTag has no built-in rating, so
+  its explicitness rating is derived from its tags.
 
 ### Changed
 
