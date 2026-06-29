@@ -1,5 +1,5 @@
 import { emit } from "@tauri-apps/api/event";
-import type { Album, Folder, ImageRecord, ImageTag, SortOrder } from "../store";
+import type { Album, ExploreTagEntry, Folder, ImageRecord, ImageTag, SortOrder } from "../store";
 import { compareImages, createMockDb, mockExif } from "./mockFixtures";
 import { getMockScenario } from "./mockScenarios";
 
@@ -58,10 +58,20 @@ function searchTags(payload: unknown) {
       .filter(([, tags]) => tags.some((tag) => tag.tag.toLowerCase().includes(query)))
       .map(([imageId]) => Number(imageId)),
   );
-  const images = filterImages(db.images, payload)
+  const images = filterImages(db.images, { params: { ...p, query: "", search: "" } })
     .filter((image) => matchingIds.has(image.id))
     .sort(compareImages((p.sort ?? "date_desc") as SortOrder));
   return page(images, Number(p.offset ?? 0), Number(p.limit ?? 200));
+}
+
+function searchTagsAutocomplete(payload: unknown): ExploreTagEntry[] {
+  const p = params(payload);
+  const query = String(p.query ?? "").trim().toLowerCase();
+  const limit = Number(p.limit ?? 10);
+  return db.exploreTags
+    .filter((entry) => !query || entry.tag.toLowerCase().includes(query))
+    .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag))
+    .slice(0, limit);
 }
 
 function semanticSearch(payload: unknown): ImageRecord[] {
@@ -233,6 +243,8 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
       return semanticSearch(payload);
     case "search_images_by_tag":
       return searchTags(payload);
+    case "search_tags_autocomplete":
+      return searchTagsAutocomplete(payload);
     case "get_images_by_ids":
       return (p.image_ids ?? []).map((id: number) => db.images.find((image) => image.id === id)).filter(Boolean);
     case "find_similar_images":

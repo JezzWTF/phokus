@@ -218,6 +218,107 @@ html[data-theme="subtle-light"] .explore-spinner {
   border-top-color: rgb(17 24 39 / 0.55) !important;
 }
 
+html[data-theme="subtle-light"] .tag-manager-header {
+  background: rgb(244 242 234 / 0.72) !important;
+  border-color: #d8d2c7 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-stat {
+  background: rgb(31 41 55 / 0.06) !important;
+  color: #5f5a52 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-match {
+  background: rgb(37 99 235 / 0.12) !important;
+  color: #1d4ed8 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-help,
+html[data-theme="subtle-light"] .tag-manager-empty {
+  color: #6f6a61 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-filter {
+  background: #fbfaf6 !important;
+  border-color: #cfc7b8 !important;
+  color: #111827 !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.64) !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-filter::placeholder {
+  color: #8a8378 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-filter:focus {
+  background: #fffdfa !important;
+  border-color: #7aa2e3 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-clear {
+  color: #6b645a !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-clear:hover {
+  background: rgb(31 41 55 / 0.08) !important;
+  color: #111827 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-tile {
+  background: rgb(251 250 246 / 0.5) !important;
+  border-color: rgb(151 141 126 / 0.22) !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-tile:hover,
+html[data-theme="subtle-light"] .tag-manager-tile:focus-within {
+  background: rgb(255 253 250 / 0.74) !important;
+  border-color: rgb(151 141 126 / 0.36) !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-name {
+  color: #1f2937 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-name:hover {
+  color: #111827 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-count {
+  background: rgb(31 41 55 / 0.07) !important;
+  color: #6b645a !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-edit-input {
+  background: #fffdfa !important;
+  color: #111827 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-secondary,
+html[data-theme="subtle-light"] .tag-manager-action {
+  background: rgb(255 253 250 / 0.92) !important;
+  border-color: rgb(31 41 55 / 0.12) !important;
+  color: #5f5a52 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-secondary:hover,
+html[data-theme="subtle-light"] .tag-manager-action:hover {
+  background: rgb(31 41 55 / 0.06) !important;
+  color: #111827 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-save {
+  color: #1d4ed8 !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-danger,
+html[data-theme="subtle-light"] .tag-manager-action-danger:hover {
+  color: #b91c1c !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-empty {
+  background: rgb(251 250 246 / 0.42) !important;
+  border-color: #d8d2c7 !important;
+}
+
 html[data-theme="subtle-light"] .feature-scope-trigger {
   background: #f8f6ef !important;
   border-color: #d0c8ba !important;

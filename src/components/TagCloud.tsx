@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ExploreMode, ExploreTagEntry, RelatedTagEntry, TagCloudEntry, useGalleryStore } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
+import { ThemedDropdown } from "./ThemedDropdown";
 import { Tooltip } from "./Tooltip";
 import { mediaSrc } from "../lib/mediaSrc";
 
@@ -666,9 +668,18 @@ function ClusterCloud({
   );
 }
 
-// A flat, manageable row for a single tag — rename (which doubles as merge when
-// the new name already exists) and delete across the whole library.
-function TagManageRow({
+type TagManageSort = "count_desc" | "count_asc" | "az" | "za";
+
+const TAG_MANAGE_SORTS: { value: TagManageSort; label: string }[] = [
+  { value: "count_desc", label: "Most used" },
+  { value: "count_asc", label: "Least used" },
+  { value: "az", label: "A-Z" },
+  { value: "za", label: "Z-A" },
+];
+
+// Compact management tile for a single tag. Rename doubles as merge when the new
+// name already exists, and delete applies across the scoped tag set.
+function TagManageTile({
   entry,
   onSearch,
   onRename,
@@ -708,12 +719,17 @@ function TagManageRow({
   };
 
   return (
-    <div className="group flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-white/[0.04]">
-      <div className="min-w-0 flex-1">
+    <div
+      data-tag-manager-tile
+      className={`tag-manager-tile group relative min-w-0 rounded-lg border border-white/[0.06] bg-white/[0.018] px-3 py-2 transition-[background-color,border-color,transform] duration-150 focus-within:border-white/[0.14] focus-within:bg-white/[0.045] hover:border-white/[0.12] hover:bg-white/[0.04] ${
+        editing || confirming ? "min-h-[82px]" : "min-h-[46px]"
+      }`}
+    >
+      <div className="flex min-w-0 items-start gap-2">
         {editing ? (
           <input
             ref={inputRef}
-            className="w-full rounded border border-white/10 bg-white/10 px-2 py-1 text-sm text-white outline-none ring-1 ring-blue-500/40"
+            className="tag-manager-edit-input min-w-0 flex-1 rounded-md border border-blue-400/35 bg-black/25 px-2 py-1 text-sm text-white outline-none ring-1 ring-blue-500/30"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
@@ -723,29 +739,31 @@ function TagManageRow({
             disabled={busy}
           />
         ) : (
-          <button
-            className="truncate text-left text-sm text-white/85 transition-colors hover:text-white"
-            onClick={() => onSearch(entry.tag)}
-            title="Search this tag"
-          >
-            {entry.tag}
-          </button>
+          <Tooltip label="Search this tag" delay={500} anchorToCursor className="min-w-0 flex-1">
+            <button
+              className="tag-manager-name block w-full truncate pr-36 text-left text-sm font-medium text-white/85 transition-colors hover:text-white"
+              onClick={() => onSearch(entry.tag)}
+            >
+              {entry.tag}
+            </button>
+          </Tooltip>
         )}
+        <span className="tag-manager-count absolute right-2.5 top-2 shrink-0 rounded-full bg-white/[0.055] px-2 py-0.5 text-[10px] tabular-nums text-white/38">
+          {entry.count.toLocaleString()}
+        </span>
       </div>
-      <span className="shrink-0 text-xs tabular-nums text-white/30">{entry.count.toLocaleString()}</span>
 
       {editing ? (
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="mt-2 flex items-center gap-1">
           <button
-            className="rounded-md bg-blue-500/20 px-2 py-1 text-[11px] text-blue-200 transition-colors hover:bg-blue-500/30 disabled:opacity-50"
+            className="tag-manager-save rounded-md bg-blue-500/20 px-2 py-1 text-[11px] text-blue-200 transition-colors hover:bg-blue-500/30 disabled:opacity-50"
             onClick={() => void commitRename()}
             disabled={busy || !value.trim()}
-            title="Rename (merges into the target if it already exists)"
           >
             Save
           </button>
           <button
-            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/50 transition-colors hover:bg-white/5 hover:text-white/80"
+            className="tag-manager-secondary rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/50 transition-colors hover:bg-white/5 hover:text-white/80"
             onClick={() => setEditing(false)}
             disabled={busy}
           >
@@ -753,16 +771,16 @@ function TagManageRow({
           </button>
         </div>
       ) : confirming ? (
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="mt-2 flex items-center gap-1">
           <button
-            className="rounded-md bg-red-500/20 px-2 py-1 text-[11px] text-red-300 transition-colors hover:bg-red-500/30 disabled:opacity-50"
+            className="tag-manager-danger rounded-md bg-red-500/20 px-2 py-1 text-[11px] text-red-300 transition-colors hover:bg-red-500/30 disabled:opacity-50"
             onClick={async () => { setBusy(true); try { await onDelete(entry.tag); setConfirming(false); } finally { setBusy(false); } }}
             disabled={busy}
           >
             Delete
           </button>
           <button
-            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/50 transition-colors hover:bg-white/5 hover:text-white/80"
+            className="tag-manager-secondary rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/50 transition-colors hover:bg-white/5 hover:text-white/80"
             onClick={() => setConfirming(false)}
             disabled={busy}
           >
@@ -770,16 +788,17 @@ function TagManageRow({
           </button>
         </div>
       ) : (
-        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+        <div className="pointer-events-none absolute right-12 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+          <Tooltip label="Rename or merge into another tag" delay={400} anchorToCursor>
+            <button
+              className="tag-manager-action rounded-md border border-white/10 bg-gray-950/80 px-2 py-1 text-[11px] text-white/60 transition-colors hover:bg-white/8 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80"
+              onClick={() => setEditing(true)}
+            >
+              Rename
+            </button>
+          </Tooltip>
           <button
-            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/60 transition-colors hover:bg-white/8 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80"
-            onClick={() => setEditing(true)}
-            title="Rename or merge into another tag"
-          >
-            Rename
-          </button>
-          <button
-            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/60 transition-colors hover:bg-red-500/10 hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/80"
+            className="tag-manager-action tag-manager-action-danger rounded-md border border-white/10 bg-gray-950/80 px-2 py-1 text-[11px] text-white/60 transition-colors hover:bg-red-500/10 hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/80"
             onClick={() => setConfirming(true)}
           >
             Delete
@@ -801,22 +820,149 @@ function TagManageList({
   onRename: (from: string, to: string) => Promise<void>;
   onDelete: (tag: string) => Promise<void>;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<TagManageSort>("count_desc");
+  const [columns, setColumns] = useState(3);
+
+  useLayoutEffect(() => {
+    const el = measureRef.current;
+    if (!el) return;
+    const update = () => {
+      const width = el.getBoundingClientRect().width;
+      setColumns(width >= 1160 ? 4 : width >= 780 ? 3 : width >= 520 ? 2 : 1);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const filteredEntries = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const filtered = needle
+      ? entries.filter((entry) => entry.tag.toLowerCase().includes(needle))
+      : entries;
+    return [...filtered].sort((left, right) => {
+      switch (sort) {
+        case "count_asc":
+          return left.count - right.count || left.tag.localeCompare(right.tag);
+        case "az":
+          return left.tag.localeCompare(right.tag);
+        case "za":
+          return right.tag.localeCompare(left.tag);
+        case "count_desc":
+        default:
+          return right.count - left.count || left.tag.localeCompare(right.tag);
+      }
+    });
+  }, [entries, query, sort]);
+
+  const rowCount = Math.ceil(filteredEntries.length / columns);
+  const rowVirtualizer = useVirtualizer({
+    count: rowCount,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 54,
+    overscan: 7,
+  });
+  const visibleItems = rowVirtualizer.getVirtualItems();
+  const totalUses = useMemo(() => entries.reduce((sum, entry) => sum + entry.count, 0), [entries]);
+
   return (
-    <div className="mx-auto w-full max-w-2xl overflow-y-auto px-6 py-6">
-      <p className="mb-3 px-3 text-[11px] leading-relaxed text-white/30">
-        Rename a tag to clean it up, or rename it to an existing tag's name to merge them. Delete
-        removes a tag from every image. These changes apply across your whole library.
-      </p>
-      <div className="divide-y divide-white/[0.05]">
-        {entries.map((entry) => (
-          <TagManageRow
-            key={entry.tag}
-            entry={entry}
-            onSearch={onSearch}
-            onRename={onRename}
-            onDelete={onDelete}
-          />
-        ))}
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="tag-manager-header shrink-0 border-b border-white/[0.05] bg-black/[0.08] px-6 py-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/32">
+              <span className="tag-manager-stat rounded-full bg-white/[0.045] px-2 py-1 tabular-nums">{entries.length.toLocaleString()} tags</span>
+              <span className="tag-manager-stat rounded-full bg-white/[0.045] px-2 py-1 tabular-nums">{totalUses.toLocaleString()} uses</span>
+              {query.trim() ? (
+                <span className="tag-manager-match rounded-full bg-blue-500/10 px-2 py-1 text-blue-200/70 tabular-nums">
+                  {filteredEntries.length.toLocaleString()} matches
+                </span>
+              ) : null}
+            </div>
+            <p className="tag-manager-help mt-2 max-w-2xl text-[11px] leading-relaxed text-white/28">
+              Rename tags to clean them up, rename into an existing tag to merge, or delete a tag everywhere in the current scope.
+            </p>
+          </div>
+
+          <div className="flex min-w-[320px] flex-1 flex-wrap justify-end gap-2">
+            <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+              <input
+                className="tag-manager-filter h-9 w-full rounded-lg border border-white/8 bg-black/20 px-3 pr-8 text-sm text-white/85 outline-none transition-colors placeholder:text-white/22 focus:border-blue-400/35 focus:bg-black/28"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Filter tags"
+              />
+              {query ? (
+                <span className="absolute right-2 top-2 z-10">
+                  <Tooltip label="Clear filter" delay={400} anchorToCursor>
+                    <button
+                      className="tag-manager-clear inline-flex h-5 w-5 items-center justify-center rounded-md text-white/35 transition-colors hover:bg-white/8 hover:text-white/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70"
+                      onClick={() => setQuery("")}
+                      aria-label="Clear tag filter"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 6l12 12M18 6L6 18" />
+                      </svg>
+                    </button>
+                  </Tooltip>
+                </span>
+              ) : null}
+            </div>
+            <ThemedDropdown
+              value={sort}
+              onChange={(value) => setSort(value as TagManageSort)}
+              options={TAG_MANAGE_SORTS}
+              ariaLabel="Sort managed tags"
+              align="right"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div ref={scrollRef} data-tag-manager-scroll className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <div ref={measureRef} className="mx-auto w-full max-w-7xl">
+          {filteredEntries.length === 0 ? (
+            <div className="tag-manager-empty flex h-48 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.02] text-sm text-white/30">
+              No tags match that filter.
+            </div>
+          ) : (
+            <div
+              className="relative w-full"
+              style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+            >
+              {visibleItems.map((virtualRow) => {
+                const start = virtualRow.index * columns;
+                const rowEntries = filteredEntries.slice(start, start + columns);
+                return (
+                  <div
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={rowVirtualizer.measureElement}
+                    className="absolute left-0 top-0 grid w-full gap-x-2 pb-2"
+                    style={{
+                      gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  >
+                    {rowEntries.map((entry) => (
+                      <TagManageTile
+                        key={entry.tag}
+                        entry={entry}
+                        onSearch={onSearch}
+                        onRename={onRename}
+                        onDelete={onDelete}
+                      />
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -864,6 +1010,8 @@ export function TagCloud() {
                 : hasEntries
                   ? exploreMode === "visual"
                     ? `${entryCount} cluster${entryCount !== 1 ? "s" : ""} — click any to open`
+                    : manageTags
+                      ? `${entryCount} tag${entryCount !== 1 ? "s" : ""} available to manage`
                     : visibleTagCount < entryCount
                       ? `${visibleTagCount} of ${entryCount} tags shown — click any to search`
                       : `${entryCount} tag${entryCount !== 1 ? "s" : ""} — click any to search`

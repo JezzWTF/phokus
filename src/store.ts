@@ -2370,9 +2370,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   renameTag: async (from, to) => {
     await invoke("rename_tag", { params: { from, to } });
     // Tag content changed — invalidate the explore-tags and tag-cloud caches.
+    // Keep the current tag list visible while the refresh runs so manager UI
+    // state such as filtering and sorting is not lost to a loading remount.
     set({
       exploreTagsFolderId: undefined,
-      exploreTagEntries: [],
       tagCloudFolderId: undefined,
       tagCloudEntries: [],
     });
@@ -2388,9 +2389,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   deleteTag: async (tag) => {
     const removed = await invoke<number>("delete_tag", { params: { tag } });
+    // Keep the current tag list visible while the refresh runs so manager UI
+    // state such as filtering and sorting is not lost to a loading remount.
     set({
       exploreTagsFolderId: undefined,
-      exploreTagEntries: [],
       tagCloudFolderId: undefined,
       tagCloudEntries: [],
     });
