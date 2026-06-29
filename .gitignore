@@ -35,5 +35,12 @@ dist-ssr
 *.pyc
 
 # Bundled CUDA runtime DLLs for the CUDA build (copied from the toolkit
-# locally; ~600 MB, never committed). See RELEASE_PLAN.md "CUDA release variant".
+# locally; ~600 MB, never committed).
 src-tauri/cuda-redist/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
