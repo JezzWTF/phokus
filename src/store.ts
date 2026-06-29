@@ -375,20 +375,21 @@ interface GalleryState {
   galleryScrollResetKey: number;
   activeView: ActiveView;
   exploreMode: ExploreMode;
+  tagManagerOpen: boolean;
   tagCloudEntries: TagCloudEntry[];
   tagCloudLoading: boolean;
   tagCloudFolderId: number | null | undefined; // undefined = never loaded
   exploreTagEntries: ExploreTagEntry[];
   exploreTagLoading: boolean;
-  exploreTagsFolderId: number | null | undefined;
   // Cache-freshness key: the folder the loaded tags belong to. Set to undefined
   // by content mutations (tag add/remove/rename/delete) to mark the cache dirty
   // and force the next load to refetch.
-  relatedTagsByKey: Record<string, RelatedTagEntry[]>;
+  exploreTagsFolderId: number | null | undefined;
   // The folder whose tags are actually on screen. Kept separate from the dirty
   // marker above so a same-folder invalidation isn't mistaken for a folder switch
   // (which would wipe the visible list and remount manager UI mid-refresh).
   exploreTagsShownFolderId: number | null | undefined;
+  relatedTagsByKey: Record<string, RelatedTagEntry[]>;
   indexingProgress: Record<number, IndexProgress>;
   mediaJobProgress: Record<number, FolderJobProgress>;
   cacheDir: string;
@@ -494,6 +495,8 @@ interface GalleryState {
   closeImage: () => void;
   setView: (view: ActiveView) => void;
   setExploreMode: (mode: ExploreMode) => void;
+  setTagManagerOpen: (open: boolean) => void;
+  openTagManager: () => void;
   loadTagCloud: (options?: { force?: boolean }) => Promise<void>;
   loadExploreTags: (options?: { force?: boolean }) => Promise<void>;
   loadRelatedTags: (tag: string) => Promise<RelatedTagEntry[]>;
@@ -874,17 +877,18 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   galleryScrollResetKey: 0,
   activeView: "gallery",
   exploreMode: "visual",
+  tagManagerOpen: false,
   tagCloudEntries: [],
   tagCloudLoading: false,
   tagCloudFolderId: undefined,
   exploreTagEntries: [],
   exploreTagLoading: false,
   exploreTagsFolderId: undefined,
+  exploreTagsShownFolderId: undefined,
   relatedTagsByKey: {},
   indexingProgress: {},
   mediaJobProgress: {},
   cacheDir: "",
-  exploreTagsShownFolderId: undefined,
   captionModelStatus: null,
   captionModelPreparing: false,
   captionModelError: null,
@@ -1399,10 +1403,27 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         return;
       }
     }
-    set({ activeView, similarSourceAlbumId: null, similarScope: similarScopeReset });
+    // Entering Explore normally always starts in browse mode; openTagManager() is
+    // the only path that re-opens manage mode (it runs this then sets the flag).
+    set({
+      activeView,
+      similarSourceAlbumId: null,
+      similarScope: similarScopeReset,
+      ...(activeView === "explore" ? { tagManagerOpen: false } : {}),
+    });
   },
 
-  setExploreMode: (exploreMode) => set({ exploreMode }),
+  setExploreMode: (exploreMode) =>
+    // Manage mode only exists for the tag view; drop it when switching to visual
+    // clusters so re-entering the tag view starts in the normal browse state.
+    set(exploreMode === "visual" ? { exploreMode, tagManagerOpen: false } : { exploreMode }),
+  setTagManagerOpen: (tagManagerOpen) => set({ tagManagerOpen }),
+  // Jump straight to the tag manager from anywhere (e.g. the Settings panel):
+  // switch to Explore, select the tag view, open manage mode, and close Settings.
+  openTagManager: () => {
+    get().setView("explore");
+    set({ exploreMode: "tags", tagManagerOpen: true, settingsOpen: false });
+  },
 
   loadTagCloud: async (options) => {
     const { selectedFolderId, tagCloudFolderId, tagCloudLoading } = get();

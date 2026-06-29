@@ -983,7 +983,9 @@ export function TagCloud() {
   const renameTag = useGalleryStore((state) => state.renameTag);
   const deleteTag = useGalleryStore((state) => state.deleteTag);
   const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
-  const [manageTags, setManageTags] = useState(false);
+  // Manage mode lives in the store so it can be opened from elsewhere (Settings).
+  const manageTags = useGalleryStore((state) => state.tagManagerOpen);
+  const setManageTags = useGalleryStore((state) => state.setTagManagerOpen);
   const handleDeleteTag = async (tag: string) => { await deleteTag(tag); };
 
   useEffect(() => {
@@ -1028,7 +1030,7 @@ export function TagCloud() {
                     ? "border-white/15 bg-white/10 text-white"
                     : "border-white/8 bg-white/[0.03] text-gray-500 hover:text-gray-300"
                 }`}
-                onClick={() => setManageTags((v) => !v)}
+                onClick={() => setManageTags(!manageTags)}
               >
                 {manageTags ? "Done" : "Manage"}
               </button>

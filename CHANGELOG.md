@@ -34,7 +34,8 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Tag management** — Explore → Tag Cloud gains a Manage mode with a flat tag
   list where you can rename a tag, merge it into another (rename it to an
   existing tag's name), or delete it from every image. Changes apply across the
-  whole library.
+  whole library. Settings → AI Workspace also has an "Open tag manager" button
+  that jumps straight into it.
 - **Camera info in the lightbox** — the image info panel now shows EXIF details
   (camera, lens, aperture, shutter, ISO, focal length) and, when a photo is
   geotagged, its GPS coordinates as a link that opens the location in your

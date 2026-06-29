@@ -247,6 +247,7 @@ export function SettingsModal() {
   const openOnboarding = useGalleryStore((state) => state.openOnboarding);
   const theme = useGalleryStore((state) => state.theme);
   const setTheme = useGalleryStore((state) => state.setTheme);
+  const openTagManager = useGalleryStore((state) => state.openTagManager);
   const lightboxAutoplay = useGalleryStore((state) => state.lightboxAutoplay);
   const setLightboxAutoplay = useGalleryStore((state) => state.setLightboxAutoplay);
   const lightboxAutoMute = useGalleryStore((state) => state.lightboxAutoMute);
@@ -685,6 +686,17 @@ export function SettingsModal() {
                   </SettingsItem>
 
                   {taggerQueueStatus ? <p className="pt-3 text-xs text-gray-500">{taggerQueueStatus}</p> : null}
+                </SettingsGroup>
+
+                <SettingsGroup title="Tag library" description="Review and clean up the tags across your library.">
+                  <SettingsItem label="Manage tags" description="Open the tag manager in Explore to search, rename, and delete tags.">
+                    <button
+                      className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
+                      onClick={openTagManager}
+                    >
+                      Open tag manager
+                    </button>
+                  </SettingsItem>
                 </SettingsGroup>
               </div>
             ) : (
