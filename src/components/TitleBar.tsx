@@ -1,8 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useGalleryStore } from "../store";
+import { useGalleryStore, AppTheme } from "../store";
 import { PhokusMark } from "./PhokusMark";
 import { Tooltip } from "./Tooltip";
+
+const THEME_OPTIONS: { value: AppTheme; label: string }[] = [
+  { value: "phokus", label: "Phokus" },
+  { value: "subtle-light", label: "Subtle Light" },
+  { value: "conventional-dark", label: "Conventional Dark" },
+];
 
 // SVG icons for window controls
 function MinimizeIcon() {
@@ -41,10 +47,39 @@ function CloseIcon() {
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const setSettingsOpen = useGalleryStore((state) => state.setSettingsOpen);
+  const theme = useGalleryStore((state) => state.theme);
+  const setTheme = useGalleryStore((state) => state.setTheme);
   const updateStatus = useGalleryStore((state) => state.updateStatus);
   const updateVersion = useGalleryStore((state) => state.updateVersion);
   const installUpdate = useGalleryStore((state) => state.installUpdate);
   const appWindow = getCurrentWindow();
+
+  // Right-clicking the settings cog opens a quick theme switcher, anchored under
+  // the cog so it never overflows the right edge of the window.
+  const settingsBtnRef = useRef<HTMLButtonElement>(null);
+  const themeMenuRef = useRef<HTMLDivElement>(null);
+  const [themeMenu, setThemeMenu] = useState<{ top: number; right: number } | null>(null);
+
+  useEffect(() => {
+    if (!themeMenu) return;
+    const handleDown = (e: MouseEvent) => {
+      if (themeMenuRef.current && !themeMenuRef.current.contains(e.target as Node)) setThemeMenu(null);
+    };
+    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") setThemeMenu(null); };
+    document.addEventListener("mousedown", handleDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [themeMenu]);
+
+  const handleSettingsContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const rect = settingsBtnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setThemeMenu({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+  };
 
   useEffect(() => {
     // Get initial maximized state
@@ -109,9 +144,11 @@ export function TitleBar() {
         className="flex items-stretch h-full"
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
+        <Tooltip label="Settings (right-click to switch theme)" anchorToCursor>
         <button
+          ref={settingsBtnRef}
           onClick={() => setSettingsOpen(true)}
-          title="Settings"
+          onContextMenu={handleSettingsContextMenu}
           className="group flex h-full w-10 items-center justify-center text-gray-600 transition-colors duration-100 hover:bg-white/6 hover:text-gray-300"
         >
           <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -119,7 +156,7 @@ export function TitleBar() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </button>
-
+      </Tooltip>
         {/* Minimize */}
         <button
           onClick={handleMinimize}
@@ -147,6 +184,36 @@ export function TitleBar() {
           <CloseIcon />
         </button>
       </div>
+
+      {/* Quick theme switcher — opened by right-clicking the settings cog. */}
+      {themeMenu && (
+        <div
+          ref={themeMenuRef}
+          className="fixed z-50 min-w-[170px] py-1 px-1 rounded-lg bg-gray-900 border border-white/10 shadow-xl shadow-black/50"
+          style={{ top: themeMenu.top, right: themeMenu.right, WebkitAppRegion: "no-drag" } as React.CSSProperties}
+        >
+          <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Theme</div>
+          {THEME_OPTIONS.map((opt) => {
+            const active = theme === opt.value;
+            return (
+              <button
+                key={opt.value}
+                className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-1.5 text-left text-[12px] transition-colors ${
+                  active ? "bg-white/8 text-white" : "text-gray-300 hover:bg-white/8 hover:text-white"
+                }`}
+                onClick={() => { setTheme(opt.value); setThemeMenu(null); }}
+              >
+                {opt.label}
+                {active && (
+                  <svg className="h-3.5 w-3.5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

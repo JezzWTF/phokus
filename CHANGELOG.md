@@ -9,6 +9,9 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Quick theme switch** — right-click the settings cog in the title bar to
+  switch theme (Phokus / Subtle Light / Conventional Dark) on the spot, without
+  opening Settings.
 - **Albums** — curate your own collections. A new Albums section in the sidebar
   (with cover thumbnails, kept visually distinct from Libraries) lets you create,
   rename, reorder (drag the row), and open albums; albums can span multiple
