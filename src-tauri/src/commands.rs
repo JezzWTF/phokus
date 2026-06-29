@@ -8,7 +8,7 @@ use crate::db::{
 use crate::embedder;
 use crate::hnsw_index;
 use crate::indexer::{self, WatcherHandle};
-use crate::tagger::{self, TaggerAcceleration, TaggerModelStatus, TaggerRuntimeProbe};
+use crate::tagger::{self, TaggerAcceleration, TaggerModel, TaggerModelStatus, TaggerRuntimeProbe};
 use crate::vector;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -178,6 +178,19 @@ pub struct TagSearchPage {
 pub struct GetExploreTagsParams {
     pub folder_id: Option<i64>,
     pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct GetRelatedTagsParams {
+    pub tag: String,
+    pub folder_id: Option<i64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct RelatedTagEntry {
+    pub tag: String,
+    pub shared_count: i64,
 }
 
 #[derive(Deserialize)]
@@ -1277,7 +1290,28 @@ pub async fn get_explore_tags(
     params: GetExploreTagsParams,
 ) -> Result<Vec<ExploreTagEntry>, String> {
     let conn = db.get().map_err(|e| e.to_string())?;
-    db::get_explore_tags(&conn, params.folder_id, params.limit.unwrap_or(48))
+    db::get_explore_tags(&conn, params.folder_id, params.limit.unwrap_or(180))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_related_tags(
+    db: State<'_, DbState>,
+    params: GetRelatedTagsParams,
+) -> Result<Vec<RelatedTagEntry>, String> {
+    let tag = params.tag.trim();
+    if tag.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let conn = db.get().map_err(|e| e.to_string())?;
+    db::get_related_tags(&conn, tag, params.folder_id, params.limit.unwrap_or(16))
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|(tag, shared_count)| RelatedTagEntry { tag, shared_count })
+                .collect()
+        })
         .map_err(|e| e.to_string())
 }
 
@@ -1913,6 +1947,7 @@ pub struct FolderWorkerStates {
 
 #[tauri::command]
 pub async fn set_worker_paused(
+    app: AppHandle,
     db: State<'_, DbState>,
     worker: String,
     folder_id: i64,
@@ -1928,6 +1963,9 @@ pub async fn set_worker_paused(
         let conn = db.get().map_err(|e| e.to_string())?;
         db::requeue_processing_tagging_jobs_for_folder(&conn, folder_id)
             .map_err(|e| e.to_string())?;
+    }
+    if let Err(error) = persist_worker_pauses_if_enabled(&app) {
+        log::warn!("Failed to persist worker pause state: {error}");
     }
     Ok(())
 }
@@ -1968,6 +2006,11 @@ pub async fn get_worker_states(folder_ids: Vec<i64>) -> Result<Vec<FolderWorkerS
 #[derive(Deserialize)]
 pub struct SetTaggerAccelerationParams {
     pub acceleration: TaggerAcceleration,
+}
+
+#[derive(Deserialize)]
+pub struct SetTaggerModelParams {
+    pub model: TaggerModel,
 }
 
 #[derive(Deserialize)]
@@ -2028,6 +2071,21 @@ pub async fn set_tagger_acceleration(
 ) -> Result<TaggerAcceleration, String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     tagger::set_tagger_acceleration(&app_dir, params.acceleration).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_tagger_model(app: AppHandle) -> Result<TaggerModel, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(tagger::tagger_model(&app_dir))
+}
+
+#[tauri::command]
+pub async fn set_tagger_model(
+    app: AppHandle,
+    params: SetTaggerModelParams,
+) -> Result<TaggerModel, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tagger::set_tagger_model(&app_dir, params.model).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2428,6 +2486,8 @@ pub async fn bulk_remove_tag(
 
 const TAGGING_QUEUE_SCOPE_FILE: &str = "settings/tagging_queue_scope.txt";
 const TAGGING_QUEUE_FOLDER_IDS_FILE: &str = "settings/tagging_queue_folder_ids.txt";
+const WORKER_PAUSES_PERSIST_FILE: &str = "settings/worker_pauses_persist.txt";
+const WORKER_PAUSES_FILE: &str = "settings/worker_pauses.json";
 
 #[derive(Deserialize)]
 pub struct SetTaggingQueueScopeParams {
@@ -2496,6 +2556,67 @@ pub async fn set_tagging_queue_folder_ids(
     }
     let content: Vec<String> = params.folder_ids.iter().map(|id| id.to_string()).collect();
     std::fs::write(path, content.join(",")).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn worker_pause_persistence_enabled(app_dir: &Path) -> bool {
+    std::fs::read_to_string(app_dir.join(WORKER_PAUSES_PERSIST_FILE))
+        .map(|value| value.trim() == "true")
+        .unwrap_or(false)
+}
+
+fn write_worker_pause_snapshot(app_dir: &Path) -> Result<(), String> {
+    let path = app_dir.join(WORKER_PAUSES_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(&indexer::snapshot_worker_paused_states())
+        .map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+fn persist_worker_pauses_if_enabled(app: &AppHandle) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if worker_pause_persistence_enabled(&app_dir) {
+        write_worker_pause_snapshot(&app_dir)?;
+    }
+    Ok(())
+}
+
+pub fn restore_persisted_worker_pauses(app_dir: &Path) {
+    if !worker_pause_persistence_enabled(app_dir) {
+        return;
+    }
+
+    let path = app_dir.join(WORKER_PAUSES_FILE);
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
+    match serde_json::from_str::<indexer::PersistedPausedWorkerFolders>(&content) {
+        Ok(states) => indexer::replace_worker_paused_states(states),
+        Err(error) => log::warn!("Failed to restore persisted worker pauses: {error}"),
+    }
+}
+
+#[tauri::command]
+pub async fn get_worker_pauses_persist(app: AppHandle) -> Result<bool, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(worker_pause_persistence_enabled(&app_dir))
+}
+
+#[tauri::command]
+pub async fn set_worker_pauses_persist(app: AppHandle, persist: bool) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(WORKER_PAUSES_PERSIST_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, if persist { "true" } else { "false" }).map_err(|e| e.to_string())?;
+    if persist {
+        write_worker_pause_snapshot(&app_dir)?;
+    } else {
+        let _ = std::fs::remove_file(app_dir.join(WORKER_PAUSES_FILE));
+    }
     Ok(())
 }
 

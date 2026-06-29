@@ -3,13 +3,13 @@ use crate::db::{self, DbPool, EmbeddingJob, FolderJobProgress, ImageRecord, Inde
 use crate::embedder::{embedding_source_path, ClipImageEmbedder};
 use crate::media::{probe_video_metadata, MediaTools};
 use crate::storage::{detect_storage_profile, RuntimeAdaptiveProfile, StorageProfile};
-use crate::tagger::{self, WdTagger};
+use crate::tagger::{self, Tagger};
 use crate::thumbnail;
 use crate::vector;
 use anyhow::Result;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rayon::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -41,6 +41,14 @@ struct PausedWorkerFolders {
     tagging: HashSet<i64>,
 }
 
+#[derive(Default, Deserialize, Serialize)]
+pub struct PersistedPausedWorkerFolders {
+    pub thumbnail: Vec<i64>,
+    pub metadata: Vec<i64>,
+    pub embedding: Vec<i64>,
+    pub tagging: Vec<i64>,
+}
+
 #[derive(Clone, Copy)]
 pub struct FolderWorkerPausedState {
     pub thumbnail: bool,
@@ -48,6 +56,41 @@ pub struct FolderWorkerPausedState {
     pub embedding: bool,
     pub caption: bool,
     pub tagging: bool,
+}
+
+pub fn replace_worker_paused_states(states: PersistedPausedWorkerFolders) {
+    if let Ok(mut paused_folders) = PAUSED_WORKER_FOLDERS
+        .get_or_init(|| Mutex::new(PausedWorkerFolders::default()))
+        .lock()
+    {
+        paused_folders.thumbnail = states.thumbnail.into_iter().collect();
+        paused_folders.metadata = states.metadata.into_iter().collect();
+        paused_folders.embedding = states.embedding.into_iter().collect();
+        paused_folders.caption = HashSet::new();
+        paused_folders.tagging = states.tagging.into_iter().collect();
+    }
+}
+
+pub fn snapshot_worker_paused_states() -> PersistedPausedWorkerFolders {
+    let Ok(paused_folders) = PAUSED_WORKER_FOLDERS
+        .get_or_init(|| Mutex::new(PausedWorkerFolders::default()))
+        .lock()
+    else {
+        return PersistedPausedWorkerFolders::default();
+    };
+
+    let sorted = |set: &HashSet<i64>| {
+        let mut ids = set.iter().copied().collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids
+    };
+
+    PersistedPausedWorkerFolders {
+        thumbnail: sorted(&paused_folders.thumbnail),
+        metadata: sorted(&paused_folders.metadata),
+        embedding: sorted(&paused_folders.embedding),
+        tagging: sorted(&paused_folders.tagging),
+    }
 }
 
 pub fn set_worker_paused(worker: &str, folder_id: i64, paused: bool) {
@@ -330,7 +373,7 @@ pub fn start_caption_worker(app: AppHandle, pool: DbPool, app_data_dir: PathBuf)
 
 pub fn start_tagging_worker(app: AppHandle, pool: DbPool, app_data_dir: PathBuf) {
     std::thread::spawn(move || {
-        let mut tagger_instance: Option<WdTagger> = None;
+        let mut tagger_instance: Option<Box<dyn Tagger>> = None;
         log::info!("Tagging worker started.");
         loop {
             // If the acceleration setting changed, drop the cached session so
@@ -1236,7 +1279,7 @@ fn process_tagging_batch(
     app: &AppHandle,
     pool: &DbPool,
     app_data_dir: &Path,
-    tagger_instance: &mut Option<WdTagger>,
+    tagger_instance: &mut Option<Box<dyn Tagger>>,
 ) -> Result<bool> {
     if !tagger::tagger_model_status(app_data_dir).ready {
         return Ok(false);
@@ -1264,7 +1307,7 @@ fn process_tagging_batch(
     }
 
     if tagger_instance.is_none() {
-        match WdTagger::new(app_data_dir) {
+        match tagger::create_active_tagger(app_data_dir) {
             Ok(model) => *tagger_instance = Some(model),
             Err(error) => {
                 with_db_write_lock(|| {
@@ -1323,6 +1366,10 @@ fn process_tagging_batch(
     }
     let infer_elapsed = infer_started_at.elapsed();
 
+    // Attribute the tags to the model that actually produced them, not a
+    // hardcoded one (WD vs JoyTag are both possible).
+    let tagger_model_name = tagger_ref.model_name();
+
     let tag_results = jobs.iter().cloned().zip(outputs).collect::<Vec<_>>();
 
     let write_started_at = Instant::now();
@@ -1355,7 +1402,7 @@ fn process_tagging_batch(
                         job.image_id,
                         &tag_pairs,
                         &output.rating,
-                        tagger::WD_TAGGER_MODEL_NAME,
+                        tagger_model_name,
                     )?;
                 }
                 Err(error) => {

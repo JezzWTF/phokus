@@ -105,7 +105,9 @@ const ENTRIES = parseChangelog(changelogRaw);
 
 export function getChangelogForVersion(version: string | null | undefined): ChangelogEntry | null {
   if (!version) return null;
-  const normalized = version.replace(/^v/, "");
+  // Strip leading "v" and any build suffix (e.g. "-ui", "-dev", "-beta.1") so
+  // dev/UI-lab builds still resolve to the correct changelog entry.
+  const normalized = version.replace(/^v/, "").replace(/-[a-z].*/i, "");
   // Never surface the in-progress [Unreleased] section to users.
   if (normalized.toLowerCase() === "unreleased") return null;
   return ENTRIES.find((e) => e.version.replace(/^v/, "") === normalized) ?? null;

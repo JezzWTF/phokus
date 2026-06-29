@@ -51,6 +51,7 @@ export type SearchCommand = "filename" | "semantic" | "tag";
 export type CaptionAcceleration = "auto" | "cpu" | "directml";
 export type CaptionDetail = "short" | "detailed" | "paragraph";
 export type TaggerAcceleration = "auto" | "cpu" | "directml";
+export type TaggerModel = "wd" | "joytag";
 export type AiRating = "general" | "sensitive" | "questionable" | "explicit";
 export type TaggingQueueScope = "all" | "selected";
 export type SimilarScope = "all_media" | "current_folder" | "current_album";
@@ -216,6 +217,11 @@ export interface ExploreTagEntry {
   thumbnail_path: string | null;
 }
 
+export interface RelatedTagEntry {
+  tag: string;
+  shared_count: number;
+}
+
 export interface DuplicateGroup {
   file_hash: string;
   file_size: number;
@@ -375,6 +381,7 @@ interface GalleryState {
   exploreTagEntries: ExploreTagEntry[];
   exploreTagLoading: boolean;
   exploreTagsFolderId: number | null | undefined;
+  relatedTagsByKey: Record<string, RelatedTagEntry[]>;
   indexingProgress: Record<number, IndexProgress>;
   mediaJobProgress: Record<number, FolderJobProgress>;
   cacheDir: string;
@@ -393,6 +400,7 @@ interface GalleryState {
   taggingQueueFolderIds: number[];
   mutedFolderIds: number[];
   notificationsPaused: boolean;
+  workerPausesPersist: boolean;
   theme: AppTheme;
   lightboxAutoplay: boolean;
   lightboxAutoMute: boolean;
@@ -424,6 +432,7 @@ interface GalleryState {
   taggerModelPreparing: boolean;
   taggerModelError: string | null;
   taggerModelProgress: TaggerModelProgress | null;
+  taggerModel: TaggerModel;
   taggerAcceleration: TaggerAcceleration;
   taggerThreshold: number;
   taggerBatchSize: number;
@@ -478,8 +487,9 @@ interface GalleryState {
   closeImage: () => void;
   setView: (view: ActiveView) => void;
   setExploreMode: (mode: ExploreMode) => void;
-  loadTagCloud: () => Promise<void>;
-  loadExploreTags: () => Promise<void>;
+  loadTagCloud: (options?: { force?: boolean }) => Promise<void>;
+  loadExploreTags: (options?: { force?: boolean }) => Promise<void>;
+  loadRelatedTags: (tag: string) => Promise<RelatedTagEntry[]>;
   showVisualCluster: (imageIds: number[]) => Promise<void>;
   searchForTag: (tag: string) => void;
   loadSimilarImages: (imageId: number, folderId?: number | null, reset?: boolean, sourceFolderId?: number | null, albumId?: number | null) => Promise<void>;
@@ -515,6 +525,8 @@ interface GalleryState {
   toggleMutedFolder: (folderId: number) => void;
   loadNotificationsPaused: () => Promise<void>;
   setNotificationsPaused: (paused: boolean) => void;
+  loadWorkerPausesPersist: () => Promise<void>;
+  setWorkerPausesPersist: (persist: boolean) => void;
   setTheme: (theme: AppTheme) => void;
   setLightboxAutoplay: (enabled: boolean) => void;
   setLightboxAutoMute: (enabled: boolean) => void;
@@ -551,6 +563,8 @@ interface GalleryState {
   deleteTaggerModel: () => Promise<void>;
   loadTaggerAcceleration: () => Promise<void>;
   setTaggerAcceleration: (acceleration: TaggerAcceleration) => Promise<void>;
+  loadTaggerModel: () => Promise<void>;
+  setTaggerModel: (model: TaggerModel) => Promise<void>;
   loadTaggerThreshold: () => Promise<void>;
   setTaggerThreshold: (threshold: number) => Promise<void>;
   loadTaggerBatchSize: () => Promise<void>;
@@ -611,6 +625,7 @@ const SIMILAR_DISTANCE_THRESHOLD = 0.24;
 let galleryRequestToken = 0;
 let tagCloudRequestToken = 0;
 let exploreTagRequestToken = 0;
+let exploreTagRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 function initialAiCaptionsEnabled(): boolean {
   if (typeof window === "undefined") return false;
@@ -858,6 +873,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   exploreTagEntries: [],
   exploreTagLoading: false,
   exploreTagsFolderId: undefined,
+  relatedTagsByKey: {},
   indexingProgress: {},
   mediaJobProgress: {},
   cacheDir: "",
@@ -876,6 +892,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   taggingQueueFolderIds: [],
   mutedFolderIds: [],
   notificationsPaused: false,
+  workerPausesPersist: false,
   theme: initialTheme(),
   lightboxAutoplay: initialBoolSetting(LIGHTBOX_AUTOPLAY_KEY, true),
   lightboxAutoMute: initialBoolSetting(LIGHTBOX_AUTO_MUTE_KEY, false),
@@ -902,6 +919,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   taggerModelPreparing: false,
   taggerModelError: null,
   taggerModelProgress: null,
+  taggerModel: "wd",
   taggerAcceleration: "auto",
   taggerThreshold: 0.35,
   taggerBatchSize: 8,
@@ -932,12 +950,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const nextSelected = state.taggingQueueFolderIds.filter((folderId) => folderIds.has(folderId));
       return {
         folders,
-        taggingQueueFolderIds:
-          nextSelected.length > 0
-            ? nextSelected
-            : state.taggingQueueScope === "selected" && folders.length > 0
-              ? [folders[0].id]
-              : nextSelected,
+        taggingQueueFolderIds: nextSelected,
       };
     });
   },
@@ -1383,10 +1396,11 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   setExploreMode: (exploreMode) => set({ exploreMode }),
 
-  loadTagCloud: async () => {
+  loadTagCloud: async (options) => {
     const { selectedFolderId, tagCloudFolderId, tagCloudLoading } = get();
+    const force = options?.force ?? false;
     // Skip if already loaded for this folder and not currently loading
-    if (!tagCloudLoading && tagCloudFolderId !== undefined && tagCloudFolderId === selectedFolderId) {
+    if (!force && !tagCloudLoading && tagCloudFolderId !== undefined && tagCloudFolderId === selectedFolderId) {
       return;
     }
     const requestToken = ++tagCloudRequestToken;
@@ -1404,19 +1418,20 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     }
   },
 
-  loadExploreTags: async () => {
+  loadExploreTags: async (options) => {
     const { selectedFolderId, exploreTagsFolderId, exploreTagLoading } = get();
-    if (!exploreTagLoading && exploreTagsFolderId !== undefined && exploreTagsFolderId === selectedFolderId) {
+    const force = options?.force ?? false;
+    if (!force && !exploreTagLoading && exploreTagsFolderId !== undefined && exploreTagsFolderId === selectedFolderId) {
       return;
     }
     const requestToken = ++exploreTagRequestToken;
     set({ exploreTagLoading: true, exploreTagsFolderId: selectedFolderId });
     try {
       const entries = await invoke<ExploreTagEntry[]>("get_explore_tags", {
-        params: { folder_id: selectedFolderId, limit: 48 },
+        params: { folder_id: selectedFolderId, limit: 180 },
       });
       if (requestToken !== exploreTagRequestToken) return;
-      set({ exploreTagEntries: entries, exploreTagLoading: false });
+      set({ exploreTagEntries: entries, exploreTagLoading: false, relatedTagsByKey: {} });
     } catch (error) {
       if (requestToken !== exploreTagRequestToken) return;
       console.error("Failed to load explore tags:", error);
@@ -1818,10 +1833,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   setTaggingQueueScope: (taggingQueueScope) => {
     set((state) => ({
       taggingQueueScope,
-      taggingQueueFolderIds:
-        taggingQueueScope === "selected" && state.taggingQueueFolderIds.length === 0 && state.folders.length > 0
-          ? [state.folders[0].id]
-          : state.taggingQueueFolderIds,
+      taggingQueueFolderIds: state.taggingQueueFolderIds,
     }));
     void invoke("set_tagging_queue_scope", { scope: taggingQueueScope }).catch(() => {});
   },
@@ -1881,6 +1893,42 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   setNotificationsPaused: (paused) => {
     set({ notificationsPaused: paused });
     void invoke("set_notifications_paused", { paused }).catch(() => {});
+  },
+
+  loadRelatedTags: async (tag) => {
+    const trimmed = tag.trim();
+    if (!trimmed) return [];
+
+    const { selectedFolderId, relatedTagsByKey } = get();
+    const key = `${selectedFolderId ?? "all"}:${trimmed}`;
+    if (relatedTagsByKey[key]) {
+      return relatedTagsByKey[key];
+    }
+
+    const entries = await invoke<RelatedTagEntry[]>("get_related_tags", {
+      params: { tag: trimmed, folder_id: selectedFolderId, limit: 18 },
+    });
+    set((state) => ({
+      relatedTagsByKey: {
+        ...state.relatedTagsByKey,
+        [key]: entries,
+      },
+    }));
+    return entries;
+  },
+
+  loadWorkerPausesPersist: async () => {
+    try {
+      const persist = await invoke<boolean>("get_worker_pauses_persist");
+      set({ workerPausesPersist: persist });
+    } catch {
+      // fall back to in-memory default
+    }
+  },
+
+  setWorkerPausesPersist: (persist) => {
+    set({ workerPausesPersist: persist });
+    void invoke("set_worker_pauses_persist", { persist }).catch(() => {});
   },
 
   setTheme: (theme) => {
@@ -2158,6 +2206,30 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     set({ taggerAcceleration, taggerRuntimeProbe: null });
   },
 
+  loadTaggerModel: async () => {
+    try {
+      const taggerModel = await invoke<TaggerModel>("get_tagger_model");
+      // Never clobber the valid default with a missing/blank backend response.
+      if (taggerModel) set({ taggerModel });
+    } catch (error) {
+      set({ taggerModelError: String(error) });
+    }
+  },
+
+  setTaggerModel: async (model) => {
+    const taggerModel = await invoke<TaggerModel>("set_tagger_model", {
+      params: { model },
+    });
+    // Switching models changes which files are required on disk, so refresh the
+    // status too — the download/ready UI must reflect the newly-selected model.
+    try {
+      const taggerModelStatus = await invoke<TaggerModelStatus>("get_tagger_model_status");
+      set({ taggerModel, taggerModelStatus, taggerModelError: null, taggerRuntimeProbe: null });
+    } catch (error) {
+      set({ taggerModel, taggerRuntimeProbe: null, taggerModelError: String(error) });
+    }
+  },
+
   loadTaggerThreshold: async () => {
     try {
       const taggerThreshold = await invoke<number>("get_tagger_threshold");
@@ -2290,9 +2362,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   renameTag: async (from, to) => {
     await invoke("rename_tag", { params: { from, to } });
     // Tag content changed — invalidate the explore-tags and tag-cloud caches.
+    // Keep the current tag list visible while the refresh runs so manager UI
+    // state such as filtering and sorting is not lost to a loading remount.
     set({
       exploreTagsFolderId: undefined,
-      exploreTagEntries: [],
       tagCloudFolderId: undefined,
       tagCloudEntries: [],
     });
@@ -2308,9 +2381,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   deleteTag: async (tag) => {
     const removed = await invoke<number>("delete_tag", { params: { tag } });
+    // Keep the current tag list visible while the refresh runs so manager UI
+    // state such as filtering and sorting is not lost to a loading remount.
     set({
       exploreTagsFolderId: undefined,
-      exploreTagEntries: [],
       tagCloudFolderId: undefined,
       tagCloudEntries: [],
     });
@@ -2858,6 +2932,18 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
     const unlistenThumbnails = await listen<ThumbnailBatch>("media-updated", (event) => {
       const batch = event.payload;
+      const taggingUpdated = batch.images.some((image) => image.ai_tagged_at !== null || image.ai_tagger_error !== null);
+      if (taggingUpdated) {
+        set({ exploreTagsFolderId: undefined });
+        if (get().activeView === "explore") {
+          if (!exploreTagRefreshTimer) {
+            exploreTagRefreshTimer = setTimeout(() => {
+              exploreTagRefreshTimer = null;
+              void get().loadExploreTags({ force: true });
+            }, 700);
+          }
+        }
+      }
 
       set((state) => {
         const selectedImageUpdate =

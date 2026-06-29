@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { tileSizeForZoom, useGalleryStore, SortOrder, MediaFilter, SearchCommand, parseSearchValue, searchModeLabel, ExploreTagEntry } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
 import { ColorFilter } from "./ColorFilter";
+import { Tooltip } from "./Tooltip";
 
 const BASE_SORT_OPTIONS: { value: SortOrder; label: string }[] = [
   { value: "date_desc", label: "Newest first" },
@@ -230,7 +231,7 @@ export function Toolbar() {
         const results = await invoke<ExploreTagEntry[]>("search_tags_autocomplete", {
           params: { query: searchQuery.trim(), folder_id: selectedFolderId ?? null, limit: 10 },
         });
-        setTagSuggestions(results);
+        setTagSuggestions(Array.isArray(results) ? results : []);
       } catch {
         setTagSuggestions([]);
       }
@@ -266,7 +267,7 @@ export function Toolbar() {
   const showCommandHints = !searchCommand && searchPanelOpen;
 
   return (
-    <div className="relative z-20 shrink-0 border-b border-white/[0.06] bg-gray-950/80 backdrop-blur-xl">
+    <div className="relative z-40 shrink-0 border-b border-white/[0.06] bg-gray-950/80 backdrop-blur-xl">
       {/* Primary row */}
       <div className="flex items-center gap-2 px-3 h-12 lg:gap-3 lg:px-5">
         {/* Title + count */}
@@ -357,7 +358,7 @@ export function Toolbar() {
 
           {/* Tag autocomplete suggestions */}
           {showTagSuggestions && tagSuggestions.length > 0 ? (
-            <div className="absolute left-0 top-full z-30 mt-1.5 w-72 rounded-xl border border-white/10 bg-gray-950/98 py-1 shadow-2xl backdrop-blur">
+            <div className="absolute left-0 top-full z-50 mt-1.5 w-72 rounded-xl border border-white/10 bg-gray-950/98 py-1 shadow-2xl backdrop-blur">
               {tagSuggestions.map((entry) => (
                 <button
                   key={entry.tag}
@@ -381,25 +382,25 @@ export function Toolbar() {
 
           {/* Tag mode with no suggestions yet — show a brief hint */}
           {showTagSuggestions && tagSuggestions.length === 0 && searchQuery.trim().length > 0 ? (
-            <div className="absolute left-0 top-full z-30 mt-1.5 w-72 rounded-xl border border-white/10 bg-gray-950/98 px-3 py-2.5 shadow-2xl backdrop-blur">
+            <div className="absolute left-0 top-full z-50 mt-1.5 w-72 rounded-xl border border-white/10 bg-gray-950/98 px-3 py-2.5 shadow-2xl backdrop-blur">
               <p className="text-xs text-white/25">No matching tags</p>
             </div>
           ) : null}
 
           {/* Semantic mode hint */}
           {searchCommand === "semantic" && searchPanelOpen ? (
-            <div className="absolute left-0 top-full z-30 mt-1.5 w-72 rounded-xl border border-white/10 bg-gray-950/98 px-3 py-2.5 shadow-2xl backdrop-blur">
+            <div className="absolute left-0 top-full z-50 mt-1.5 w-72 rounded-xl border border-white/10 bg-gray-950/98 px-3 py-2.5 shadow-2xl backdrop-blur">
               <p className="text-xs text-white/40">Search by meaning and visual concepts</p>
             </div>
           ) : null}
 
           {/* Command hints — only shown when no command is active */}
           {showCommandHints ? (
-            <div className="absolute left-0 top-full z-30 mt-1.5 w-64 rounded-xl border border-white/10 bg-gray-950/98 py-1 shadow-2xl backdrop-blur">
+            <div className="absolute left-0 top-full z-50 mt-1.5 w-64 rounded-xl border border-white/10 bg-gray-950/98 py-1 shadow-2xl backdrop-blur">
               {(
                 [
-                  { command: "tag" as SearchCommand, prefix: "/t", label: "Tags", description: "Search AI and user tags" },
-                  { command: "semantic" as SearchCommand, prefix: "/s", label: "Semantic", description: "Search by meaning" },
+                  { command: "tag" as SearchCommand, prefix: "/t", label: "Tags", description: "Search user and AI tags" },
+                  { command: "semantic" as SearchCommand, prefix: "/s", label: "Semantic", description: "Search by meaning, object, mood" },
                 ] as const
               ).map((option) => (
                 <button
@@ -434,20 +435,20 @@ export function Toolbar() {
         {/* Zoom */}
         <div className="flex items-center rounded-lg border border-white/8 overflow-hidden light-theme:border-gray-700/40">
           {(["compact", "comfortable", "detail"] as const).map((preset, i) => (
-            <button
-              key={preset}
-              className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                i > 0 ? "border-l border-white/8" : ""
-              } ${
-                zoomPreset === preset
-                  ? "bg-white/10 text-white light-theme:bg-gray-900 light-theme:text-white"
-                  : "text-gray-500 hover:text-gray-200 hover:bg-white/5 light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
-              }`}
-              title={`${tileSize}px tiles`}
-              onClick={() => setZoomPreset(preset)}
-            >
-              {preset === "compact" ? "S" : preset === "comfortable" ? "M" : "L"}
-            </button>
+            <Tooltip key={preset} label={`${tileSize}px tiles`} followCursor>
+              <button
+                className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  i > 0 ? "border-l border-white/8" : ""
+                } ${
+                  zoomPreset === preset
+                    ? "bg-white/10 text-white light-theme:bg-gray-900 light-theme:text-white"
+                    : "text-gray-500 hover:text-gray-200 hover:bg-white/5 light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
+                }`}
+                onClick={() => setZoomPreset(preset)}
+              >
+                {preset === "compact" ? "S" : preset === "comfortable" ? "M" : "L"}
+              </button>
+            </Tooltip>
           ))}
         </div>
       </div>

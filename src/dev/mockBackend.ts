@@ -1,5 +1,5 @@
 import { emit } from "@tauri-apps/api/event";
-import type { Album, Folder, ImageRecord, ImageTag, SortOrder } from "../store";
+import type { Album, ExploreTagEntry, Folder, ImageRecord, ImageTag, SortOrder } from "../store";
 import { compareImages, createMockDb, mockExif } from "./mockFixtures";
 import { getMockScenario } from "./mockScenarios";
 
@@ -58,10 +58,20 @@ function searchTags(payload: unknown) {
       .filter(([, tags]) => tags.some((tag) => tag.tag.toLowerCase().includes(query)))
       .map(([imageId]) => Number(imageId)),
   );
-  const images = filterImages(db.images, payload)
+  const images = filterImages(db.images, { params: { ...p, query: "", search: "" } })
     .filter((image) => matchingIds.has(image.id))
     .sort(compareImages((p.sort ?? "date_desc") as SortOrder));
   return page(images, Number(p.offset ?? 0), Number(p.limit ?? 200));
+}
+
+function searchTagsAutocomplete(payload: unknown): ExploreTagEntry[] {
+  const p = params(payload);
+  const query = String(p.query ?? "").trim().toLowerCase();
+  const limit = Number(p.limit ?? 10);
+  return db.exploreTags
+    .filter((entry) => !query || entry.tag.toLowerCase().includes(query))
+    .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag))
+    .slice(0, limit);
 }
 
 function semanticSearch(payload: unknown): ImageRecord[] {
@@ -233,6 +243,8 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
       return semanticSearch(payload);
     case "search_images_by_tag":
       return searchTags(payload);
+    case "search_tags_autocomplete":
+      return searchTagsAutocomplete(payload);
     case "get_images_by_ids":
       return (p.image_ids ?? []).map((id: number) => db.images.find((image) => image.id === id)).filter(Boolean);
     case "find_similar_images":
@@ -241,7 +253,21 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
     case "get_tag_cloud":
       return db.scenario === "empty" ? [] : db.tagCloud;
     case "get_explore_tags":
-      return db.scenario === "empty" ? [] : db.exploreTags.slice(0, Number(p.limit ?? 48));
+      return db.scenario === "empty" ? [] : db.exploreTags.slice(0, Number(p.limit ?? 180));
+    case "get_related_tags": {
+      const relatedCounts = new Map<string, number>();
+      for (const imageTags of Object.values(db.tagsByImageId)) {
+        if (!imageTags.some((tag) => tag.tag === p.tag)) continue;
+        for (const tag of imageTags) {
+          if (tag.tag === p.tag) continue;
+          relatedCounts.set(tag.tag, (relatedCounts.get(tag.tag) ?? 0) + 1);
+        }
+      }
+      return Array.from(relatedCounts.entries())
+        .map(([tag, shared_count]) => ({ tag, shared_count }))
+        .sort((left, right) => right.shared_count - left.shared_count || left.tag.localeCompare(right.tag))
+        .slice(0, Number(p.limit ?? 18));
+    }
     case "suggest_image_tags":
       return ["select", "warm light"];
     case "rename_tag":
@@ -344,6 +370,9 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
       return 12;
     case "get_tagger_model_status":
       return { model_id: "SmilingWolf/wd-vit-tagger-v3", model_name: "WD ViT Tagger", local_dir: "mock://models/tagger", ready: true, missing_files: [] };
+    case "get_tagger_model":
+    case "set_tagger_model":
+      return p.model ?? "wd";
     case "get_tagger_acceleration":
     case "set_tagger_acceleration":
       return p.acceleration ?? "auto";
@@ -364,9 +393,11 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
     case "set_tagging_queue_folder_ids":
     case "set_muted_folder_ids":
     case "set_notifications_paused":
+    case "set_worker_pauses_persist":
     case "set_worker_paused":
       return null;
     case "get_notifications_paused":
+    case "get_worker_pauses_persist":
     case "get_onboarding_completed":
       return db.scenario !== "empty";
     case "set_onboarding_completed":

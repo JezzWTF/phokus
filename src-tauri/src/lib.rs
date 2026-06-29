@@ -1,3 +1,4 @@
+mod ai_tag_filter;
 mod captioner;
 mod color;
 mod commands;
@@ -118,6 +119,7 @@ pub fn run() {
 
             let thumb_dir = app_dir.join("thumbnails");
             std::fs::create_dir_all(&thumb_dir).expect("Failed to create thumbnail dir");
+            commands::restore_persisted_worker_pauses(&app_dir);
 
             // The asset protocol scope is no longer a blanket "**": thumbnails
             // are allowed statically in tauri.conf.json, and each indexed
@@ -194,14 +196,19 @@ pub fn run() {
             commands::suggest_image_tags,
             commands::set_worker_paused,
             commands::get_worker_states,
+            commands::get_worker_pauses_persist,
+            commands::set_worker_pauses_persist,
             commands::get_tag_cloud,
             commands::get_explore_tags,
+            commands::get_related_tags,
             commands::get_images_by_ids,
             commands::get_failed_embedding_images,
             commands::get_failed_tagging_images,
             commands::get_tagger_model_status,
             commands::get_tagger_acceleration,
             commands::set_tagger_acceleration,
+            commands::get_tagger_model,
+            commands::set_tagger_model,
             commands::probe_tagger_runtime,
             commands::get_tagger_threshold,
             commands::set_tagger_threshold,

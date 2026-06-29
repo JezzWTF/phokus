@@ -1,4 +1,4 @@
-use crate::vector;
+use crate::{ai_tag_filter, vector};
 use anyhow::Result;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -378,6 +378,42 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     )?;
 
     vector::migrate(conn)?;
+    remove_filtered_ai_tags(conn)?;
+    Ok(())
+}
+
+fn remove_filtered_ai_tags(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("SELECT id, tag FROM image_tags WHERE source = 'ai'")?;
+    let filtered_ids = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .filter_map(|row| match row {
+            Ok((id, tag)) if ai_tag_filter::is_removed_ai_tag(&tag) => Some(Ok(id)),
+            Ok(_) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+
+    if filtered_ids.is_empty() {
+        return Ok(());
+    }
+
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut delete_stmt = tx.prepare("DELETE FROM image_tags WHERE id = ?1")?;
+        for id in &filtered_ids {
+            delete_stmt.execute([id])?;
+        }
+    }
+    tx.execute("DELETE FROM tag_cloud_cache", [])?;
+    tx.commit()?;
+
+    log::info!(
+        "Removed {} filtered AI tag(s) from existing library data",
+        filtered_ids.len()
+    );
     Ok(())
 }
 
@@ -2394,6 +2430,34 @@ pub fn get_explore_tags(
                 representative_image_id,
                 thumbnail_path,
             })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok(rows)
+}
+
+pub fn get_related_tags(
+    conn: &Connection,
+    tag: &str,
+    folder_id: Option<i64>,
+    limit: usize,
+) -> Result<Vec<(String, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT other.tag, COUNT(DISTINCT other.image_id) AS shared_count
+         FROM image_tags base
+         JOIN image_tags other ON other.image_id = base.image_id
+         JOIN images i ON i.id = base.image_id
+         WHERE base.tag = ?1
+           AND other.tag != base.tag
+           AND (?2 IS NULL OR i.folder_id = ?2)
+         GROUP BY other.tag
+         ORDER BY shared_count DESC, other.tag ASC
+         LIMIT ?3",
+    )?;
+
+    let rows = stmt
+        .query_map(params![tag, folder_id, limit as i64], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
