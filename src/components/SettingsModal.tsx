@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppTheme, CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, TaggerAcceleration, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
+import { AppTheme, CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, TaggerAcceleration, TaggerModel, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
 import { FfmpegStatusRow } from "./onboarding/StepWelcome";
 import { ThemedDropdown } from "./ThemedDropdown";
 import { getChangelogForVersion } from "../changelog";
@@ -100,6 +100,44 @@ function ScopeButton({ scope, current, onSelect, children }: {
   );
 }
 
+// Display metadata for each selectable tagging model.
+const TAGGER_MODELS: Record<TaggerModel, { name: string; tab: string; description: string }> = {
+  wd: {
+    name: "WD SwinV2 Tagger v3",
+    tab: "WD (anime)",
+    description:
+      "Anime-focused vision model by SmilingWolf. Generates booru-style tags with configurable confidence thresholds.",
+  },
+  joytag: {
+    name: "JoyTag",
+    tab: "JoyTag (general)",
+    description:
+      "Booru-schema tagger that also handles photographic content and is strong on NSFW concepts. The explicitness rating is derived from its tags.",
+  },
+};
+
+function TaggerModelButton({ model, current, onSelect, children }: {
+  model: TaggerModel;
+  current: TaggerModel;
+  onSelect: (model: TaggerModel) => void;
+  children: React.ReactNode;
+}) {
+  const active = model === current;
+  return (
+    <button
+      type="button"
+      className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
+        active
+          ? "border-emerald-400/35 bg-emerald-500/15 text-emerald-200 light-theme:border-emerald-600/50 light-theme:bg-emerald-100 light-theme:text-emerald-700"
+          : "border-transparent text-gray-500 hover:bg-white/[0.06] hover:text-gray-200 light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
+      }`}
+      onClick={() => onSelect(model)}
+    >
+      {children}
+    </button>
+  );
+}
+
 function TaggerAccelerationButton({ acceleration, current, onSelect, children }: {
   acceleration: TaggerAcceleration;
   current: TaggerAcceleration;
@@ -129,6 +167,8 @@ export function SettingsModal() {
   const [taggerClearing, setTaggerClearing] = useState(false);
   const [taggerAccelerationSaving, setTaggerAccelerationSaving] = useState(false);
   const [taggerAccelerationError, setTaggerAccelerationError] = useState<string | null>(null);
+  const [taggerModelSwitching, setTaggerModelSwitching] = useState(false);
+  const [taggerModelSwitchError, setTaggerModelSwitchError] = useState<string | null>(null);
   const [taggerThresholdDraft, setTaggerThresholdDraft] = useState<string | null>(null);
   const [taggerThresholdSaving, setTaggerThresholdSaving] = useState(false);
   const [taggerThresholdError, setTaggerThresholdError] = useState<string | null>(null);
@@ -173,6 +213,9 @@ export function SettingsModal() {
   const deleteTaggerModel = useGalleryStore((state) => state.deleteTaggerModel);
   const loadTaggerAcceleration = useGalleryStore((state) => state.loadTaggerAcceleration);
   const setTaggerAcceleration = useGalleryStore((state) => state.setTaggerAcceleration);
+  const taggerModel = useGalleryStore((state) => state.taggerModel);
+  const loadTaggerModel = useGalleryStore((state) => state.loadTaggerModel);
+  const setTaggerModel = useGalleryStore((state) => state.setTaggerModel);
   const loadTaggerThreshold = useGalleryStore((state) => state.loadTaggerThreshold);
   const setTaggerThreshold = useGalleryStore((state) => state.setTaggerThreshold);
   const loadTaggerBatchSize = useGalleryStore((state) => state.loadTaggerBatchSize);
@@ -210,6 +253,7 @@ export function SettingsModal() {
   useEffect(() => {
     if (!settingsOpen) return;
     void loadTaggerModelStatus();
+    void loadTaggerModel();
     void loadTaggerAcceleration();
     void loadTaggerThreshold();
     void loadTaggerBatchSize();
@@ -221,7 +265,7 @@ export function SettingsModal() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [settingsOpen, loadTaggerModelStatus, loadTaggerAcceleration, loadTaggerThreshold, loadTaggerBatchSize, loadTaggingQueueScope, loadTaggingQueueFolderIds, setSettingsOpen]);
+  }, [settingsOpen, loadTaggerModelStatus, loadTaggerModel, loadTaggerAcceleration, loadTaggerThreshold, loadTaggerBatchSize, loadTaggingQueueScope, loadTaggingQueueFolderIds, setSettingsOpen]);
 
   useEffect(() => {
     if (!settingsOpen || activeSection !== "general") return;
@@ -365,10 +409,39 @@ export function SettingsModal() {
             {activeSection === "workspace" ? (
               <div className="mt-8 space-y-9">
                 <SettingsGroup title="Model">
+                  <SettingsItem label="Tagging model" description="Choose which model generates tags. JoyTag suits photos and NSFW; WD is anime-focused. Switching may require a one-time download.">
+                    <div className="flex flex-col items-end gap-1.5">
+                      <div className="flex rounded-lg border border-white/[0.07] p-0.5 light-theme:border-gray-300/80">
+                        {(["wd", "joytag"] as const).map((model) => (
+                          <TaggerModelButton
+                            key={model}
+                            model={model}
+                            current={taggerModel}
+                            onSelect={(nextModel) => {
+                              if (nextModel === taggerModel) return;
+                              setTaggerModelSwitching(true);
+                              setTaggerModelSwitchError(null);
+                              void setTaggerModel(nextModel)
+                                .catch((error: unknown) => setTaggerModelSwitchError(String(error)))
+                                .finally(() => setTaggerModelSwitching(false));
+                            }}
+                          >
+                            {TAGGER_MODELS[model].tab}
+                          </TaggerModelButton>
+                        ))}
+                      </div>
+                      {taggerModelSwitchError ? (
+                        <p className="text-[11px] text-amber-300">{taggerModelSwitchError}</p>
+                      ) : (
+                        <p className="text-[11px] text-gray-600">{taggerModelSwitching ? "Switching..." : `Current: ${TAGGER_MODELS[taggerModel].name}`}</p>
+                      )}
+                    </div>
+                  </SettingsItem>
+
                   <SettingsItem
                     label={
                       <>
-                        WD SwinV2 Tagger v3{" "}
+                        {TAGGER_MODELS[taggerModel].name}{" "}
                         <span className="ml-1.5 align-middle">
                           <StatusPill tone={taggerReady ? "ready" : taggerModelPreparing ? "busy" : "muted"}>
                             {taggerReady ? "Installed" : taggerModelPreparing ? "Preparing" : "Not installed"}
@@ -376,7 +449,7 @@ export function SettingsModal() {
                         </span>
                       </>
                     }
-                    description="Anime-focused vision model by SmilingWolf. Generates booru-style tags with configurable confidence thresholds."
+                    description={TAGGER_MODELS[taggerModel].description}
                   >
                     <div className="flex items-center gap-2">
                       {taggerReady ? (
@@ -469,7 +542,7 @@ export function SettingsModal() {
                       {taggerThresholdError ? (
                         <p className="text-[11px] text-amber-300">{taggerThresholdError}</p>
                       ) : (
-                        <p className="text-[11px] text-gray-600">{taggerThresholdSaving ? "Saving..." : "Default: 0.35"}</p>
+                        <p className="text-[11px] text-gray-600">{taggerThresholdSaving ? "Saving..." : `Default: ${taggerModel === "joytag" ? "0.4" : "0.35"}`}</p>
                       )}
                     </div>
                   </SettingsItem>

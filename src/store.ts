@@ -51,6 +51,7 @@ export type SearchCommand = "filename" | "semantic" | "tag";
 export type CaptionAcceleration = "auto" | "cpu" | "directml";
 export type CaptionDetail = "short" | "detailed" | "paragraph";
 export type TaggerAcceleration = "auto" | "cpu" | "directml";
+export type TaggerModel = "wd" | "joytag";
 export type AiRating = "general" | "sensitive" | "questionable" | "explicit";
 export type TaggingQueueScope = "all" | "selected";
 export type SimilarScope = "all_media" | "current_folder" | "current_album";
@@ -424,6 +425,7 @@ interface GalleryState {
   taggerModelPreparing: boolean;
   taggerModelError: string | null;
   taggerModelProgress: TaggerModelProgress | null;
+  taggerModel: TaggerModel;
   taggerAcceleration: TaggerAcceleration;
   taggerThreshold: number;
   taggerBatchSize: number;
@@ -551,6 +553,8 @@ interface GalleryState {
   deleteTaggerModel: () => Promise<void>;
   loadTaggerAcceleration: () => Promise<void>;
   setTaggerAcceleration: (acceleration: TaggerAcceleration) => Promise<void>;
+  loadTaggerModel: () => Promise<void>;
+  setTaggerModel: (model: TaggerModel) => Promise<void>;
   loadTaggerThreshold: () => Promise<void>;
   setTaggerThreshold: (threshold: number) => Promise<void>;
   loadTaggerBatchSize: () => Promise<void>;
@@ -902,6 +906,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   taggerModelPreparing: false,
   taggerModelError: null,
   taggerModelProgress: null,
+  taggerModel: "wd",
   taggerAcceleration: "auto",
   taggerThreshold: 0.35,
   taggerBatchSize: 8,
@@ -2156,6 +2161,29 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       params: { acceleration },
     });
     set({ taggerAcceleration, taggerRuntimeProbe: null });
+  },
+
+  loadTaggerModel: async () => {
+    try {
+      const taggerModel = await invoke<TaggerModel>("get_tagger_model");
+      set({ taggerModel });
+    } catch (error) {
+      set({ taggerModelError: String(error) });
+    }
+  },
+
+  setTaggerModel: async (model) => {
+    const taggerModel = await invoke<TaggerModel>("set_tagger_model", {
+      params: { model },
+    });
+    // Switching models changes which files are required on disk, so refresh the
+    // status too — the download/ready UI must reflect the newly-selected model.
+    try {
+      const taggerModelStatus = await invoke<TaggerModelStatus>("get_tagger_model_status");
+      set({ taggerModel, taggerModelStatus, taggerModelError: null, taggerRuntimeProbe: null });
+    } catch (error) {
+      set({ taggerModel, taggerRuntimeProbe: null, taggerModelError: String(error) });
+    }
   },
 
   loadTaggerThreshold: async () => {
