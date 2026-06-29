@@ -950,12 +950,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       const nextSelected = state.taggingQueueFolderIds.filter((folderId) => folderIds.has(folderId));
       return {
         folders,
-        taggingQueueFolderIds:
-          nextSelected.length > 0
-            ? nextSelected
-            : state.taggingQueueScope === "selected" && folders.length > 0
-              ? [folders[0].id]
-              : nextSelected,
+        taggingQueueFolderIds: nextSelected,
       };
     });
   },
@@ -1838,10 +1833,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   setTaggingQueueScope: (taggingQueueScope) => {
     set((state) => ({
       taggingQueueScope,
-      taggingQueueFolderIds:
-        taggingQueueScope === "selected" && state.taggingQueueFolderIds.length === 0 && state.folders.length > 0
-          ? [state.folders[0].id]
-          : state.taggingQueueFolderIds,
+      taggingQueueFolderIds: state.taggingQueueFolderIds,
     }));
     void invoke("set_tagging_queue_scope", { scope: taggingQueueScope }).catch(() => {});
   },

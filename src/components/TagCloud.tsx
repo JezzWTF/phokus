@@ -477,8 +477,8 @@ function TagAtlas({
       <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
         <defs>
           <radialGradient id="tag-atlas-glow" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="rgba(255,255,255,0.2)" />
-            <stop offset="100%" stopColor="rgba(255,255,255,0)" />
+            <stop offset="0%" stopColor={isLight ? "rgba(60,50,30,0.18)" : "rgba(255,255,255,0.2)"} />
+            <stop offset="100%" stopColor="rgba(0,0,0,0)" />
           </radialGradient>
         </defs>
         {activeNode && activeAnchor ? (
