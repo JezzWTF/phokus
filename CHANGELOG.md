@@ -59,6 +59,10 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Explore cluster layout** — clusters are now sized by image count (busier
   clusters are larger and stack on top) and repositioned to avoid overlapping, so
   every cluster stays viewable and clickable even in dense libraries.
+- **Faster CPU tagging** — when AI tagging runs on the CPU provider (no usable
+  GPU) it now uses multiple cores instead of being pinned to one, several times
+  faster on multi-core machines. A couple of cores are left free so the rest of
+  the app stays responsive. GPU (DirectML) tagging is unchanged.
 
 ### Fixed
 
@@ -93,6 +97,12 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Explore polish** — the Tag Cloud now uses the in-app tooltip instead of the
   native browser one (and reads "1 image", not "1 images"), and the folder-scope
   dropdown no longer opens behind the cluster cards.
+- **AI tagging no longer freezes the app** — tagging now runs inference in small
+  GPU micro-batches with a brief yield between them, instead of one wide batch
+  that monopolised the GPU (and with it the whole UI) for seconds at a time. The
+  app stays responsive while tagging runs, throughput is steadier (the old wide
+  batches caused periodic slowdowns), and the first batch after launch starts
+  faster.
 
 ## [0.1.1] — 2026-06-23
 

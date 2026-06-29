@@ -4,6 +4,7 @@ use image::{imageops::FilterType, DynamicImage, ImageReader};
 use ort::ep;
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::Tensor;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -36,6 +37,19 @@ const RATING_CATEGORY: u8 = 9;
 
 pub const DEFAULT_THRESHOLD: f32 = 0.35;
 pub const DEFAULT_MAX_TAGS: usize = 30;
+
+/// How many images are fed to the GPU in a single forward pass, regardless of
+/// how many the worker claims from the DB at once. The WD model is compute-
+/// bound on a shared GPU, so a wide batch buys little throughput but holds the
+/// GPU (and therefore the WebView2 compositor) hostage for its whole duration,
+/// freezing the UI. Small chunks keep each DirectML dispatch short — lower this
+/// for a smoother UI under heavy tagging, raise it for marginally higher
+/// throughput on a dedicated GPU.
+pub const TAGGER_INFER_CHUNK: usize = 4;
+
+/// Brief pause between inference chunks so the compositor and other workers can
+/// claim the GPU/CPU between dispatches. Negligible against per-chunk inference.
+pub const TAGGER_INFER_YIELD_MS: u64 = 40;
 
 /// Set to `true` by `set_tagger_acceleration` so the tagging worker loop
 /// knows to drop its cached `WdTagger` and reload with the new EP.
@@ -456,33 +470,34 @@ impl WdTagger {
 
         let session = create_tagger_session(&model_path, acceleration)?;
 
-        // Determine the input spatial size from the ONNX model graph.
-        // WD v3 models use (1, H, W, 3) where H == W, typically 448.
-        let input_size = {
+        // Determine the input spatial size (and batch axis, for diagnostics) from
+        // the ONNX model graph. WD v3 models use (N, H, W, 3) with H == W,
+        // typically 448, and a dynamic batch dimension (reported as -1/0) which
+        // batched inference relies on.
+        let (input_size, batch_axis) = {
             let inputs = session.inputs();
-            let dim = inputs
+            inputs
                 .first()
                 .and_then(|inp| {
                     if let ort::value::ValueType::Tensor { shape, .. } = inp.dtype() {
-                        shape
-                            .get(1)
-                            .and_then(|&d| if d > 0 { Some(d as usize) } else { None })
+                        let size = shape.get(1).copied().filter(|&d| d > 0).map(|d| d as usize);
+                        Some((size.unwrap_or(448), shape.first().copied()))
                     } else {
                         None
                     }
                 })
-                .unwrap_or(448);
-            dim
+                .unwrap_or((448, None))
         };
 
         let labels = load_labels(&labels_path)?;
 
         log::info!(
-            "WD tagger loaded in {:?} ({} labels, input {}x{}, {:?} acceleration)",
+            "WD tagger loaded in {:?} ({} labels, input {}x{}, batch axis {:?}, {:?} acceleration)",
             started_at.elapsed(),
             labels.len(),
             input_size,
             input_size,
+            batch_axis,
             acceleration,
         );
 
@@ -494,14 +509,96 @@ impl WdTagger {
         })
     }
 
-    pub fn run(&mut self, image_path: &Path, max_tags: usize) -> Result<TaggerOutput> {
-        let started_at = Instant::now();
+    /// Tag a batch of images in a single forward pass. Returns one result per
+    /// input path, in the same order. Per-image decode failures — and, if the
+    /// batched inference itself fails (e.g. a model pinned to batch=1), a
+    /// per-image inference fallback — are reflected in the individual `Result`s.
+    pub fn run_batch(
+        &mut self,
+        image_paths: &[PathBuf],
+        max_tags: usize,
+    ) -> Vec<Result<TaggerOutput>> {
+        if image_paths.is_empty() {
+            return Vec::new();
+        }
 
-        let image_array = preprocess_image(image_path, self.input_size)?;
-        let batch_size = 1usize;
+        let started_at = Instant::now();
+        let input_size = self.input_size;
+        let stride = input_size * input_size * 3;
+
+        // Decode + preprocess every image in parallel, keeping results aligned to
+        // the inputs so a failure stays attached to its own path.
+        let preprocessed: Vec<Result<Vec<f32>>> = image_paths
+            .par_iter()
+            .map(|path| preprocess_image(path, input_size))
+            .collect();
+
+        // Pack the successfully-decoded images into one contiguous buffer for a
+        // single batched inference, remembering which input slot each came from.
+        let mut batch_slots: Vec<usize> = Vec::new();
+        let mut batch_pixels: Vec<f32> = Vec::with_capacity(image_paths.len() * stride);
+        for (i, result) in preprocessed.iter().enumerate() {
+            if let Ok(pixels) = result {
+                batch_slots.push(i);
+                batch_pixels.extend_from_slice(pixels);
+            }
+        }
+
+        // Seed each slot with its decode error; inference overwrites the ones
+        // that decoded. The placeholder error never survives a decoded slot.
+        let mut results: Vec<Result<TaggerOutput>> = preprocessed
+            .into_iter()
+            .map(|r| match r {
+                Ok(_) => Err(anyhow::anyhow!(
+                    "tagging inference did not run for this image"
+                )),
+                Err(error) => Err(error),
+            })
+            .collect();
+
+        if batch_slots.is_empty() {
+            return results; // nothing decoded
+        }
+
+        match self.infer_batch(&batch_pixels, batch_slots.len(), max_tags) {
+            Ok(outputs) => {
+                for (&slot, output) in batch_slots.iter().zip(outputs) {
+                    results[slot] = Ok(output);
+                }
+            }
+            Err(batch_error) => {
+                log::warn!(
+                    "WD tagger batch inference failed for {} images, falling back to per-image: {batch_error}",
+                    batch_slots.len()
+                );
+                for (k, &slot) in batch_slots.iter().enumerate() {
+                    let pixels = batch_pixels[k * stride..(k + 1) * stride].to_vec();
+                    results[slot] = self.infer_one(pixels, max_tags);
+                }
+            }
+        }
+
+        log::debug!(
+            "WD tagger batch: {} images ({} decoded) in {:?}",
+            image_paths.len(),
+            batch_slots.len(),
+            started_at.elapsed(),
+        );
+
+        results
+    }
+
+    /// Run `count` already-preprocessed images (contiguous `[count, H, W, 3]`
+    /// pixels) through the model in one forward pass.
+    fn infer_batch(
+        &mut self,
+        pixels: &[f32],
+        count: usize,
+        max_tags: usize,
+    ) -> Result<Vec<TaggerOutput>> {
         let input = Tensor::from_array((
-            [batch_size, self.input_size, self.input_size, 3usize],
-            image_array.into_boxed_slice(),
+            [count, self.input_size, self.input_size, 3usize],
+            pixels.to_vec().into_boxed_slice(),
         ))
         .map_err(|error| anyhow::anyhow!("{error}"))?;
 
@@ -511,23 +608,48 @@ impl WdTagger {
             .run(ort::inputs! { input_name.as_str() => input })
             .map_err(|error| anyhow::anyhow!("{error}"))?;
 
-        let (_, probabilities) = outputs[0]
+        let (_, probs) = outputs[0]
             .try_extract_tensor::<f32>()
             .map_err(|error| anyhow::anyhow!("{error}"))?;
 
-        let probs: &[f32] = probabilities;
-
-        if probs.len() != self.labels.len() {
+        let n_labels = self.labels.len();
+        if probs.len() != count * n_labels {
             anyhow::bail!(
-                "Model output length {} does not match label count {}",
+                "Model output length {} does not match {} images x {} labels",
                 probs.len(),
-                self.labels.len()
+                count,
+                n_labels
             );
         }
 
-        // Collect rating scores (category 9) - pick the argmax as the rating.
-        let rating = self
-            .labels
+        // Borrow disjoint fields (not all of `self`) so this doesn't conflict
+        // with the mutable session borrow `outputs` still holds.
+        let labels = &self.labels;
+        let threshold = self.threshold;
+        Ok(probs
+            .chunks_exact(n_labels)
+            .map(|row| Self::tags_from_probs(labels, threshold, row, max_tags))
+            .collect())
+    }
+
+    /// Run a single preprocessed image through the model.
+    fn infer_one(&mut self, image_array: Vec<f32>, max_tags: usize) -> Result<TaggerOutput> {
+        self.infer_batch(&image_array, 1, max_tags)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("tagger produced no output for image"))
+    }
+
+    /// Convert one image's class probabilities into its rating + sorted tags.
+    /// Associated (not `&self`) so callers can hold a disjoint session borrow.
+    fn tags_from_probs(
+        labels: &[TagEntry],
+        threshold: f32,
+        probs: &[f32],
+        max_tags: usize,
+    ) -> TaggerOutput {
+        // Rating (category 9): pick the argmax label as the rating.
+        let rating = labels
             .iter()
             .zip(probs.iter())
             .filter(|(entry, _)| entry.category == RATING_CATEGORY)
@@ -535,14 +657,13 @@ impl WdTagger {
             .map(|(entry, _)| entry.name.clone())
             .unwrap_or_else(|| "general".to_string());
 
-        // Collect general + character tags above threshold, sorted by confidence.
-        let mut tags: Vec<TagResult> = self
-            .labels
+        // General + character tags above threshold, sorted by confidence.
+        let mut tags: Vec<TagResult> = labels
             .iter()
             .zip(probs.iter())
             .filter(|(entry, prob)| {
                 (entry.category == GENERAL_CATEGORY || entry.category == CHARACTER_CATEGORY)
-                    && **prob >= self.threshold
+                    && **prob >= threshold
             })
             .map(|(entry, prob)| TagResult {
                 tag: entry.name.clone(),
@@ -553,16 +674,7 @@ impl WdTagger {
         tags.sort_by(|a, b| b.confidence.total_cmp(&a.confidence));
         tags.truncate(max_tags);
 
-        log::info!(
-            "WD tagger: {} tags (threshold={}, rating={}) in {:?} for {}",
-            tags.len(),
-            self.threshold,
-            rating,
-            started_at.elapsed(),
-            image_path.display(),
-        );
-
-        Ok(TaggerOutput { tags, rating })
+        TaggerOutput { tags, rating }
     }
 }
 
@@ -581,6 +693,22 @@ fn create_tagger_session(path: &Path, acceleration: TaggerAcceleration) -> Resul
         TaggerAcceleration::Auto | TaggerAcceleration::Directml
     );
 
+    // Intra-op thread count. For DirectML the matmuls run on the GPU, so a
+    // single CPU thread for the few CPU-side ops avoids needlessly contending
+    // with the other workers. The CPU EP, however, is compute-bound and would
+    // otherwise be pinned to one core (~15x slower than it needs to be), so give
+    // it most of the logical cores while leaving a couple free for the UI and a
+    // possible concurrent scan. Tagging is the lowest-priority worker, so when
+    // it runs the heavier workers are idle. (Auto only lands on CPU when
+    // DirectML is unavailable — rare on Windows — and stays single-threaded;
+    // CPU-bound users can select the CPU provider explicitly for the speedup.)
+    let intra_threads = match acceleration {
+        TaggerAcceleration::Cpu => std::thread::available_parallelism()
+            .map(|p| p.get().saturating_sub(2).max(1))
+            .unwrap_or(2),
+        TaggerAcceleration::Auto | TaggerAcceleration::Directml => 1,
+    };
+
     let builder = builder
         .with_memory_pattern(!use_directml)
         .map_err(|error| anyhow::anyhow!("{error}"))?;
@@ -588,12 +716,14 @@ fn create_tagger_session(path: &Path, acceleration: TaggerAcceleration) -> Resul
         .with_parallel_execution(false)
         .map_err(|error| anyhow::anyhow!("{error}"))?;
     let builder = builder
-        .with_intra_threads(1)
+        .with_intra_threads(intra_threads)
         .map_err(|error| anyhow::anyhow!("{error}"))?;
 
     let mut builder = match acceleration {
         TaggerAcceleration::Cpu => {
-            log::info!("WD tagger: using CPU execution provider");
+            log::info!(
+                "WD tagger: using CPU execution provider ({intra_threads} intra-op threads)"
+            );
             builder
         }
         TaggerAcceleration::Auto => builder
