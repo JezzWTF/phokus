@@ -48,8 +48,22 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   for real-photo libraries. Each model downloads on demand, and tags are
   attributed to the model that produced them. JoyTag has no built-in rating, so
   its explicitness rating is derived from its tags.
+- **Related tags in Explore** — clicking a tag in the Tag Cloud atlas now reveals
+  its most co-occurring tags with animated connection lines and per-tag image
+  counts, so you can quickly see how tags cluster together and jump to a refined
+  search.
+- **Persist worker pauses across restarts** — a new toggle in Settings → General
+  lets you save per-folder worker pause states so they survive an app restart;
+  useful when you want a folder permanently excluded from background processing
+  without having to re-pause it every launch.
 
 ### Changed
+
+- **Tag manager search and sort** — the Manage mode tag list now has a live
+  filter input and a sort dropdown (most-used / least-used / A–Z / Z–A). The
+  list is virtualised so libraries with thousands of tags scroll without lag,
+  and renaming or deleting a tag no longer clears the current filter/sort state
+  mid-edit.
 
 - **Safer deletion** — deleting media now asks for confirmation and spells out
   that it permanently removes the file(s) from disk. This covers the new gallery
@@ -109,6 +123,19 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   app stays responsive while tagging runs, throughput is steadier (the old wide
   batches caused periodic slowdowns), and the first batch after launch starts
   faster.
+- **Noisy AI tags filtered automatically** — a built-in removal list strips
+  generic or low-signal tags (e.g. "simple background") from WD and JoyTag
+  output before they are stored. Previously-generated tags matching the list are
+  cleaned up at startup. Manual user-added tags are never touched.
+- **Explore Tag Cloud hover glow in Subtle Light** — the radial glow that
+  appears under a tag word on hover was invisible on the light background
+  (white on cream). It now uses a warm dark tone matching the rest of the
+  light-theme palette, and the atlas connection-line gradient adapts to the
+  theme as well.
+- **AI Workspace "Selected Folders" no longer pre-selects a folder** — switching
+  the tagging queue scope to "Selected Folders" previously auto-selected the
+  first folder in the list. It now starts with nothing selected so you can
+  choose exactly which folders to target.
 
 ## [0.1.1] — 2026-06-23
 
