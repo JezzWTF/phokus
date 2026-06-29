@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ImageRecord, tileSizeForZoom, useGalleryStore } from "../store";
 import { ContextMenu, ImageTile } from "./Gallery";
+import { Tooltip } from "./Tooltip";
 
 const GAP = 6;
 const HEADER_HEIGHT = 52;
@@ -374,16 +375,16 @@ function ScrubberYearBlock({ yearEntry, activeGroupIndex, onScrollTo }: Scrubber
 
   return (
     <div className="w-full flex flex-col items-center">
-      <button
-        className={`w-full text-center py-0.5 text-[10px] font-semibold tracking-wide transition-colors ${
-          isYearActive ? "text-white/80" : "text-white/30 hover:text-white/55"
-        }`}
-        onClick={() => onScrollTo(yearEntry.firstGroupIndex)}
-        title={yearEntry.year}
-      >
-        {yearEntry.year}
-      </button>
-
+      <Tooltip label={yearEntry.year} anchorToCursor>
+        <button
+          className={`w-full text-center py-0.5 text-[10px] font-semibold tracking-wide transition-colors ${
+            isYearActive ? "text-white/80" : "text-white/30 hover:text-white/55"
+          }`}
+          onClick={() => onScrollTo(yearEntry.firstGroupIndex)}
+        >
+          {yearEntry.year}
+        </button>
+      </Tooltip>
       <div
         className="grid gap-[3px] pb-1.5"
         style={{ gridTemplateColumns: "repeat(3, 10px)" }}
@@ -396,14 +397,14 @@ function ScrubberYearBlock({ yearEntry, activeGroupIndex, onScrollTo }: Scrubber
             return <span key={monthNum} className="h-[10px] w-[10px]" />;
           }
           return (
-            <button
-              key={monthNum}
-              title={`${monthEntry.label} ${yearEntry.year}`}
-              onClick={() => onScrollTo(monthEntry.groupIndex)}
-              className={`h-[10px] w-[10px] rounded-full transition-colors ${
-                isActive ? "bg-white/70" : "bg-white/15 hover:bg-white/40"
-              }`}
-            />
+            <Tooltip key={monthNum} label={`${monthEntry.label} ${yearEntry.year}`} anchorToCursor>
+              <button
+                onClick={() => onScrollTo(monthEntry.groupIndex)}
+                className={`h-[10px] w-[10px] rounded-full transition-colors ${
+                  isActive ? "bg-white/70" : "bg-white/15 hover:bg-white/40"
+                }`}
+              />
+            </Tooltip>
           );
         })}
       </div>

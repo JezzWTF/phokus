@@ -1,4 +1,5 @@
 import { MouseEvent, ReactNode, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 
 type TooltipSide = "top" | "bottom" | "left" | "right";
@@ -20,8 +21,8 @@ const STATIC_CLASSES = `${BASE_CLASSES} transition-opacity duration-100`;
 /**
  * Lightweight custom tooltip — fades in (faster than the native one) after a
  * tunable hover `delay`, and hides instantly on leave or click. By default it
- * anchors to a `side` of the wrapper; with `followCursor` it tracks the pointer
- * (fixed-positioned, so it escapes scroll-container clipping).
+ * anchors to a `side` of the wrapper. `anchorToCursor` shows at the pointer's
+ * entry position; `followCursor` keeps tracking the pointer.
  */
 export function Tooltip({
   label,
@@ -29,6 +30,7 @@ export function Tooltip({
   side = "bottom",
   align = "center",
   block = false,
+  anchorToCursor = false,
   followCursor = false,
   className = "",
   children,
@@ -41,6 +43,8 @@ export function Tooltip({
   align?: TooltipAlign;
   /** Full-width block wrapper (e.g. wrapping a grid cell) instead of inline. */
   block?: boolean;
+  /** Position at the cursor when shown, without following subsequent movement. */
+  anchorToCursor?: boolean;
   /** Track the cursor (fixed position) instead of anchoring to a side. */
   followCursor?: boolean;
   /** Extra classes for the wrapper (e.g. layout). */
@@ -49,6 +53,7 @@ export function Tooltip({
 }) {
   const [visible, setVisible] = useState(false);
   const [coords, setCoords] = useState({ x: 0, y: 0 });
+  const [mounted, setMounted] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const frame = useRef<number | undefined>(undefined);
   const tooltipRef = useRef<HTMLSpanElement>(null);
@@ -79,7 +84,7 @@ export function Tooltip({
   };
   const show = (event: MouseEvent<HTMLElement>) => {
     clear();
-    if (followCursor) place(event.clientX, event.clientY);
+    if (anchorToCursor || followCursor) place(event.clientX, event.clientY);
     if (delay <= 0) {
       setVisible(true);
       return;
@@ -100,9 +105,31 @@ export function Tooltip({
     });
   };
 
-  useEffect(() => clear, []);
+  useEffect(() => {
+    setMounted(true);
+    return clear;
+  }, []);
 
   const Wrapper = block ? "div" : "span";
+  const cursorTooltip = (
+    <motion.span
+      ref={tooltipRef}
+      role="tooltip"
+      aria-hidden={!visible}
+      // Portaled + fixed so transformed parents and scroll containers cannot
+      // distort cursor-anchored tooltip coordinates.
+      className={`fixed ${BASE_CLASSES}`}
+      initial={false}
+      animate={{ left: coords.x, top: coords.y, opacity: visible ? 1 : 0 }}
+      transition={{
+        left: followCursor ? { type: "spring", stiffness: 700, damping: 45, mass: 0.35 } : { duration: 0 },
+        top: followCursor ? { type: "spring", stiffness: 520, damping: 34, mass: 0.45 } : { duration: 0 },
+        opacity: { duration: visible ? 0.1 : 0.05 },
+      }}
+    >
+      {label}
+    </motion.span>
+  );
 
   return (
     <Wrapper
@@ -113,24 +140,8 @@ export function Tooltip({
       onPointerDown={hide}
     >
       {children}
-      {followCursor ? (
-        <motion.span
-          ref={tooltipRef}
-          role="tooltip"
-          aria-hidden={!visible}
-          // Fixed (so the scroll container's overflow doesn't clip it) and
-          // positioned by `place()` near the cursor with viewport-edge flipping.
-          className={`fixed ${BASE_CLASSES}`}
-          initial={false}
-          animate={{ left: coords.x, top: coords.y, opacity: visible ? 1 : 0 }}
-          transition={{
-            left: { type: "spring", stiffness: 700, damping: 45, mass: 0.35 },
-            top: { type: "spring", stiffness: 520, damping: 34, mass: 0.45 },
-            opacity: { duration: visible ? 0.1 : 0.05 },
-          }}
-        >
-          {label}
-        </motion.span>
+      {anchorToCursor || followCursor ? (
+        mounted ? createPortal(cursorTooltip, document.body) : null
       ) : (
         <span
           role="tooltip"

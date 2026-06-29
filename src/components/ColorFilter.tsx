@@ -56,7 +56,7 @@ export function ColorFilter() {
   }, [open]);
 
   return (
-    <div ref={ref} className="relative ml-1 flex shrink-0 items-center border-l border-white/[0.06] pl-2">
+    <div ref={ref} className="relative ml-1 flex shrink-0 items-center border-l border-white/6 pl-2">
       {/* Trigger — a single palette icon; shows the active color as a dot when a
           filter is applied so the collapsed state still communicates it. */}
       <Tooltip label={isActive ? "Color filter active" : "Filter by color"} delay={400}>
@@ -99,9 +99,9 @@ export function ColorFilter() {
               {SWATCHES.map((swatch) => {
                 const active = rgbEquals(colorFilter, swatch.rgb);
                 return (
+                  <Tooltip label= {swatch.name} followCursor>
                   <button
                     key={swatch.name}
-                    title={swatch.name}
                     aria-label={`Filter by ${swatch.name}`}
                     className={`h-5 w-5 shrink-0 rounded-full border transition-transform ${
                       active ? "scale-110 border-white/40 ring-2 ring-white/70" : "border-white/15 hover:scale-110"
@@ -109,12 +109,12 @@ export function ColorFilter() {
                     style={{ backgroundColor: toHex(swatch.rgb) }}
                     onClick={() => setColorFilter(active ? null : swatch.rgb)}
                   />
+                </Tooltip>
                 );
               })}
-
+              <Tooltip label= "Custom Colour" followCursor>
               {/* Custom color picker — rainbow until a custom color is chosen. */}
               <label
-                title="Custom color"
                 className={`relative h-5 w-5 shrink-0 cursor-pointer overflow-hidden rounded-full border ${
                   isCustom ? "border-white/40 ring-2 ring-white/70" : "border-white/15 hover:scale-110"
                 }`}
@@ -130,11 +130,11 @@ export function ColorFilter() {
                   value={colorFilter ? toHex(colorFilter) : "#3b7dd8"}
                   onChange={(event) => setColorFilter(fromHex(event.target.value))}
                 />
-              </label>
+              </label></Tooltip>
             </div>
 
             {isActive || (colorBackfill && colorBackfill.total > 0) ? (
-              <div className="mt-2 flex items-center justify-between gap-3 border-t border-white/[0.06] pt-2 light-theme:border-gray-700/40">
+              <div className="mt-2 flex items-center justify-between gap-3 border-t border-white/6 pt-2 light-theme:border-gray-700/40">
                 {colorBackfill && colorBackfill.total > 0 ? (
                   <span
                     className="text-[10px] text-gray-600"
