@@ -59,6 +59,10 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Explore cluster layout** — clusters are now sized by image count (busier
   clusters are larger and stack on top) and repositioned to avoid overlapping, so
   every cluster stays viewable and clickable even in dense libraries.
+- **Faster CPU tagging** — when AI tagging runs on the CPU provider (no usable
+  GPU) it now uses multiple cores instead of being pinned to one, several times
+  faster on multi-core machines. A couple of cores are left free so the rest of
+  the app stays responsive. GPU (DirectML) tagging is unchanged.
 
 ### Fixed
 

@@ -693,6 +693,22 @@ fn create_tagger_session(path: &Path, acceleration: TaggerAcceleration) -> Resul
         TaggerAcceleration::Auto | TaggerAcceleration::Directml
     );
 
+    // Intra-op thread count. For DirectML the matmuls run on the GPU, so a
+    // single CPU thread for the few CPU-side ops avoids needlessly contending
+    // with the other workers. The CPU EP, however, is compute-bound and would
+    // otherwise be pinned to one core (~15x slower than it needs to be), so give
+    // it most of the logical cores while leaving a couple free for the UI and a
+    // possible concurrent scan. Tagging is the lowest-priority worker, so when
+    // it runs the heavier workers are idle. (Auto only lands on CPU when
+    // DirectML is unavailable — rare on Windows — and stays single-threaded;
+    // CPU-bound users can select the CPU provider explicitly for the speedup.)
+    let intra_threads = match acceleration {
+        TaggerAcceleration::Cpu => std::thread::available_parallelism()
+            .map(|p| p.get().saturating_sub(2).max(1))
+            .unwrap_or(2),
+        TaggerAcceleration::Auto | TaggerAcceleration::Directml => 1,
+    };
+
     let builder = builder
         .with_memory_pattern(!use_directml)
         .map_err(|error| anyhow::anyhow!("{error}"))?;
@@ -700,12 +716,14 @@ fn create_tagger_session(path: &Path, acceleration: TaggerAcceleration) -> Resul
         .with_parallel_execution(false)
         .map_err(|error| anyhow::anyhow!("{error}"))?;
     let builder = builder
-        .with_intra_threads(1)
+        .with_intra_threads(intra_threads)
         .map_err(|error| anyhow::anyhow!("{error}"))?;
 
     let mut builder = match acceleration {
         TaggerAcceleration::Cpu => {
-            log::info!("WD tagger: using CPU execution provider");
+            log::info!(
+                "WD tagger: using CPU execution provider ({intra_threads} intra-op threads)"
+            );
             builder
         }
         TaggerAcceleration::Auto => builder
