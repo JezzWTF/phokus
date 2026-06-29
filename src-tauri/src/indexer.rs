@@ -9,7 +9,7 @@ use crate::vector;
 use anyhow::Result;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rayon::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -41,6 +41,14 @@ struct PausedWorkerFolders {
     tagging: HashSet<i64>,
 }
 
+#[derive(Default, Deserialize, Serialize)]
+pub struct PersistedPausedWorkerFolders {
+    pub thumbnail: Vec<i64>,
+    pub metadata: Vec<i64>,
+    pub embedding: Vec<i64>,
+    pub tagging: Vec<i64>,
+}
+
 #[derive(Clone, Copy)]
 pub struct FolderWorkerPausedState {
     pub thumbnail: bool,
@@ -48,6 +56,41 @@ pub struct FolderWorkerPausedState {
     pub embedding: bool,
     pub caption: bool,
     pub tagging: bool,
+}
+
+pub fn replace_worker_paused_states(states: PersistedPausedWorkerFolders) {
+    if let Ok(mut paused_folders) = PAUSED_WORKER_FOLDERS
+        .get_or_init(|| Mutex::new(PausedWorkerFolders::default()))
+        .lock()
+    {
+        paused_folders.thumbnail = states.thumbnail.into_iter().collect();
+        paused_folders.metadata = states.metadata.into_iter().collect();
+        paused_folders.embedding = states.embedding.into_iter().collect();
+        paused_folders.caption = HashSet::new();
+        paused_folders.tagging = states.tagging.into_iter().collect();
+    }
+}
+
+pub fn snapshot_worker_paused_states() -> PersistedPausedWorkerFolders {
+    let Ok(paused_folders) = PAUSED_WORKER_FOLDERS
+        .get_or_init(|| Mutex::new(PausedWorkerFolders::default()))
+        .lock()
+    else {
+        return PersistedPausedWorkerFolders::default();
+    };
+
+    let sorted = |set: &HashSet<i64>| {
+        let mut ids = set.iter().copied().collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids
+    };
+
+    PersistedPausedWorkerFolders {
+        thumbnail: sorted(&paused_folders.thumbnail),
+        metadata: sorted(&paused_folders.metadata),
+        embedding: sorted(&paused_folders.embedding),
+        tagging: sorted(&paused_folders.tagging),
+    }
 }
 
 pub fn set_worker_paused(worker: &str, folder_id: i64, paused: bool) {

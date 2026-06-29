@@ -1947,6 +1947,7 @@ pub struct FolderWorkerStates {
 
 #[tauri::command]
 pub async fn set_worker_paused(
+    app: AppHandle,
     db: State<'_, DbState>,
     worker: String,
     folder_id: i64,
@@ -1962,6 +1963,9 @@ pub async fn set_worker_paused(
         let conn = db.get().map_err(|e| e.to_string())?;
         db::requeue_processing_tagging_jobs_for_folder(&conn, folder_id)
             .map_err(|e| e.to_string())?;
+    }
+    if let Err(error) = persist_worker_pauses_if_enabled(&app) {
+        log::warn!("Failed to persist worker pause state: {error}");
     }
     Ok(())
 }
@@ -2482,6 +2486,8 @@ pub async fn bulk_remove_tag(
 
 const TAGGING_QUEUE_SCOPE_FILE: &str = "settings/tagging_queue_scope.txt";
 const TAGGING_QUEUE_FOLDER_IDS_FILE: &str = "settings/tagging_queue_folder_ids.txt";
+const WORKER_PAUSES_PERSIST_FILE: &str = "settings/worker_pauses_persist.txt";
+const WORKER_PAUSES_FILE: &str = "settings/worker_pauses.json";
 
 #[derive(Deserialize)]
 pub struct SetTaggingQueueScopeParams {
@@ -2550,6 +2556,67 @@ pub async fn set_tagging_queue_folder_ids(
     }
     let content: Vec<String> = params.folder_ids.iter().map(|id| id.to_string()).collect();
     std::fs::write(path, content.join(",")).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn worker_pause_persistence_enabled(app_dir: &Path) -> bool {
+    std::fs::read_to_string(app_dir.join(WORKER_PAUSES_PERSIST_FILE))
+        .map(|value| value.trim() == "true")
+        .unwrap_or(false)
+}
+
+fn write_worker_pause_snapshot(app_dir: &Path) -> Result<(), String> {
+    let path = app_dir.join(WORKER_PAUSES_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(&indexer::snapshot_worker_paused_states())
+        .map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+fn persist_worker_pauses_if_enabled(app: &AppHandle) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if worker_pause_persistence_enabled(&app_dir) {
+        write_worker_pause_snapshot(&app_dir)?;
+    }
+    Ok(())
+}
+
+pub fn restore_persisted_worker_pauses(app_dir: &Path) {
+    if !worker_pause_persistence_enabled(app_dir) {
+        return;
+    }
+
+    let path = app_dir.join(WORKER_PAUSES_FILE);
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
+    match serde_json::from_str::<indexer::PersistedPausedWorkerFolders>(&content) {
+        Ok(states) => indexer::replace_worker_paused_states(states),
+        Err(error) => log::warn!("Failed to restore persisted worker pauses: {error}"),
+    }
+}
+
+#[tauri::command]
+pub async fn get_worker_pauses_persist(app: AppHandle) -> Result<bool, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(worker_pause_persistence_enabled(&app_dir))
+}
+
+#[tauri::command]
+pub async fn set_worker_pauses_persist(app: AppHandle, persist: bool) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join(WORKER_PAUSES_PERSIST_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, if persist { "true" } else { "false" }).map_err(|e| e.to_string())?;
+    if persist {
+        write_worker_pause_snapshot(&app_dir)?;
+    } else {
+        let _ = std::fs::remove_file(app_dir.join(WORKER_PAUSES_FILE));
+    }
     Ok(())
 }
 

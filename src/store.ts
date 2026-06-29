@@ -400,6 +400,7 @@ interface GalleryState {
   taggingQueueFolderIds: number[];
   mutedFolderIds: number[];
   notificationsPaused: boolean;
+  workerPausesPersist: boolean;
   theme: AppTheme;
   lightboxAutoplay: boolean;
   lightboxAutoMute: boolean;
@@ -524,6 +525,8 @@ interface GalleryState {
   toggleMutedFolder: (folderId: number) => void;
   loadNotificationsPaused: () => Promise<void>;
   setNotificationsPaused: (paused: boolean) => void;
+  loadWorkerPausesPersist: () => Promise<void>;
+  setWorkerPausesPersist: (persist: boolean) => void;
   setTheme: (theme: AppTheme) => void;
   setLightboxAutoplay: (enabled: boolean) => void;
   setLightboxAutoMute: (enabled: boolean) => void;
@@ -889,6 +892,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   taggingQueueFolderIds: [],
   mutedFolderIds: [],
   notificationsPaused: false,
+  workerPausesPersist: false,
   theme: initialTheme(),
   lightboxAutoplay: initialBoolSetting(LIGHTBOX_AUTOPLAY_KEY, true),
   lightboxAutoMute: initialBoolSetting(LIGHTBOX_AUTO_MUTE_KEY, false),
@@ -1919,6 +1923,20 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       },
     }));
     return entries;
+  },
+
+  loadWorkerPausesPersist: async () => {
+    try {
+      const persist = await invoke<boolean>("get_worker_pauses_persist");
+      set({ workerPausesPersist: persist });
+    } catch {
+      // fall back to in-memory default
+    }
+  },
+
+  setWorkerPausesPersist: (persist) => {
+    set({ workerPausesPersist: persist });
+    void invoke("set_worker_pauses_persist", { persist }).catch(() => {});
   },
 
   setTheme: (theme) => {

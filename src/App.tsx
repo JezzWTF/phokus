@@ -27,6 +27,7 @@ export default function App() {
   const loadAlbums = useGalleryStore((state) => state.loadAlbums);
   const loadMutedFolderIds = useGalleryStore((state) => state.loadMutedFolderIds);
   const loadNotificationsPaused = useGalleryStore((state) => state.loadNotificationsPaused);
+  const loadWorkerPausesPersist = useGalleryStore((state) => state.loadWorkerPausesPersist);
   const subscribeToProgress = useGalleryStore((state) => state.subscribeToProgress);
   const loadAppVersion = useGalleryStore((state) => state.loadAppVersion);
   const checkForUpdates = useGalleryStore((state) => state.checkForUpdates);
@@ -39,6 +40,7 @@ export default function App() {
     void initializeNotifications();
     void loadMutedFolderIds();
     void loadNotificationsPaused();
+    void loadWorkerPausesPersist();
     void loadFfmpegStatus();
     void loadOnboardingCompleted();
     // Load the app version first so the What's New toast/modal (which read

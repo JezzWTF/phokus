@@ -381,9 +381,11 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
     case "set_tagging_queue_folder_ids":
     case "set_muted_folder_ids":
     case "set_notifications_paused":
+    case "set_worker_pauses_persist":
     case "set_worker_paused":
       return null;
     case "get_notifications_paused":
+    case "get_worker_pauses_persist":
     case "get_onboarding_completed":
       return db.scenario !== "empty";
     case "set_onboarding_completed":

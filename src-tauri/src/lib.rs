@@ -119,6 +119,7 @@ pub fn run() {
 
             let thumb_dir = app_dir.join("thumbnails");
             std::fs::create_dir_all(&thumb_dir).expect("Failed to create thumbnail dir");
+            commands::restore_persisted_worker_pauses(&app_dir);
 
             // The asset protocol scope is no longer a blanket "**": thumbnails
             // are allowed statically in tauri.conf.json, and each indexed
@@ -195,6 +196,8 @@ pub fn run() {
             commands::suggest_image_tags,
             commands::set_worker_paused,
             commands::get_worker_states,
+            commands::get_worker_pauses_persist,
+            commands::set_worker_pauses_persist,
             commands::get_tag_cloud,
             commands::get_explore_tags,
             commands::get_related_tags,
