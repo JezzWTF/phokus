@@ -381,7 +381,14 @@ interface GalleryState {
   exploreTagEntries: ExploreTagEntry[];
   exploreTagLoading: boolean;
   exploreTagsFolderId: number | null | undefined;
+  // Cache-freshness key: the folder the loaded tags belong to. Set to undefined
+  // by content mutations (tag add/remove/rename/delete) to mark the cache dirty
+  // and force the next load to refetch.
   relatedTagsByKey: Record<string, RelatedTagEntry[]>;
+  // The folder whose tags are actually on screen. Kept separate from the dirty
+  // marker above so a same-folder invalidation isn't mistaken for a folder switch
+  // (which would wipe the visible list and remount manager UI mid-refresh).
+  exploreTagsShownFolderId: number | null | undefined;
   indexingProgress: Record<number, IndexProgress>;
   mediaJobProgress: Record<number, FolderJobProgress>;
   cacheDir: string;
@@ -877,6 +884,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   indexingProgress: {},
   mediaJobProgress: {},
   cacheDir: "",
+  exploreTagsShownFolderId: undefined,
   captionModelStatus: null,
   captionModelPreparing: false,
   captionModelError: null,
@@ -1404,7 +1412,15 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       return;
     }
     const requestToken = ++tagCloudRequestToken;
-    set({ tagCloudLoading: true, tagCloudFolderId: selectedFolderId });
+    // On a real folder switch, drop the previous folder's clusters so the loading
+    // panel shows instead of lingering stale results. A same-folder refresh keeps
+    // them to avoid a flicker when the cache returns instantly.
+    const isFolderSwitch = tagCloudFolderId !== selectedFolderId;
+    set({
+      tagCloudLoading: true,
+      tagCloudFolderId: selectedFolderId,
+      ...(isFolderSwitch ? { tagCloudEntries: [] } : {}),
+    });
     try {
       const entries = await invoke<TagCloudEntry[]>("get_tag_cloud", {
         folderId: selectedFolderId,
@@ -1425,7 +1441,20 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       return;
     }
     const requestToken = ++exploreTagRequestToken;
-    set({ exploreTagLoading: true, exploreTagsFolderId: selectedFolderId });
+    // A real folder switch is decided by what's currently *shown*, not by the
+    // dirty marker — a same-folder invalidation nulls exploreTagsFolderId but
+    // leaves exploreTagsShownFolderId pointing at the displayed folder, so the
+    // visible list (and manager UI state) survives the refresh. On an actual
+    // switch, drop the previous folder's tags so the loading panel shows.
+    const { exploreTagsShownFolderId } = get();
+    const isFolderSwitch =
+      exploreTagsShownFolderId !== undefined && exploreTagsShownFolderId !== selectedFolderId;
+    set({
+      exploreTagLoading: true,
+      exploreTagsFolderId: selectedFolderId,
+      exploreTagsShownFolderId: selectedFolderId,
+      ...(isFolderSwitch ? { exploreTagEntries: [], relatedTagsByKey: {} } : {}),
+    });
     try {
       const entries = await invoke<ExploreTagEntry[]>("get_explore_tags", {
         params: { folder_id: selectedFolderId, limit: 180 },

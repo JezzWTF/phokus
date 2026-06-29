@@ -59,6 +59,10 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- **Faster Explore on large libraries** — revisiting a folder's visual clusters
+  is now near-instant. The cluster cache is validated from a lightweight
+  image-ID signature instead of re-reading every embedding, so big libraries no
+  longer stall for several seconds even when the cached result is reused.
 - **Tag manager search and sort** — the Manage mode tag list now has a live
   filter input and a sort dropdown (most-used / least-used / A–Z / Z–A). The
   list is virtualised so libraries with thousands of tags scroll without lag,
@@ -86,6 +90,10 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **Stale Explore results on folder switch** — switching folders (or re-entering
+  Explore) no longer briefly shows the previous folder's clusters/tags with no
+  loading indicator; the view now clears and shows a loading state until the new
+  folder's data arrives.
 - **Rating no longer scrambles search results** — rating or favoriting an image
   while viewing similar-image, region, semantic, tag, or album results no longer
   re-sorts the view back into the default order; the current result ordering is

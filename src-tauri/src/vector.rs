@@ -263,6 +263,44 @@ pub fn get_embedding_revision(conn: &Connection) -> Result<String> {
 
 /// Returns all stored image embeddings with their image IDs, optionally filtered to one folder.
 /// Each entry is `(image_id, normalized_f32_embedding)`.
+/// Returns `(count, hash)` over the stored embedding image IDs for the scope in a
+/// single ordered pass, without loading any embedding blobs. The hash covers the
+/// exact set of IDs, so it is membership-sensitive: adding, removing, or moving an
+/// image between folders changes it even when the count happens to stay the same.
+/// Used (together with the embedding revision, which catches an image being
+/// re-embedded in place) as the cheap tag-cloud cache key so a cache hit doesn't
+/// have to read and unpack hundreds of MB of embeddings just to validate freshness.
+pub fn embedding_ids_signature(conn: &Connection, folder_id: Option<i64>) -> Result<(i64, u64)> {
+    use xxhash_rust::xxh3::Xxh3;
+    let mut hasher = Xxh3::new();
+    let mut count: i64 = 0;
+    let mut hash_row = |id: i64| {
+        hasher.update(&id.to_le_bytes());
+        count += 1;
+    };
+    match folder_id {
+        Some(fid) => {
+            let mut stmt = conn.prepare(
+                "SELECT image_id FROM image_vec
+                 WHERE image_id IN (SELECT id FROM images WHERE folder_id = ?1)
+                 ORDER BY image_id",
+            )?;
+            let mut rows = stmt.query([fid])?;
+            while let Some(row) = rows.next()? {
+                hash_row(row.get(0)?);
+            }
+        }
+        None => {
+            let mut stmt = conn.prepare("SELECT image_id FROM image_vec ORDER BY image_id")?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                hash_row(row.get(0)?);
+            }
+        }
+    }
+    Ok((count, hasher.digest()))
+}
+
 pub fn get_all_image_embeddings_with_ids(
     conn: &Connection,
     folder_id: Option<i64>,

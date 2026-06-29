@@ -1178,38 +1178,39 @@ pub async fn get_tag_cloud(
     db: State<'_, DbState>,
     folder_id: Option<i64>,
 ) -> Result<Vec<TagCloudEntry>, String> {
-    let embeddings_with_ids = {
-        let conn = db.get().map_err(|e| e.to_string())?;
-        vector::get_all_image_embeddings_with_ids(&conn, folder_id).map_err(|e| e.to_string())?
-    };
-
-    let n = embeddings_with_ids.len();
-    if n < 5 {
-        return Ok(vec![]);
-    }
-
-    // Sort by ID for stable ordering; hash both IDs and embedding bytes so that
-    // replacing a file and regenerating its embedding invalidates the cache even
-    // when the set of image IDs hasn't changed.
-    let mut sorted_pairs: Vec<_> = embeddings_with_ids.iter().collect();
-    sorted_pairs.sort_unstable_by_key(|(id, _)| *id);
-    let current_hash = {
-        use xxhash_rust::xxh3::Xxh3;
-        let mut hasher = Xxh3::new();
-        for (id, embedding) in &sorted_pairs {
-            hasher.update(&id.to_le_bytes());
-            for val in embedding.iter() {
-                hasher.update(&val.to_le_bytes());
-            }
-        }
-        hasher.digest()
-    };
     let folder_scope = match folder_id {
         Some(id) => format!("folder_{id}"),
         None => "all".to_string(),
     };
 
-    // Try to return a valid SQLite cache
+    // Build a cheap cache key from a hash of the embedded image-ID set plus the
+    // global monotonic embedding revision. The ID-set hash catches membership
+    // changes (add/remove, or moving an image between folders — even when the
+    // count is unchanged); the revision catches an image being re-embedded in
+    // place (same IDs, new vector). Together they validate the cache WITHOUT
+    // reading and unpacking every embedding blob — which for a large library is
+    // hundreds of MB and was the real cause of the multi-second Explore stall
+    // even on a cache hit.
+    let (count, current_hash) = {
+        let conn = db.get().map_err(|e| e.to_string())?;
+        let (count, ids_hash) =
+            vector::embedding_ids_signature(&conn, folder_id).map_err(|e| e.to_string())?;
+        let revision = vector::get_embedding_revision(&conn).map_err(|e| e.to_string())?;
+        let hash = {
+            use xxhash_rust::xxh3::Xxh3;
+            let mut hasher = Xxh3::new();
+            hasher.update(&ids_hash.to_le_bytes());
+            hasher.update(revision.as_bytes());
+            hasher.digest()
+        };
+        (count, hash)
+    };
+
+    if count < 5 {
+        return Ok(vec![]);
+    }
+
+    // Try to return a valid SQLite cache before loading any embeddings.
     {
         let conn = db.get().map_err(|e| e.to_string())?;
         if let Some(json) = db::get_tag_cloud_cache(&conn, &folder_scope, current_hash)
@@ -1225,8 +1226,17 @@ pub async fn get_tag_cloud(
         }
     }
 
-    // Cache miss — run k-means
+    // Cache miss — now pay the cost of loading embeddings and running k-means.
+    let embeddings_with_ids = {
+        let conn = db.get().map_err(|e| e.to_string())?;
+        vector::get_all_image_embeddings_with_ids(&conn, folder_id).map_err(|e| e.to_string())?
+    };
+    if embeddings_with_ids.len() < 5 {
+        return Ok(vec![]);
+    }
+
     let ids: Vec<i64> = embeddings_with_ids.iter().map(|(id, _)| *id).collect();
+    let n = embeddings_with_ids.len();
     let points: Vec<Vec<f32>> = embeddings_with_ids
         .into_iter()
         .map(|(_, emb)| emb)
@@ -1276,9 +1286,12 @@ pub async fn get_tag_cloud(
         });
     }
 
-    // Persist to SQLite — ignore write errors (cache is best-effort)
+    // Persist to SQLite. The cache is best-effort, but a silent write failure here
+    // would defeat the whole optimization (every visit would recompute), so log it.
     if let Ok(json) = serde_json::to_string(&entries) {
-        let _ = db::set_tag_cloud_cache(&conn, &folder_scope, current_hash, &json);
+        if let Err(e) = db::set_tag_cloud_cache(&conn, &folder_scope, current_hash, &json) {
+            eprintln!("failed to persist tag-cloud cache for {folder_scope}: {e}");
+        }
     }
 
     Ok(entries)
