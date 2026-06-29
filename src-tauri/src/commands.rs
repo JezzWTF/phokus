@@ -8,7 +8,7 @@ use crate::db::{
 use crate::embedder;
 use crate::hnsw_index;
 use crate::indexer::{self, WatcherHandle};
-use crate::tagger::{self, TaggerAcceleration, TaggerModelStatus, TaggerRuntimeProbe};
+use crate::tagger::{self, TaggerAcceleration, TaggerModel, TaggerModelStatus, TaggerRuntimeProbe};
 use crate::vector;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -1971,6 +1971,11 @@ pub struct SetTaggerAccelerationParams {
 }
 
 #[derive(Deserialize)]
+pub struct SetTaggerModelParams {
+    pub model: TaggerModel,
+}
+
+#[derive(Deserialize)]
 pub struct SetTaggerThresholdParams {
     pub threshold: f32,
 }
@@ -2028,6 +2033,21 @@ pub async fn set_tagger_acceleration(
 ) -> Result<TaggerAcceleration, String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     tagger::set_tagger_acceleration(&app_dir, params.acceleration).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_tagger_model(app: AppHandle) -> Result<TaggerModel, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(tagger::tagger_model(&app_dir))
+}
+
+#[tauri::command]
+pub async fn set_tagger_model(
+    app: AppHandle,
+    params: SetTaggerModelParams,
+) -> Result<TaggerModel, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tagger::set_tagger_model(&app_dir, params.model).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

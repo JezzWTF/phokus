@@ -202,6 +202,8 @@ pub fn run() {
             commands::get_tagger_model_status,
             commands::get_tagger_acceleration,
             commands::set_tagger_acceleration,
+            commands::get_tagger_model,
+            commands::set_tagger_model,
             commands::probe_tagger_runtime,
             commands::get_tagger_threshold,
             commands::set_tagger_threshold,
