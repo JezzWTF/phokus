@@ -209,8 +209,13 @@ html[data-theme="subtle-light"] .explore-cluster-count {
   color: #ffffff !important;
 }
 
-html[data-theme="subtle-light"] .explore-tag-word:hover {
-  background: #e8e2d6 !important;
+html[data-theme="subtle-light"] .explore-tag-word::before {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(60, 50, 30, 0.13),
+    rgba(60, 50, 30, 0.05) 46%,
+    rgba(60, 50, 30, 0) 72%
+  ) !important;
 }
 
 html[data-theme="subtle-light"] .explore-spinner {
