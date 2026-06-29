@@ -1248,13 +1248,16 @@ fn process_tagging_batch(
 
     // Exclude actively-indexing folders for the same reason as the other
     // workers: don't compete with a running scan.
+    let batch_started_at = Instant::now();
     let mut excluded_folders = paused_folder_ids("tagging");
     excluded_folders.extend(active_indexing_folders());
     let batch_size = crate::tagger::tagger_batch_size(app_data_dir);
+    let claim_started_at = Instant::now();
     let jobs = with_db_write_lock(|| {
         let mut conn = pool.get()?;
         db::claim_tagging_jobs(&mut conn, &excluded_folders, batch_size)
     })?;
+    let claim_elapsed = claim_started_at.elapsed();
 
     if jobs.is_empty() {
         return Ok(false);
@@ -1288,21 +1291,41 @@ fn process_tagging_batch(
         .as_mut()
         .expect("tagger should be initialized before tagging batch processing");
 
-    let tag_results = jobs
+    // Resolve each job's source image (AVIF can't be decoded directly, so it
+    // falls back to its thumbnail), then tag the batch in small chunks (below).
+    let source_paths: Vec<PathBuf> = jobs
         .iter()
         .map(|job| {
-            let source_path = if is_avif_path(Path::new(&job.path)) {
-                job.thumbnail_path.as_deref().unwrap_or(&job.path)
+            if is_avif_path(Path::new(&job.path)) {
+                PathBuf::from(job.thumbnail_path.as_deref().unwrap_or(&job.path))
             } else {
-                &job.path
-            };
-            (
-                job.clone(),
-                tagger_ref.run(Path::new(source_path), tagger::DEFAULT_MAX_TAGS),
-            )
+                PathBuf::from(&job.path)
+            }
         })
-        .collect::<Vec<_>>();
+        .collect();
 
+    // Tag in small micro-batches instead of one wide forward pass. On a shared
+    // GPU every DirectML dispatch blocks the WebView2 compositor for its whole
+    // duration, so a 16-wide batch freezes the UI for seconds; small chunks keep
+    // each GPU lock short (and bound peak decode memory) while a brief yield
+    // between them lets the UI and other workers grab the GPU/CPU. The model is
+    // compute-bound here, so this costs almost no throughput.
+    let infer_started_at = Instant::now();
+    let mut outputs = Vec::with_capacity(source_paths.len());
+    let mut chunks = source_paths.chunks(tagger::TAGGER_INFER_CHUNK).peekable();
+    while let Some(chunk) = chunks.next() {
+        outputs.extend(tagger_ref.run_batch(chunk, tagger::DEFAULT_MAX_TAGS));
+        if chunks.peek().is_some() {
+            std::thread::sleep(std::time::Duration::from_millis(
+                tagger::TAGGER_INFER_YIELD_MS,
+            ));
+        }
+    }
+    let infer_elapsed = infer_started_at.elapsed();
+
+    let tag_results = jobs.iter().cloned().zip(outputs).collect::<Vec<_>>();
+
+    let write_started_at = Instant::now();
     let updated_images = with_db_write_lock(|| {
         let mut conn = pool.get()?;
         let tx = conn.transaction()?;
@@ -1354,6 +1377,7 @@ fn process_tagging_batch(
             db::requeue_tagging_jobs(&conn, &image_ids)
         });
     })?;
+    let write_elapsed = write_started_at.elapsed();
 
     if !updated_images.is_empty() {
         let folder_ids = updated_images
@@ -1368,6 +1392,15 @@ fn process_tagging_batch(
         );
         emit_folder_job_progress(app, pool, &folder_ids.into_iter().collect::<Vec<_>>(), true);
     }
+
+    log::info!(
+        "Tagging batch timing: {} items, claim {:?}, tag {:?}, write {:?}, total {:?}",
+        jobs.len(),
+        claim_elapsed,
+        infer_elapsed,
+        write_elapsed,
+        batch_started_at.elapsed()
+    );
 
     Ok(true)
 }

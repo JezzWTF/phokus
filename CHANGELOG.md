@@ -93,6 +93,12 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Explore polish** — the Tag Cloud now uses the in-app tooltip instead of the
   native browser one (and reads "1 image", not "1 images"), and the folder-scope
   dropdown no longer opens behind the cluster cards.
+- **AI tagging no longer freezes the app** — tagging now runs inference in small
+  GPU micro-batches with a brief yield between them, instead of one wide batch
+  that monopolised the GPU (and with it the whole UI) for seconds at a time. The
+  app stays responsive while tagging runs, throughput is steadier (the old wide
+  batches caused periodic slowdowns), and the first batch after launch starts
+  faster.
 
 ## [0.1.1] — 2026-06-23
 
