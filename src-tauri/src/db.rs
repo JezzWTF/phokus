@@ -1,4 +1,4 @@
-use crate::vector;
+use crate::{ai_tag_filter, vector};
 use anyhow::Result;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -378,6 +378,42 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     )?;
 
     vector::migrate(conn)?;
+    remove_filtered_ai_tags(conn)?;
+    Ok(())
+}
+
+fn remove_filtered_ai_tags(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("SELECT id, tag FROM image_tags WHERE source = 'ai'")?;
+    let filtered_ids = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .filter_map(|row| match row {
+            Ok((id, tag)) if ai_tag_filter::is_removed_ai_tag(&tag) => Some(Ok(id)),
+            Ok(_) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+
+    if filtered_ids.is_empty() {
+        return Ok(());
+    }
+
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut delete_stmt = tx.prepare("DELETE FROM image_tags WHERE id = ?1")?;
+        for id in &filtered_ids {
+            delete_stmt.execute([id])?;
+        }
+    }
+    tx.execute("DELETE FROM tag_cloud_cache", [])?;
+    tx.commit()?;
+
+    log::info!(
+        "Removed {} filtered AI tag(s) from existing library data",
+        filtered_ids.len()
+    );
     Ok(())
 }
 

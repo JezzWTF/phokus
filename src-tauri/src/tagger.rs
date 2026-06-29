@@ -1,3 +1,4 @@
+use crate::ai_tag_filter;
 use anyhow::Result;
 use hf_hub::{api::sync::Api, Repo, RepoType};
 use image::{imageops::FilterType, DynamicImage, ImageReader};
@@ -759,6 +760,7 @@ impl WdTagger {
             .filter(|(entry, prob)| {
                 (entry.category == GENERAL_CATEGORY || entry.category == CHARACTER_CATEGORY)
                     && **prob >= threshold
+                    && !ai_tag_filter::is_removed_ai_tag(&entry.name)
             })
             .map(|(entry, prob)| TagResult {
                 tag: entry.name.clone(),
@@ -1137,9 +1139,11 @@ fn joytag_tags_from_logits(
         .zip(logits.iter())
         .filter_map(|(name, logit)| {
             let confidence = sigmoid(*logit);
-            (confidence >= threshold).then(|| TagResult {
-                tag: name.clone(),
-                confidence,
+            (confidence >= threshold && !ai_tag_filter::is_removed_ai_tag(name)).then(|| {
+                TagResult {
+                    tag: name.clone(),
+                    confidence,
+                }
             })
         })
         .collect();

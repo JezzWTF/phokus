@@ -1,3 +1,4 @@
+mod ai_tag_filter;
 mod captioner;
 mod color;
 mod commands;
