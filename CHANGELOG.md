@@ -63,6 +63,9 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- **Two-column lightbox details** — the image info panel now lays metadata out in
+  two columns (Dimensions/Duration, Video codec/Audio codec, Type/File size sit
+  side by side), so the panel is more compact and less scrolling.
 - **Faster Explore on large libraries** — revisiting a folder's visual clusters
   is now near-instant. The cluster cache is validated from a lightweight
   image-ID signature instead of re-reading every embedding, so big libraries no

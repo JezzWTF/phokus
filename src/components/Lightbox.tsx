@@ -611,7 +611,8 @@ export function Lightbox() {
                 )}
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 space-y-4 text-sm">
-                  <div>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+                  <div className="col-span-2">
                     <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">Rating</p>
                     <div className="flex items-center gap-1">
                       {Array.from({ length: 5 }, (_, index) => {
@@ -674,7 +675,7 @@ export function Lightbox() {
                       </div>
 
                       {selectedImage.metadata_error ? (
-                        <div>
+                        <div className="col-span-2">
                           <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">Metadata</p>
                           <p className="text-amber-300">{selectedImage.metadata_error}</p>
                         </div>
@@ -692,17 +693,18 @@ export function Lightbox() {
                     <p className="text-white">{formatBytes(selectedImage.file_size)}</p>
                   </div>
 
-                  <div>
+                  <div className="col-span-2">
                     <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">Modified</p>
                     <p className="text-white">{formatDate(selectedImage.modified_at)}</p>
                   </div>
 
-                  <div>
+                  <div className="col-span-2">
                     <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">Embedding</p>
                     <p className="text-white">{embeddingLabel(selectedImage.embedding_status, selectedImage.embedding_model)}</p>
                     {selectedImage.embedding_error ? (
                       <p className="mt-1 text-xs text-amber-300">{selectedImage.embedding_error}</p>
                     ) : null}
+                  </div>
                   </div>
 
                   <div>
