@@ -9,157 +9,112 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
-- **Quick theme switch** — right-click the settings cog in the title bar to
-  switch theme (Phokus / Subtle Light / Conventional Dark) on the spot, without
-  opening Settings.
-- **Albums** — curate your own collections. A new Albums section in the sidebar
-  (with cover thumbnails, kept visually distinct from Libraries) lets you create,
-  rename, reorder (drag the row), and open albums; albums can span multiple
-  folders. Add images from the gallery's bulk action bar or from the lightbox,
-  remove them from within an album, and use Manage mode to multi-select and
-  delete albums in one go. Deleting an album never touches your files — only the
-  grouping is removed.
-- **Multi-select & bulk actions in the gallery** — hover a thumbnail's top-left
-  corner to reveal a selection checkbox (click it to start selecting); while
-  selecting, click tiles to toggle and double-click to open. A floating action
-  bar then lets you tag (with autocomplete), rate, favorite, add to an album, or
-  delete the whole selection at once. Works in similar-image, region, and album
-  views too.
-- **Colour search** — filter the gallery (and Timeline) by dominant colour via a
-  collapsible swatch palette plus a custom colour picker in the toolbar; existing
-  libraries are backfilled automatically in the background.
-- **Album-scoped similar search** — when finding visually similar images or
-  searching by a selected region from an album, you can now keep results scoped
-  to that album, switch back to the source folder, or search all media.
-- **Tag management** — Explore → Tag Cloud gains a Manage mode with a flat tag
-  list where you can rename a tag, merge it into another (rename it to an
-  existing tag's name), or delete it from every image. Changes apply across the
-  whole library. Settings → AI Workspace also has an "Open tag manager" button
-  that jumps straight into it.
-- **Camera info in the lightbox** — the image info panel now shows EXIF details
-  (camera, lens, aperture, shutter, ISO, focal length) and, when a photo is
-  geotagged, its GPS coordinates as a link that opens the location in your
-  browser. Read on demand from the file, so it works on already-indexed images
-  without re-indexing.
 - **What's New** — after updating, Phokus now greets you with a "What's new"
-  toast that opens an in-app release-notes screen for the new version, with the
-  changes grouped into collapsible Added / Changed / Fixed sections.
-- **Build badge in Settings** — the version line in Settings → Updates now shows
-  whether the running build is the CPU or CUDA (GPU-accelerated) variant.
-- **Choose your tagging model** — Settings → AI Workspace now lets you switch the
-  AI tagger between the WD tagger (anime-focused) and **JoyTag**, which also
-  handles photographic content and is stronger on NSFW concepts — a better fit
-  for real-photo libraries. Each model downloads on demand, and tags are
-  attributed to the model that produced them. JoyTag has no built-in rating, so
-  its explicitness rating is derived from its tags.
-- **Related tags in Explore** — clicking a tag in the Tag Cloud atlas now reveals
-  its most co-occurring tags with animated connection lines and per-tag image
-  counts, so you can quickly see how tags cluster together and jump to a refined
-  search.
-- **Persist worker pauses across restarts** — a new toggle in Settings → General
-  lets you save per-folder worker pause states so they survive an app restart;
-  useful when you want a folder permanently excluded from background processing
-  without having to re-pause it every launch.
+  toast that opens a tidy in-app tour of the new version. Added, Changed, and
+  Fixed notes are grouped into collapsible sections, so you can skim the good
+  bits without playing "spot the difference".
+- **Quick theme switch** — right-click the settings cog in the title bar to
+  swap between Phokus, Subtle Light, and Conventional Dark instantly. No Settings
+  detour required.
+- **Albums** — make your own cross-folder collections without moving a single
+  file. Albums live in their own sidebar section with cover thumbnails, can be
+  created, renamed, reordered, opened, and cleaned up in Manage mode, and deleting
+  one only removes the grouping.
+- **Gallery multi-select** — hover a thumbnail's top-left corner to start
+  selecting, then use the floating action bar to tag, rate, favorite, add to an
+  album, or delete a whole batch at once. It also works in similar-image, region,
+  and album views, because bulk work should not disappear the moment you need it.
+- **Colour search** — narrow the Gallery, Timeline, or tag results by dominant
+  colour using toolbar swatches or a custom picker. Great for those "I know it
+  was mostly blue" moments.
+- **Album-aware similar search** — similar-image and region searches started from
+  an album can now stay inside that album, jump back to the source folder, or
+  search everything.
+- **Tag manager** — Explore's Tag Cloud now has a Manage mode for renaming,
+  merging, and deleting tags across the whole library. There is also an "Open tag
+  manager" shortcut in Settings -> AI Workspace when you want to get straight to
+  the cleanup.
+- **Camera info in the lightbox** — the info panel now shows EXIF details like
+  camera, lens, aperture, shutter speed, ISO, and focal length. Geotagged photos
+  also get a browser link for their GPS coordinates, and already-indexed images
+  do not need a re-index.
+- **Build badge in Settings** — Settings -> Updates now shows whether you are
+  running the CPU build or the CUDA build.
+- **Choose your tagging model** — Settings -> AI Workspace now lets you pick
+  between the anime-focused WD tagger and JoyTag, which is better suited to photo
+  libraries and stronger on NSFW concepts (if that's your thing, we don't judge).
+  Models download only when needed, and tags remember which model created them.
+- **Related tags in Explore** — Hover over a tag in the Tag Cloud to see the tags
+  that most often appear with it, complete with connection lines and image counts.
+  Handy for finding little clusters you did not know were there.
+- **Pause workers for longer** — Settings -> General can now remember per-folder
+  worker pauses across app restarts, useful for folders you want to keep in the
+  library but leave out of background processing for now.
+- **Editable folder path** — the folder picker now has an address bar, so you can
+  paste a path directly while still using breadcrumbs for quick jumps.
 
 ### Changed
 
-- **Two-column lightbox details** — the image info panel now lays metadata out in
-  two columns (Dimensions/Duration, Video codec/Audio codec, Type/File size sit
-  side by side), so the panel is more compact and less scrolling.
-- **Faster Explore on large libraries** — revisiting a folder's visual clusters
-  is now near-instant. The cluster cache is validated from a lightweight
-  image-ID signature instead of re-reading every embedding, so big libraries no
-  longer stall for several seconds even when the cached result is reused.
-- **Faster first-time visual clustering** — computing clusters for a large
-  library is now much quicker: centroids are found on a representative sample and
-  every image is then assigned across all CPU cores, instead of iterating over
-  the whole library single-threaded. Density-aware seeding keeps the groupings
-  balanced, so no single cluster swallows a huge share of images.
-- **Tag manager search and sort** — the Manage mode tag list now has a live
-  filter input and a sort dropdown (most-used / least-used / A–Z / Z–A). The
-  list is virtualised so libraries with thousands of tags scroll without lag,
-  and renaming or deleting a tag no longer clears the current filter/sort state
-  mid-edit.
-
-- **Safer deletion** — deleting media now asks for confirmation and spells out
-  that it permanently removes the file(s) from disk. This covers the new gallery
-  bulk delete and the Duplicate Finder, which previously deleted on a single
-  click with no confirmation or warning.
-- The updater now shows a real download progress bar with a percentage in
-  Settings → Updates (previously it only said "Downloading").
-- **Smaller-screen layout** — the toolbar adapts on narrow windows: the filter
-  chips scroll horizontally instead of squashing (so "Similar: Folder/All" no
-  longer stack), the search box shrinks, and the colour-search swatches now open
-  in a compact popover rather than expanding inline and running off-screen. The
-  sidebar and the lightbox info panel also narrow to give the gallery more room.
-- **Explore cluster layout** — clusters are now sized by image count (busier
-  clusters are larger and stack on top) and repositioned to avoid overlapping, so
-  every cluster stays viewable and clickable even in dense libraries.
-- **Faster CPU tagging** — when AI tagging runs on the CPU provider (no usable
-  GPU) it now uses multiple cores instead of being pinned to one, several times
-  faster on multi-core machines. A couple of cores are left free so the rest of
-  the app stays responsive. GPU (DirectML) tagging is unchanged.
-- **Goodbye Native Tooltips** — Hello modern tooltip! Replaced the boring, native
-  tooltips for the custom tooltip across the board
+- **Neater lightbox details** — image and video metadata now sits in two columns,
+  so the info panel shows more at a glance with less scrolling.
+- **Faster Explore revisits** — returning to a folder's visual clusters should
+  feel much faster now, even in big libraries.
+- **Faster first-time clustering** — large libraries build their first visual
+  clusters much more quickly, while still keeping the groups nicely balanced.
+- **Better tag browsing** — the Tag manager now has live search, sorting
+  (most-used, least-used, A-Z, and Z-A), smooth scrolling for huge tag lists, and
+  it keeps your filter/sort in place while you edit.
+- **Safer deletion** — deleting media now asks for confirmation and clearly says
+  the file is being removed from disk. This covers gallery bulk delete and the
+  Duplicate Finder.
+- **Clearer update progress** — Settings -> Updates now shows a real download
+  progress bar with a percentage instead of the old lonely "Downloading" label.
+- **Better narrow-window layout** — the toolbar, filters, search box, colour
+  picker, sidebar, and lightbox info panel now adapt more gracefully when the
+  window is short on space.
+- **Tidier Explore clusters** — busier clusters get more room, dense groups
+  overlap less, and everything should stay easier to read and click.
+- **Faster CPU tagging** — CPU-only AI tagging can now use multiple cores while
+  leaving some breathing room for the rest of the app. GPU tagging is unchanged.
+- **Smoother tooltips** — Phokus now uses its custom tooltip style across more of
+  the app instead of falling back to the native browser tooltip.
 
 ### Fixed
 
-- **Stale Explore results on folder switch** — switching folders (or re-entering
-  Explore) no longer briefly shows the previous folder's clusters/tags with no
-  loading indicator; the view now clears and shows a loading state until the new
-  folder's data arrives.
-- **Rating no longer scrambles search results** — rating or favoriting an image
-  while viewing similar-image, region, semantic, tag, or album results no longer
-  re-sorts the view back into the default order; the current result ordering is
-  preserved.
-- The update download/install progress toast now reappears when you start an
-  update from the title-bar indicator or Settings after dismissing the earlier
-  "Update available" prompt — previously progress only showed in Settings.
-- Subtle Light theme — fixed several surfaces and buttons that stayed dark or
-  became unreadable on hover, including new dialogs and the green action buttons
-  across the updater and onboarding.
-- **Endless self-indexing loop** — adding a folder that contains Phokus's own
-  app-data directory (for example, your whole user profile) no longer makes the
-  app index its own thumbnail cache, generate thumbnails of those thumbnails, and
-  loop forever. That directory is now skipped by both the folder scanner and the
-  filesystem watcher.
-- **Background tasks now lead with the active folder** — when one folder's
-  workers are paused while another is actively processing, the active folder
-  takes the main slot in the background-tasks bar instead of the paused one.
-- **Oversized window on smaller screens** — on a fresh install the window opened
-  at a fixed size that was taller than the usable area on displays like
-  1366×768, leaving part of it off-screen. It now clamps to the monitor's work
-  area (excluding the taskbar) and centres there when it would overflow; larger
-  displays and any remembered size/position are left untouched.
-- **Explore readability in Subtle Light** — fixed washed-out and unreadable
-  elements in the Explore view on the light theme. Cluster cards now use a soft
-  dark caption scrim (the previous cream overlay fogged the photos), with a
-  legible label, count, and "Open" button; Cluster Cloud words use darker accents and
-  a higher opacity floor instead of near-invisible pale text.
-- **Explore polish** — the Cluster Cloud now uses the in-app tooltip instead of the
-  native browser one (and reads "1 image", not "1 images"), and the folder-scope
-  dropdown no longer opens behind the cluster cards.
-- **AI tagging no longer freezes the app** — tagging now runs inference in small
-  GPU micro-batches with a brief yield between them, instead of one wide batch
-  that monopolised the GPU (and with it the whole UI) for seconds at a time. The
-  app stays responsive while tagging runs, throughput is steadier (the old wide
-  batches caused periodic slowdowns), and the first batch after launch starts
-  faster.
-- **Noisy AI tags filtered automatically** — a built-in removal list strips
-  generic or low-signal tags (e.g. "simple background") from WD and JoyTag
-  output before they are stored. Previously-generated tags matching the list are
-  cleaned up at startup. Manual user-added tags are never touched.
-- **Explore Tag Cloud hover glow in Subtle Light** — the radial glow that
-  appears under a tag word on hover was invisible on the light background
-  (white on cream). It now uses a warm dark tone matching the rest of the
-  light-theme palette, and the atlas connection-line gradient adapts to the
-  theme as well.
-- **AI Workspace "Selected Folders" no longer pre-selects a folder** — switching
-  the tagging queue scope to "Selected Folders" previously auto-selected the
-  first folder in the list. It now starts with nothing selected so you can
-  choose exactly which folders to target.
-- **Colour filtering** — Colour filtering now works within tag search results,
-  you can search/select a tag and then narrow that result set by colour.
+- **Explore no longer flashes the last folder** — switching folders now clears
+  the old clusters/tags and shows a loading state while the new folder catches
+  up.
+- **Ratings keep your search order** — rating or favoriting an image no longer
+  reshuffles similar-image, region, semantic, tag, or album results.
+- **Update progress comes back when you need it** — if you dismiss the update
+  prompt and later start the update from the title bar or Settings, the progress
+  toast now reappears instead of hiding away in Settings.
+- **Subtle Light cleanup** — fixed dark or hard-to-read surfaces, hover states,
+  dialogs, updater buttons, onboarding controls, and green action buttons in the
+  light theme.
+- **No more self-indexing loops** — if you add a broad folder like your user
+  profile, Phokus now skips its own app-data directory instead of indexing its
+  thumbnail cache forever.
+- **Background tasks show the active work first** — when one folder is paused and
+  another is processing, the active folder gets the main spot in the background
+  tasks bar.
+- **First launch fits smaller screens** — fresh installs now clamp the window to
+  the usable monitor area, so 1366x768-style displays do not lose part of the app
+  below the taskbar.
+- **Explore is clearer in Subtle Light** — cluster captions, buttons, cloud
+  words, hover glows, and the new connection lines now use stronger light-theme
+  colours.
+- **Explore got a few sharp edges sanded down** — Cluster Cloud uses the in-app
+  tooltip, singular counts now say "1 image", and the folder-scope dropdown no
+  longer hides behind cluster cards.
+- **AI tagging stays responsive** — GPU tagging now works in smaller bursts with
+  brief pauses between them, so the UI keeps moving and the first batch starts
+  sooner.
+- **Noisy AI tags get cleaned up** — generic low-signal tags from WD and JoyTag
+  are filtered before they are saved, and matching older generated tags are
+  cleaned up on startup. Your manually-added tags are left alone.
+- **Selected Folders starts empty** — choosing "Selected Folders" for AI tagging
+  no longer pre-selects the first folder. You decide exactly what gets queued.
 
 ## [0.1.1] — 2026-06-23
 

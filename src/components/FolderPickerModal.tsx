@@ -7,6 +7,26 @@ function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
+function cleanAddressInput(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if ((first === "\"" && last === "\"") || (first === "'" && last === "'")) {
+      return trimmed.slice(1, -1).trim();
+    }
+  }
+  return trimmed;
+}
+
+function friendlyDirectoryError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/cannot find the path|os error 3|not found|no such file/i.test(message)) {
+    return "Folder not found. Check the path and try again.";
+  }
+  return message;
+}
+
 function folderName(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, "");
   const parts = trimmed.split(/[\\/]+/).filter(Boolean);
@@ -207,12 +227,15 @@ export function FolderPickerModal() {
 
   const [listing, setListing] = useState<DirListing | null>(null);
   const [currentPath, setCurrentPath] = useState<string | null>(null);
+  const [addressDraft, setAddressDraft] = useState("");
+  const [addressEditing, setAddressEditing] = useState(false);
   const [stagedPaths, setStagedPaths] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<FolderAddResult[] | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const addressInputRef = useRef<HTMLInputElement>(null);
 
   const libraryPaths = useMemo(() => new Set(folders.map((folder) => normalizePath(folder.path))), [folders]);
   const stagedSet = useMemo(() => new Set(stagedPaths.map(normalizePath)), [stagedPaths]);
@@ -234,12 +257,14 @@ export function FolderPickerModal() {
       .then((nextListing) => {
         if (cancelled) return;
         setListing(nextListing);
+        setAddressDraft(nextListing.current ?? "");
+        setAddressEditing(false);
         scrollRef.current?.scrollTo({ top: 0, left: 0 });
       })
       .catch((loadError) => {
         if (cancelled) return;
         setListing({ current: currentPath, parent: null, entries: [] });
-        setError(loadError instanceof Error ? loadError.message : String(loadError));
+        setError(friendlyDirectoryError(loadError));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -252,15 +277,32 @@ export function FolderPickerModal() {
   useEffect(() => {
     if (!folderPickerOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setFolderPickerOpen(false);
+      if (event.key === "Escape") {
+        if (addressEditing) {
+          setAddressDraft(listing?.current ?? "");
+          setAddressEditing(false);
+          return;
+        }
+        setFolderPickerOpen(false);
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [folderPickerOpen, setFolderPickerOpen]);
+  }, [addressEditing, folderPickerOpen, listing?.current, setFolderPickerOpen]);
+
+  useEffect(() => {
+    if (!addressEditing) return;
+    requestAnimationFrame(() => {
+      addressInputRef.current?.focus();
+      addressInputRef.current?.select();
+    });
+  }, [addressEditing]);
 
   useEffect(() => {
     if (folderPickerOpen) return;
     setCurrentPath(null);
+    setAddressDraft("");
+    setAddressEditing(false);
     setListing(null);
     setStagedPaths([]);
     setError(null);
@@ -271,6 +313,10 @@ export function FolderPickerModal() {
   if (!folderPickerOpen) return null;
 
   const entries = listing?.entries ?? [];
+  const addressPath = cleanAddressInput(addressEditing ? addressDraft : (listing?.current ?? ""));
+  const normalizedAddressPath = addressPath ? normalizePath(addressPath) : "";
+  const addressAlreadyAdded = normalizedAddressPath ? libraryPaths.has(normalizedAddressPath) : false;
+  const addressAlreadyStaged = normalizedAddressPath ? stagedSet.has(normalizedAddressPath) : false;
 
   const togglePath = (path: string) => {
     const normalized = normalizePath(path);
@@ -280,6 +326,40 @@ export function FolderPickerModal() {
       const exists = current.some((staged) => normalizePath(staged) === normalized);
       return exists ? current.filter((staged) => normalizePath(staged) !== normalized) : [...current, path];
     });
+  };
+
+  const stagePath = (path: string) => {
+    const cleaned = cleanAddressInput(path);
+    if (!cleaned) {
+      setError("Enter a folder path first.");
+      return;
+    }
+
+    const normalized = normalizePath(cleaned);
+    if (libraryPaths.has(normalized)) {
+      setError("That folder is already in your library.");
+      return;
+    }
+    if (stagedSet.has(normalized)) {
+      setError("That folder is already selected.");
+      return;
+    }
+
+    setError(null);
+    setResults(null);
+    setStagedPaths((current) => [...current, cleaned]);
+  };
+
+  const navigateToAddress = () => {
+    const cleaned = cleanAddressInput(addressDraft);
+    setResults(null);
+    setError(null);
+    setCurrentPath(cleaned || null);
+  };
+
+  const beginAddressEdit = () => {
+    setAddressDraft(listing?.current ?? "");
+    setAddressEditing(true);
   };
 
   const removeStagedPath = (path: string) => {
@@ -354,22 +434,74 @@ export function FolderPickerModal() {
               >
                 Up
               </button>
-              <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden rounded-md border border-white/10 bg-white/[0.025] px-2 py-1.5 light-theme:border-gray-300/70 light-theme:bg-gray-900">
-                {breadcrumbs.map((crumb, index) => (
-                  <span key={`${crumb.path ?? "root"}-${index}`} className="flex min-w-0 items-center gap-1">
-                    {index > 0 ? <span className="text-gray-700 light-theme:text-gray-400">/</span> : null}
-                    <Tooltip label={crumb.path ?? "Roots"} anchorToCursor>
-                      <button
-                        type="button"
-                        className="max-w-40 truncate rounded px-1.5 py-0.5 text-xs text-gray-400 transition-colors hover:bg-white/[0.06] hover:text-white light-theme:text-gray-500 light-theme:hover:bg-gray-800 light-theme:hover:text-white"
-                        onClick={() => setCurrentPath(crumb.path)}
-                      >
-                        {crumb.label}
-                      </button>
-                    </Tooltip>
-                  </span>
-                ))}
-              </nav>
+              {addressEditing ? (
+                <form
+                  className="flex min-w-0 flex-1 items-center gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    navigateToAddress();
+                  }}
+                >
+                  <label className="sr-only" htmlFor="folder-picker-address">Folder path</label>
+                  <input
+                    ref={addressInputRef}
+                    id="folder-picker-address"
+                    className="min-w-0 flex-1 rounded-md border border-white/10 bg-white/[0.035] px-3 py-1.5 font-mono text-xs text-gray-200 placeholder-gray-600 outline-none transition-colors focus:border-white/25 focus:bg-white/[0.055] light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:placeholder-gray-500 light-theme:focus:bg-gray-800"
+                    value={addressDraft}
+                    onChange={(event) => {
+                      setAddressDraft(event.target.value);
+                      setResults(null);
+                    }}
+                    placeholder="Paste or type a folder path"
+                    spellCheck={false}
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-md border border-white/10 bg-white/[0.035] px-2.5 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-40 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800"
+                    disabled={loading}
+                  >
+                    Go
+                  </button>
+                </form>
+              ) : (
+                <div
+                  className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden rounded-md border border-white/10 bg-white/[0.025] px-2 py-1.5 light-theme:border-gray-300/70 light-theme:bg-gray-900"
+                >
+                  <nav className="flex min-w-0 items-center gap-1 overflow-hidden">
+                    {breadcrumbs.map((crumb, index) => (
+                      <span key={`${crumb.path ?? "root"}-${index}`} className="flex min-w-0 items-center gap-1">
+                        {index > 0 ? <span className="text-gray-700 light-theme:text-gray-400">/</span> : null}
+                        <Tooltip label={crumb.path ?? "Roots"} anchorToCursor>
+                          <button
+                            type="button"
+                            className="max-w-40 truncate rounded px-1.5 py-0.5 text-xs text-gray-400 transition-colors hover:bg-white/[0.06] hover:text-white light-theme:text-gray-500 light-theme:hover:bg-gray-800 light-theme:hover:text-white"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setCurrentPath(crumb.path);
+                            }}
+                          >
+                            {crumb.label}
+                          </button>
+                        </Tooltip>
+                      </span>
+                    ))}
+                  </nav>
+                  <button
+                    type="button"
+                    className="min-w-10 flex-1 self-stretch cursor-text rounded px-1"
+                    onClick={beginAddressEdit}
+                    aria-label="Edit folder path"
+                  />
+                </div>
+              )}
+              <button
+                type="button"
+                className="rounded-md border border-emerald-400/35 bg-emerald-500/15 px-2.5 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+                onClick={() => stagePath(addressPath)}
+                disabled={!addressPath || addressAlreadyAdded || addressAlreadyStaged}
+              >
+                Select
+              </button>
             </div>
 
             {error ? (
