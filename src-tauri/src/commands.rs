@@ -162,6 +162,8 @@ pub struct TagSearchParams {
     pub media_kind: Option<String>,
     pub favorites_only: Option<bool>,
     pub rating_min: Option<i64>,
+    /// Optional `[r, g, b]` color filter applied within the tag result set.
+    pub color: Option<[u8; 3]>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
 }
@@ -957,6 +959,7 @@ pub async fn search_images_by_tag(
     let conn = db.get().map_err(|e| e.to_string())?;
     let limit = params.limit.unwrap_or(64);
     let offset = params.offset.unwrap_or(0);
+    let color = params.color.map(|[r, g, b]| (r, g, b));
     let (images, total) = db::search_images_by_tag(
         &conn,
         &params.query,
@@ -964,6 +967,7 @@ pub async fn search_images_by_tag(
         params.media_kind.as_deref(),
         params.favorites_only.unwrap_or(false),
         params.rating_min.unwrap_or(0),
+        color,
         limit,
         offset,
     )

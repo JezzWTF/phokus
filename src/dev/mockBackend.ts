@@ -9,6 +9,36 @@ let nextAlbumId = 100;
 let nextTagId = 10_000;
 
 type AnyPayload = Record<string, any> | undefined;
+type Rgb = [number, number, number];
+
+const mockPalette: Rgb[] = [
+  [59, 125, 216],
+  [31, 182, 166],
+  [76, 175, 80],
+  [242, 207, 46],
+  [232, 134, 46],
+  [226, 59, 59],
+  [139, 92, 246],
+  [236, 72, 153],
+  [139, 90, 43],
+  [26, 26, 26],
+  [245, 245, 245],
+  [154, 160, 166],
+];
+
+function isRgb(value: unknown): value is Rgb {
+  return Array.isArray(value) && value.length === 3 && value.every((entry) => typeof entry === "number");
+}
+
+function colorDistanceSq(left: Rgb, right: Rgb): number {
+  return (left[0] - right[0]) ** 2 + (left[1] - right[1]) ** 2 + (left[2] - right[2]) ** 2;
+}
+
+function matchesMockColor(image: ImageRecord, color: Rgb): boolean {
+  const primary = mockPalette[(image.id - 1) % mockPalette.length];
+  const secondary = mockPalette[(image.folder_id + image.rating) % mockPalette.length];
+  return colorDistanceSq(primary, color) <= 4_900 || colorDistanceSq(secondary, color) <= 4_900;
+}
 
 function params(payload: unknown): Record<string, any> {
   if (!payload || typeof payload !== "object") return {};
@@ -28,6 +58,7 @@ function page<T>(items: T[], offset = 0, limit = 200) {
 function filterImages(input: ImageRecord[], payload: unknown): ImageRecord[] {
   const p = params(payload);
   const query = String(p.search ?? p.query ?? "").trim().toLowerCase();
+  const color = isRgb(p.color) ? p.color : null;
   return input.filter((image) => {
     if (p.folder_id !== undefined && p.folder_id !== null && image.folder_id !== p.folder_id) return false;
     if (p.media_kind && image.media_kind !== p.media_kind) return false;
@@ -36,6 +67,7 @@ function filterImages(input: ImageRecord[], payload: unknown): ImageRecord[] {
     if (p.embedding_failed_only && image.embedding_status !== "failed") return false;
     if (p.tagging_failed_only && !image.ai_tagger_error) return false;
     if (query && !image.filename.toLowerCase().includes(query)) return false;
+    if (color && !matchesMockColor(image, color)) return false;
     return true;
   });
 }

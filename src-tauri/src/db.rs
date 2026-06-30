@@ -2244,6 +2244,7 @@ pub fn search_images_by_tag(
     media_kind: Option<&str>,
     favorites_only: bool,
     rating_min: i64,
+    color: Option<(u8, u8, u8)>,
     limit: usize,
     offset: usize,
 ) -> Result<(Vec<ImageRecord>, usize)> {
@@ -2252,6 +2253,10 @@ pub fn search_images_by_tag(
         return Ok((Vec::new(), 0));
     }
     let favorites_flag = i64::from(favorites_only);
+    let (color_flag, qr, qg, qb) = match color {
+        Some((r, g, b)) => (1i64, r as i64, g as i64, b as i64),
+        None => (0, 0, 0, 0),
+    };
 
     // Total count (for pagination)
     let total: usize = conn.query_row(
@@ -2262,13 +2267,25 @@ pub fn search_images_by_tag(
            AND (?2 IS NULL OR i.media_kind = ?2)
            AND (?3 = 0 OR i.favorite = 1)
            AND i.rating >= ?4
-           AND LOWER(TRIM(t.tag)) = ?5",
+           AND LOWER(TRIM(t.tag)) = ?5
+           AND (?6 = 0 OR EXISTS (
+               SELECT 1 FROM image_colors c
+               WHERE c.image_id = i.id
+                 AND c.weight >= ?11
+                 AND ((c.r - ?7)*(c.r - ?7) + (c.g - ?8)*(c.g - ?8) + (c.b - ?9)*(c.b - ?9)) <= ?10
+           ))",
         params![
             folder_id,
             media_kind,
             favorites_flag,
             rating_min,
-            normalized_query
+            normalized_query,
+            color_flag,
+            qr,
+            qg,
+            qb,
+            crate::color::MATCH_DISTANCE_SQ,
+            crate::color::MATCH_MIN_WEIGHT
         ],
         |row| row.get::<_, i64>(0),
     )? as usize;
@@ -2282,8 +2299,14 @@ pub fn search_images_by_tag(
            AND (?3 = 0 OR i.favorite = 1)
            AND i.rating >= ?4
            AND LOWER(TRIM(t.tag)) = ?5
+           AND (?6 = 0 OR EXISTS (
+               SELECT 1 FROM image_colors c
+               WHERE c.image_id = i.id
+                 AND c.weight >= ?11
+                 AND ((c.r - ?7)*(c.r - ?7) + (c.g - ?8)*(c.g - ?8) + (c.b - ?9)*(c.b - ?9)) <= ?10
+           ))
          ORDER BY i.rating DESC, i.modified_at DESC NULLS LAST, i.filename ASC
-         LIMIT ?6 OFFSET ?7",
+         LIMIT ?12 OFFSET ?13",
     )?;
 
     let image_ids = stmt
@@ -2294,6 +2317,12 @@ pub fn search_images_by_tag(
                 favorites_flag,
                 rating_min,
                 normalized_query,
+                color_flag,
+                qr,
+                qg,
+                qb,
+                crate::color::MATCH_DISTANCE_SQ,
+                crate::color::MATCH_MIN_WEIGHT,
                 limit as i64,
                 offset as i64
             ],

@@ -1161,6 +1161,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
             media_kind: mediaFilter === "all" ? null : mediaFilter,
             favorites_only: favoritesOnly,
             rating_min: minimumRating > 0 ? minimumRating : null,
+            color: colorFilter,
             limit: PAGE_SIZE,
             offset,
           },
