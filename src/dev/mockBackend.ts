@@ -250,8 +250,8 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
     case "find_similar_images":
     case "find_similar_by_region":
       return similarImages(payload);
-    case "get_tag_cloud":
-      return db.scenario === "empty" ? [] : db.tagCloud;
+    case "get_visual_clusters":
+      return db.scenario === "empty" ? [] : db.visualClusters;
     case "get_explore_tags":
       return db.scenario === "empty" ? [] : db.exploreTags.slice(0, Number(p.limit ?? 180));
     case "get_related_tags": {

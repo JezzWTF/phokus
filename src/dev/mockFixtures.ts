@@ -9,7 +9,7 @@ import type {
   ImageRecord,
   ImageTag,
   SortOrder,
-  TagCloudEntry,
+  VisualClusterEntry,
 } from "../store";
 import type { MockScenario } from "./mockScenarios";
 import { fixtureMediaPath } from "./mockMedia";
@@ -21,7 +21,7 @@ export interface MockDb {
   albums: Album[];
   albumImageIds: Record<number, number[]>;
   tagsByImageId: Record<number, ImageTag[]>;
-  tagCloud: TagCloudEntry[];
+  visualClusters: VisualClusterEntry[];
   exploreTags: ExploreTagEntry[];
   backgroundJobs: FolderJobProgress[];
   duplicateGroups: DuplicateGroup[];
@@ -252,7 +252,7 @@ function makeProgress(folders: Folder[], scenario: MockScenario): FolderJobProgr
   }));
 }
 
-function makeTagCloud(images: ImageRecord[]): TagCloudEntry[] {
+function makeVisualClusters(images: ImageRecord[]): VisualClusterEntry[] {
   return tags.slice(0, 10).map((_, index) => {
     const group = images.filter((image) => image.id % (index + 2) === 0).slice(0, 28);
     const representative = group[0] ?? images[index];
@@ -305,7 +305,7 @@ export function createMockDb(scenario: MockScenario): MockDb {
     albums,
     albumImageIds,
     tagsByImageId: makeTags(images, scenario),
-    tagCloud: makeTagCloud(images),
+    visualClusters: makeVisualClusters(images),
     exploreTags: makeExploreTags(images, scenario),
     backgroundJobs: makeProgress(folders, scenario),
     duplicateGroups: makeDuplicateGroups(images, scenario),

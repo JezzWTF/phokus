@@ -267,12 +267,16 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             UNIQUE(image_id, tag)
         );
 
-        CREATE TABLE IF NOT EXISTS tag_cloud_cache (
+        CREATE TABLE IF NOT EXISTS visual_cluster_cache (
             folder_scope    TEXT PRIMARY KEY,
             image_ids_hash  INTEGER NOT NULL,
             entries_json    TEXT NOT NULL,
             created_at      TEXT NOT NULL DEFAULT (datetime('now'))
         );
+        -- Renamed from the misnamed tag_cloud_cache (it caches visual clusters,
+        -- not tags). The cache is disposable and was already invalidated by a
+        -- cluster-algorithm version bump, so the old table is simply dropped.
+        DROP TABLE IF EXISTS tag_cloud_cache;
 
         CREATE TABLE IF NOT EXISTS duplicate_scan_cache (
             folder_scope    TEXT PRIMARY KEY,
@@ -407,7 +411,7 @@ fn remove_filtered_ai_tags(conn: &Connection) -> Result<()> {
             delete_stmt.execute([id])?;
         }
     }
-    tx.execute("DELETE FROM tag_cloud_cache", [])?;
+    tx.execute("DELETE FROM visual_cluster_cache", [])?;
     tx.commit()?;
 
     log::info!(
@@ -2799,9 +2803,9 @@ pub fn rename_tag(conn: &Connection, from: &str, to: &str) -> Result<()> {
     )?;
     // …then drop the now-duplicate leftovers still under the old name.
     tx.execute("DELETE FROM image_tags WHERE tag = ?1", params![from])?;
-    // The tag-cloud cache keys on image-id hashes, not tag text, so a rename
+    // The visual-cluster cache keys on image-id hashes, not tag text, so a rename
     // wouldn't invalidate it automatically — clear it.
-    tx.execute("DELETE FROM tag_cloud_cache", [])?;
+    tx.execute("DELETE FROM visual_cluster_cache", [])?;
     tx.commit()?;
     Ok(())
 }
@@ -2810,7 +2814,7 @@ pub fn rename_tag(conn: &Connection, from: &str, to: &str) -> Result<()> {
 pub fn delete_tag(conn: &Connection, name: &str) -> Result<i64> {
     let tx = conn.unchecked_transaction()?;
     let removed = tx.execute("DELETE FROM image_tags WHERE tag = ?1", params![name])? as i64;
-    tx.execute("DELETE FROM tag_cloud_cache", [])?;
+    tx.execute("DELETE FROM visual_cluster_cache", [])?;
     tx.commit()?;
     Ok(removed)
 }
@@ -2983,14 +2987,14 @@ fn map_image_row(row: &Row<'_>) -> rusqlite::Result<ImageRecord> {
     })
 }
 
-/// Returns cached tag-cloud entries if the stored hash matches `current_hash`.
-pub fn get_tag_cloud_cache(
+/// Returns cached visual-cluster entries if the stored hash matches `current_hash`.
+pub fn get_visual_cluster_cache(
     conn: &Connection,
     folder_scope: &str,
     current_hash: u64,
 ) -> Result<Option<String>> {
     let result: rusqlite::Result<(i64, String)> = conn.query_row(
-        "SELECT image_ids_hash, entries_json FROM tag_cloud_cache WHERE folder_scope = ?1",
+        "SELECT image_ids_hash, entries_json FROM visual_cluster_cache WHERE folder_scope = ?1",
         params![folder_scope],
         |row| Ok((row.get(0)?, row.get(1)?)),
     );
@@ -3002,15 +3006,15 @@ pub fn get_tag_cloud_cache(
     }
 }
 
-/// Upserts the tag-cloud cache for the given scope.
-pub fn set_tag_cloud_cache(
+/// Upserts the visual-cluster cache for the given scope.
+pub fn set_visual_cluster_cache(
     conn: &Connection,
     folder_scope: &str,
     image_ids_hash: u64,
     entries_json: &str,
 ) -> Result<()> {
     conn.execute(
-        "INSERT INTO tag_cloud_cache (folder_scope, image_ids_hash, entries_json, created_at)
+        "INSERT INTO visual_cluster_cache (folder_scope, image_ids_hash, entries_json, created_at)
          VALUES (?1, ?2, ?3, datetime('now'))
          ON CONFLICT(folder_scope) DO UPDATE SET
              image_ids_hash = excluded.image_ids_hash,
