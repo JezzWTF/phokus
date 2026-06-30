@@ -1201,6 +1201,7 @@ pub async fn get_tag_cloud(
             let mut hasher = Xxh3::new();
             hasher.update(&ids_hash.to_le_bytes());
             hasher.update(revision.as_bytes());
+            hasher.update(CLUSTER_CACHE_VERSION.as_bytes());
             hasher.digest()
         };
         (count, hash)
@@ -1243,7 +1244,13 @@ pub async fn get_tag_cloud(
         .collect();
 
     let k = (n / 20).clamp(5, 30);
+    let kmeans_start = std::time::Instant::now();
     let (centroids, cluster_counts, assignments) = kmeans_cosine(&points, k, 40);
+    log::debug!(
+        "tag-cloud clustering: {n} embeddings, k={k}, sampled={} → {:.2?}",
+        n > MAX_KMEANS_SAMPLE,
+        kmeans_start.elapsed(),
+    );
 
     let mut entries: Vec<TagCloudEntry> = Vec::new();
     let mut order: Vec<usize> = (0..k).collect();
@@ -1290,7 +1297,7 @@ pub async fn get_tag_cloud(
     // would defeat the whole optimization (every visit would recompute), so log it.
     if let Ok(json) = serde_json::to_string(&entries) {
         if let Err(e) = db::set_tag_cloud_cache(&conn, &folder_scope, current_hash, &json) {
-            eprintln!("failed to persist tag-cloud cache for {folder_scope}: {e}");
+            log::warn!("failed to persist tag-cloud cache for {folder_scope}: {e}");
         }
     }
 
@@ -1846,33 +1853,138 @@ fn normalize(v: &mut [f32]) {
     }
 }
 
+/// When the library is larger than this, the iterative k-means centroid search
+/// runs on a deterministic, evenly-strided sample of this many embeddings rather
+/// than the full set; every image is then assigned to its nearest centroid in a
+/// single parallel pass. The centroid search is the expensive O(n·k·dim·iters)
+/// part, so sampling it keeps the (statistically equivalent) clustering fast on
+/// large libraries while the full assignment still places every image.
+const MAX_KMEANS_SAMPLE: usize = 3000;
+
+/// Bumped whenever the clustering algorithm changes so persisted tag-cloud caches
+/// computed by an older algorithm are invalidated and recomputed on next view.
+const CLUSTER_CACHE_VERSION: &str = "sampled-v2";
+
+/// Cosine k-means. For large inputs the iterative centroid search runs on a
+/// strided sample (see [`MAX_KMEANS_SAMPLE`]); the final assignment of every
+/// point to its nearest centroid always covers the full input, in parallel.
 fn kmeans_cosine(
     points: &[Vec<f32>],
     k: usize,
     max_iter: usize,
 ) -> (Vec<Vec<f32>>, Vec<usize>, Vec<usize>) {
     let n = points.len();
-    let dim = points[0].len();
 
-    // Deterministic k-means++ init: spread centroids as far apart as possible
+    // Deterministic, evenly-distributed sample for the centroid search. For n at
+    // or below the cap this is just the full set (a clone), so behaviour is
+    // unchanged on small/medium libraries.
+    let sample: Vec<Vec<f32>> = if n > MAX_KMEANS_SAMPLE {
+        let step = n / MAX_KMEANS_SAMPLE;
+        points
+            .iter()
+            .step_by(step)
+            .take(MAX_KMEANS_SAMPLE)
+            .cloned()
+            .collect()
+    } else {
+        points.to_vec()
+    };
+
+    let centroids = kmeans_centroids(&sample, k, max_iter);
+
+    // Assign every point — not just the sample — to its nearest centroid.
+    let assignments = assign_to_centroids(points, &centroids);
+
+    let mut counts = vec![0usize; k];
+    for &a in &assignments {
+        counts[a] += 1;
+    }
+
+    (centroids, counts, assignments)
+}
+
+/// Small deterministic PRNG (SplitMix64) so k-means++ seeding is reproducible
+/// across runs without pulling in the `rand` crate.
+struct DetRng(u64);
+
+impl DetRng {
+    fn new(seed: u64) -> Self {
+        DetRng(seed)
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    /// Uniform f64 in [0, 1).
+    fn next_f64(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+    }
+}
+
+/// Deterministic k-means++ seeding: the first centroid is the middle point, then
+/// each subsequent centroid is drawn from the remaining points with probability
+/// proportional to its squared distance to the nearest chosen centroid (D²
+/// weighting). For unit-normalized embeddings the squared Euclidean distance is
+/// proportional to `1 - cos`, so that is used as the weight. Unlike greedy
+/// farthest-point seeding this places proportionally more centroids in dense
+/// regions, preventing a single centroid from absorbing the whole dominant mode.
+fn kmeans_pp_seed(points: &[Vec<f32>], k: usize) -> Vec<Vec<f32>> {
+    let n = points.len();
+    let mut rng = DetRng::new(0x5EED_1234_ABCD_0001);
     let mut centroids: Vec<Vec<f32>> = Vec::with_capacity(k);
     centroids.push(points[n / 2].clone());
+
+    // d2[i] = distance from point i to its nearest chosen centroid (∝ squared
+    // Euclidean for unit vectors), kept up to date as centroids are added.
+    let mut d2 = vec![f32::MAX; n];
     for _ in 1..k {
-        let next = points
-            .iter()
-            .map(|p| {
-                let best_sim = centroids
-                    .iter()
-                    .map(|c| dot(p, c))
-                    .fold(f32::NEG_INFINITY, f32::max);
-                1.0 - best_sim // distance = 1 - cosine_similarity
-            })
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(i, _)| i)
-            .unwrap_or(0);
-        centroids.push(points[next].clone());
+        let last = centroids.last().unwrap();
+        for (i, p) in points.iter().enumerate() {
+            let dist = (1.0 - dot(p, last)).max(0.0);
+            if dist < d2[i] {
+                d2[i] = dist;
+            }
+        }
+
+        let total: f64 = d2.iter().map(|&w| w as f64).sum();
+        if total <= 0.0 {
+            // Remaining points coincide with chosen centroids; pad deterministically.
+            centroids.push(points[n / 2].clone());
+            continue;
+        }
+
+        let mut target = rng.next_f64() * total;
+        let mut idx = n - 1;
+        for (i, &w) in d2.iter().enumerate() {
+            target -= w as f64;
+            if target <= 0.0 {
+                idx = i;
+                break;
+            }
+        }
+        centroids.push(points[idx].clone());
     }
+
+    centroids
+}
+
+/// Runs deterministic k-means++ seeding + Lloyd iterations on `points`, returning
+/// the final normalized centroids. Operates only on the slice it is given — the
+/// caller passes a sample for large libraries.
+fn kmeans_centroids(points: &[Vec<f32>], k: usize, max_iter: usize) -> Vec<Vec<f32>> {
+    let n = points.len();
+    let dim = points[0].len();
+
+    // Density-aware k-means++ seeding (see kmeans_pp_seed). Crucially NOT greedy
+    // farthest-point seeding, which picks outliers and — on a sampled large
+    // library — leaves the dense core under-seeded so one centroid swallows a huge
+    // share of the (visually generic) images.
+    let mut centroids = kmeans_pp_seed(points, k);
 
     let mut assignments = vec![0usize; n];
 
@@ -1914,12 +2026,26 @@ fn kmeans_cosine(
         }
     }
 
-    let mut counts = vec![0usize; k];
-    for &a in &assignments {
-        counts[a] += 1;
-    }
+    centroids
+}
 
-    (centroids, counts, assignments)
+/// Assigns each point to its nearest centroid (max cosine similarity) in parallel.
+/// This is the only step that touches every embedding, so parallelising it is
+/// where the multi-core speed-up on large libraries comes from.
+fn assign_to_centroids(points: &[Vec<f32>], centroids: &[Vec<f32>]) -> Vec<usize> {
+    use rayon::prelude::*;
+    points
+        .par_iter()
+        .map(|p| {
+            centroids
+                .iter()
+                .enumerate()
+                .map(|(j, c)| (j, dot(p, c)))
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(j, _)| j)
+                .unwrap_or(0)
+        })
+        .collect()
 }
 
 #[derive(Serialize)]

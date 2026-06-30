@@ -26,7 +26,7 @@ pub const JOYTAG_MODEL_NAME: &str = "joytag";
 // CLIP-style mean/std normalization on [0,1] values (not raw [0,255]), and an
 // NCHW layout (not NHWC). These are the OpenAI CLIP normalization constants.
 const JOYTAG_MEAN: [f32; 3] = [0.481_454_66, 0.457_827_5, 0.408_210_73];
-const JOYTAG_STD: [f32; 3] = [0.268_629_54, 0.261_302_58, 0.275_777_11];
+const JOYTAG_STD: [f32; 3] = [0.268_629_54, 0.261_302_6, 0.275_777_1];
 // JoyTag's recommended detection threshold (used as the default; the user's
 // tagger_threshold setting still overrides it).
 const JOYTAG_DEFAULT_THRESHOLD: f32 = 0.4;
