@@ -198,7 +198,7 @@ pub fn run() {
             commands::get_worker_states,
             commands::get_worker_pauses_persist,
             commands::set_worker_pauses_persist,
-            commands::get_tag_cloud,
+            commands::get_visual_clusters,
             commands::get_explore_tags,
             commands::get_related_tags,
             commands::get_images_by_ids,

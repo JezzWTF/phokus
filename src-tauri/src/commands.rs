@@ -1161,7 +1161,7 @@ pub async fn reset_generated_captions(
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct TagCloudEntry {
+pub struct VisualClusterEntry {
     pub count: usize,
     pub representative_image_id: i64,
     pub thumbnail_path: Option<String>,
@@ -1174,10 +1174,10 @@ pub struct TagCloudEntry {
 /// Results are cached in SQLite keyed by a hash of the embedded image IDs, so repeated
 /// calls (including across app restarts) return instantly when the library hasn't changed.
 #[tauri::command]
-pub async fn get_tag_cloud(
+pub async fn get_visual_clusters(
     db: State<'_, DbState>,
     folder_id: Option<i64>,
-) -> Result<Vec<TagCloudEntry>, String> {
+) -> Result<Vec<VisualClusterEntry>, String> {
     let folder_scope = match folder_id {
         Some(id) => format!("folder_{id}"),
         None => "all".to_string(),
@@ -1214,10 +1214,10 @@ pub async fn get_tag_cloud(
     // Try to return a valid SQLite cache before loading any embeddings.
     {
         let conn = db.get().map_err(|e| e.to_string())?;
-        if let Some(json) = db::get_tag_cloud_cache(&conn, &folder_scope, current_hash)
+        if let Some(json) = db::get_visual_cluster_cache(&conn, &folder_scope, current_hash)
             .map_err(|e| e.to_string())?
         {
-            if let Ok(entries) = serde_json::from_str::<Vec<TagCloudEntry>>(&json) {
+            if let Ok(entries) = serde_json::from_str::<Vec<VisualClusterEntry>>(&json) {
                 // Reject cache entries written before image_ids were tracked — they all
                 // have empty image_ids which causes "No media found" when a cluster is opened.
                 if entries.iter().all(|e| !e.image_ids.is_empty()) {
@@ -1247,12 +1247,12 @@ pub async fn get_tag_cloud(
     let kmeans_start = std::time::Instant::now();
     let (centroids, cluster_counts, assignments) = kmeans_cosine(&points, k, 40);
     log::debug!(
-        "tag-cloud clustering: {n} embeddings, k={k}, sampled={} → {:.2?}",
+        "visual-cluster clustering: {n} embeddings, k={k}, sampled={} → {:.2?}",
         n > MAX_KMEANS_SAMPLE,
         kmeans_start.elapsed(),
     );
 
-    let mut entries: Vec<TagCloudEntry> = Vec::new();
+    let mut entries: Vec<VisualClusterEntry> = Vec::new();
     let mut order: Vec<usize> = (0..k).collect();
     order.sort_unstable_by(|&a, &b| cluster_counts[b].cmp(&cluster_counts[a]));
 
@@ -1285,7 +1285,7 @@ pub async fn get_tag_cloud(
             .ok()
             .and_then(|img| img.thumbnail_path);
 
-        entries.push(TagCloudEntry {
+        entries.push(VisualClusterEntry {
             count,
             representative_image_id: best_id,
             thumbnail_path,
@@ -1296,8 +1296,8 @@ pub async fn get_tag_cloud(
     // Persist to SQLite. The cache is best-effort, but a silent write failure here
     // would defeat the whole optimization (every visit would recompute), so log it.
     if let Ok(json) = serde_json::to_string(&entries) {
-        if let Err(e) = db::set_tag_cloud_cache(&conn, &folder_scope, current_hash, &json) {
-            log::warn!("failed to persist tag-cloud cache for {folder_scope}: {e}");
+        if let Err(e) = db::set_visual_cluster_cache(&conn, &folder_scope, current_hash, &json) {
+            log::warn!("failed to persist visual-cluster cache for {folder_scope}: {e}");
         }
     }
 
@@ -1861,7 +1861,7 @@ fn normalize(v: &mut [f32]) {
 /// large libraries while the full assignment still places every image.
 const MAX_KMEANS_SAMPLE: usize = 3000;
 
-/// Bumped whenever the clustering algorithm changes so persisted tag-cloud caches
+/// Bumped whenever the clustering algorithm changes so persisted visual-cluster caches
 /// computed by an older algorithm are invalidated and recomputed on next view.
 const CLUSTER_CACHE_VERSION: &str = "sampled-v2";
 

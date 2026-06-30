@@ -203,7 +203,7 @@ export interface ImageExif {
   gps_lon: number | null;
 }
 
-export interface TagCloudEntry {
+export interface VisualClusterEntry {
   count: number;
   representative_image_id: number;
   thumbnail_path: string | null;
@@ -376,9 +376,9 @@ interface GalleryState {
   activeView: ActiveView;
   exploreMode: ExploreMode;
   tagManagerOpen: boolean;
-  tagCloudEntries: TagCloudEntry[];
-  tagCloudLoading: boolean;
-  tagCloudFolderId: number | null | undefined; // undefined = never loaded
+  visualClusterEntries: VisualClusterEntry[];
+  visualClusterLoading: boolean;
+  visualClusterFolderId: number | null | undefined; // undefined = never loaded
   exploreTagEntries: ExploreTagEntry[];
   exploreTagLoading: boolean;
   // Cache-freshness key: the folder the loaded tags belong to. Set to undefined
@@ -497,7 +497,7 @@ interface GalleryState {
   setExploreMode: (mode: ExploreMode) => void;
   setTagManagerOpen: (open: boolean) => void;
   openTagManager: () => void;
-  loadTagCloud: (options?: { force?: boolean }) => Promise<void>;
+  loadVisualClusters: (options?: { force?: boolean }) => Promise<void>;
   loadExploreTags: (options?: { force?: boolean }) => Promise<void>;
   loadRelatedTags: (tag: string) => Promise<RelatedTagEntry[]>;
   showVisualCluster: (imageIds: number[]) => Promise<void>;
@@ -633,7 +633,7 @@ const SIMILAR_DISTANCE_THRESHOLD = 0.24;
 // similarity, region search). Any new request increments it so a stale response
 // from a previous collection type cannot overwrite newer results.
 let galleryRequestToken = 0;
-let tagCloudRequestToken = 0;
+let visualClusterRequestToken = 0;
 let exploreTagRequestToken = 0;
 let exploreTagRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -878,9 +878,9 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   activeView: "gallery",
   exploreMode: "visual",
   tagManagerOpen: false,
-  tagCloudEntries: [],
-  tagCloudLoading: false,
-  tagCloudFolderId: undefined,
+  visualClusterEntries: [],
+  visualClusterLoading: false,
+  visualClusterFolderId: undefined,
   exploreTagEntries: [],
   exploreTagLoading: false,
   exploreTagsFolderId: undefined,
@@ -1010,7 +1010,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     await loadFolders();
     await loadBackgroundJobProgress();
     // Invalidate tag cloud and explore-tags cache since library content changed.
-    set({ tagCloudFolderId: undefined, tagCloudEntries: [], exploreTagsFolderId: undefined });
+    set({ visualClusterFolderId: undefined, visualClusterEntries: [], exploreTagsFolderId: undefined });
     // Always refresh the gallery: the removed folder's images may be on screen
     // (e.g. in All Media), not only when that folder was the active selection.
     await loadImages(true);
@@ -1021,7 +1021,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     await invoke("reindex_folder", { folderId });
     await loadFolders();
     // Invalidate tag cloud cache since embeddings will be regenerated
-    set({ tagCloudFolderId: undefined, tagCloudEntries: [] });
+    set({ visualClusterFolderId: undefined, visualClusterEntries: [] });
     await loadBackgroundJobProgress();
   },
 
@@ -1085,7 +1085,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       return;
     }
 
-    // Explore reloads itself via TagCloud's useEffect on selectedFolderId.
+    // Explore reloads itself via ExploreView's useEffect on selectedFolderId.
     if (activeView === "explore") return;
 
     void get().loadImages(true);
@@ -1425,33 +1425,33 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     set({ exploreMode: "tags", tagManagerOpen: true, settingsOpen: false });
   },
 
-  loadTagCloud: async (options) => {
-    const { selectedFolderId, tagCloudFolderId, tagCloudLoading } = get();
+  loadVisualClusters: async (options) => {
+    const { selectedFolderId, visualClusterFolderId, visualClusterLoading } = get();
     const force = options?.force ?? false;
     // Skip if already loaded for this folder and not currently loading
-    if (!force && !tagCloudLoading && tagCloudFolderId !== undefined && tagCloudFolderId === selectedFolderId) {
+    if (!force && !visualClusterLoading && visualClusterFolderId !== undefined && visualClusterFolderId === selectedFolderId) {
       return;
     }
-    const requestToken = ++tagCloudRequestToken;
+    const requestToken = ++visualClusterRequestToken;
     // On a real folder switch, drop the previous folder's clusters so the loading
     // panel shows instead of lingering stale results. A same-folder refresh keeps
     // them to avoid a flicker when the cache returns instantly.
-    const isFolderSwitch = tagCloudFolderId !== selectedFolderId;
+    const isFolderSwitch = visualClusterFolderId !== selectedFolderId;
     set({
-      tagCloudLoading: true,
-      tagCloudFolderId: selectedFolderId,
-      ...(isFolderSwitch ? { tagCloudEntries: [] } : {}),
+      visualClusterLoading: true,
+      visualClusterFolderId: selectedFolderId,
+      ...(isFolderSwitch ? { visualClusterEntries: [] } : {}),
     });
     try {
-      const entries = await invoke<TagCloudEntry[]>("get_tag_cloud", {
+      const entries = await invoke<VisualClusterEntry[]>("get_visual_clusters", {
         folderId: selectedFolderId,
       });
-      if (requestToken !== tagCloudRequestToken) return;
-      set({ tagCloudEntries: entries, tagCloudLoading: false });
+      if (requestToken !== visualClusterRequestToken) return;
+      set({ visualClusterEntries: entries, visualClusterLoading: false });
     } catch (error) {
-      if (requestToken !== tagCloudRequestToken) return;
+      if (requestToken !== visualClusterRequestToken) return;
       console.error("Failed to load tag cloud:", error);
-      set({ tagCloudLoading: false });
+      set({ visualClusterLoading: false });
     }
   },
 
@@ -2411,13 +2411,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
 
   renameTag: async (from, to) => {
     await invoke("rename_tag", { params: { from, to } });
-    // Tag content changed — invalidate the explore-tags and tag-cloud caches.
+    // Tag content changed — invalidate the explore-tags and visual-cluster caches.
     // Keep the current tag list visible while the refresh runs so manager UI
     // state such as filtering and sorting is not lost to a loading remount.
     set({
       exploreTagsFolderId: undefined,
-      tagCloudFolderId: undefined,
-      tagCloudEntries: [],
+      visualClusterFolderId: undefined,
+      visualClusterEntries: [],
     });
     const parsed = parseSearchValue(get().search);
     if (parsed.mode === "tag" && parsed.query === from) {
@@ -2435,8 +2435,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     // state such as filtering and sorting is not lost to a loading remount.
     set({
       exploreTagsFolderId: undefined,
-      tagCloudFolderId: undefined,
-      tagCloudEntries: [],
+      visualClusterFolderId: undefined,
+      visualClusterEntries: [],
     });
     const parsed = parseSearchValue(get().search);
     if (parsed.mode === "tag" && parsed.query === tag) {
@@ -2507,14 +2507,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     if (ids.length === 0 || cleaned.length === 0) return;
     await invoke<void>("bulk_add_tags", { params: { image_ids: ids, tags: cleaned } });
     // New tags landed — invalidate Explore tag caches.
-    set({ exploreTagsFolderId: undefined, tagCloudFolderId: undefined, tagCloudEntries: [] });
+    set({ exploreTagsFolderId: undefined, visualClusterFolderId: undefined, visualClusterEntries: [] });
   },
 
   bulkRemoveTag: async (tag) => {
     const ids = Array.from(get().gallerySelectedIds);
     if (ids.length === 0 || !tag.trim()) return;
     await invoke<void>("bulk_remove_tag", { params: { image_ids: ids, tag: tag.trim() } });
-    set({ exploreTagsFolderId: undefined, tagCloudFolderId: undefined, tagCloudEntries: [] });
+    set({ exploreTagsFolderId: undefined, visualClusterFolderId: undefined, visualClusterEntries: [] });
   },
 
   bulkDeleteSelected: async () => {
@@ -2532,8 +2532,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
       totalImages: Math.max(0, state.totalImages - succeededIds.length),
       gallerySelectedIds: new Set([...state.gallerySelectedIds].filter((id) => !succeededSet.has(id))),
       // Deletion changes tag/duplicate/album aggregates.
-      tagCloudFolderId: undefined,
-      tagCloudEntries: [],
+      visualClusterFolderId: undefined,
+      visualClusterEntries: [],
       exploreTagsFolderId: undefined,
     }));
     // The DB cascade already removed these from album_images; refresh counts/covers.

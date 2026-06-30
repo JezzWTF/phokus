@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ExploreMode, ExploreTagEntry, RelatedTagEntry, TagCloudEntry, useGalleryStore } from "../store";
+import { ExploreMode, ExploreTagEntry, RelatedTagEntry, VisualClusterEntry, useGalleryStore } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
 import { ThemedDropdown } from "./ThemedDropdown";
 import { Tooltip } from "./Tooltip";
@@ -43,7 +43,7 @@ function seeded(n: number): number {
 }
 
 interface PlacedNode {
-  entry: TagCloudEntry;
+  entry: VisualClusterEntry;
   index: number;
   x: number;
   y: number;
@@ -57,7 +57,7 @@ interface PlacedNode {
   rotateSeed: number;
 }
 
-function buildCloud(entries: TagCloudEntry[], containerW: number, containerH: number): PlacedNode[] {
+function buildCloud(entries: VisualClusterEntry[], containerW: number, containerH: number): PlacedNode[] {
   if (!entries.length || containerW <= 0 || containerH <= 0) return [];
 
   const maxCount = Math.max(...entries.map((e) => e.count));
@@ -622,13 +622,13 @@ function ExploreLoadingPanel({ mode }: { mode: ExploreMode }) {
 }
 
 // Separate component so its useLayoutEffect fires when the canvas is actually
-// mounted — not at TagCloud mount time when the container may still be hidden
+// mounted — not at ExploreView mount time when the container may still be hidden
 // behind a loading state.
 function ClusterCloud({
   entries,
   onOpen,
 }: {
-  entries: TagCloudEntry[];
+  entries: VisualClusterEntry[];
   onOpen: (imageIds: number[]) => void;
 }) {
   const reducedMotion = useReducedMotion();
@@ -968,12 +968,12 @@ function TagManageList({
   );
 }
 
-export function TagCloud() {
+export function ExploreView() {
   const exploreMode = useGalleryStore((state) => state.exploreMode);
   const setExploreMode = useGalleryStore((state) => state.setExploreMode);
-  const tagCloudEntries = useGalleryStore((state) => state.tagCloudEntries);
-  const tagCloudLoading = useGalleryStore((state) => state.tagCloudLoading);
-  const loadTagCloud = useGalleryStore((state) => state.loadTagCloud);
+  const visualClusterEntries = useGalleryStore((state) => state.visualClusterEntries);
+  const visualClusterLoading = useGalleryStore((state) => state.visualClusterLoading);
+  const loadVisualClusters = useGalleryStore((state) => state.loadVisualClusters);
   const exploreTagEntries = useGalleryStore((state) => state.exploreTagEntries);
   const exploreTagLoading = useGalleryStore((state) => state.exploreTagLoading);
   const loadExploreTags = useGalleryStore((state) => state.loadExploreTags);
@@ -989,13 +989,13 @@ export function TagCloud() {
   const handleDeleteTag = async (tag: string) => { await deleteTag(tag); };
 
   useEffect(() => {
-    if (exploreMode === "visual") void loadTagCloud();
+    if (exploreMode === "visual") void loadVisualClusters();
     else void loadExploreTags();
-  }, [exploreMode, selectedFolderId, loadTagCloud, loadExploreTags]);
+  }, [exploreMode, selectedFolderId, loadVisualClusters, loadExploreTags]);
 
-  const loading = exploreMode === "visual" ? tagCloudLoading : exploreTagLoading;
-  const hasEntries = exploreMode === "visual" ? tagCloudEntries.length > 0 : exploreTagEntries.length > 0;
-  const entryCount = exploreMode === "visual" ? tagCloudEntries.length : exploreTagEntries.length;
+  const loading = exploreMode === "visual" ? visualClusterLoading : exploreTagLoading;
+  const hasEntries = exploreMode === "visual" ? visualClusterEntries.length > 0 : exploreTagEntries.length > 0;
+  const entryCount = exploreMode === "visual" ? visualClusterEntries.length : exploreTagEntries.length;
   const visibleTagCount = Math.min(exploreTagEntries.length, TAG_ATLAS_MAX_VISIBLE);
 
   return (
@@ -1070,7 +1070,7 @@ export function TagCloud() {
         </div>
       ) : exploreMode === "visual" ? (
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <ClusterCloud entries={tagCloudEntries} onOpen={showVisualCluster} />
+          <ClusterCloud entries={visualClusterEntries} onOpen={showVisualCluster} />
         </div>
       ) : manageTags ? (
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">

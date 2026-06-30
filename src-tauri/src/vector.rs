@@ -268,7 +268,7 @@ pub fn get_embedding_revision(conn: &Connection) -> Result<String> {
 /// exact set of IDs, so it is membership-sensitive: adding, removing, or moving an
 /// image between folders changes it even when the count happens to stay the same.
 /// Used (together with the embedding revision, which catches an image being
-/// re-embedded in place) as the cheap tag-cloud cache key so a cache hit doesn't
+/// re-embedded in place) as the cheap visual-cluster cache key so a cache hit doesn't
 /// have to read and unpack hundreds of MB of embeddings just to validate freshness.
 pub fn embedding_ids_signature(conn: &Connection, folder_id: Option<i64>) -> Result<(i64, u64)> {
     use xxhash_rust::xxh3::Xxh3;

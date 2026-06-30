@@ -9,7 +9,7 @@ import type {
   ImageRecord,
   ImageTag,
   SortOrder,
-  TagCloudEntry,
+  VisualClusterEntry,
 } from "../store";
 import type { MockScenario } from "./mockScenarios";
 import { fixtureMediaPath } from "./mockMedia";
@@ -21,7 +21,7 @@ export interface MockDb {
   albums: Album[];
   albumImageIds: Record<number, number[]>;
   tagsByImageId: Record<number, ImageTag[]>;
-  tagCloud: TagCloudEntry[];
+  visualClusters: VisualClusterEntry[];
   exploreTags: ExploreTagEntry[];
   backgroundJobs: FolderJobProgress[];
   duplicateGroups: DuplicateGroup[];
@@ -252,12 +252,22 @@ function makeProgress(folders: Folder[], scenario: MockScenario): FolderJobProgr
   }));
 }
 
-function makeTagCloud(images: ImageRecord[]): TagCloudEntry[] {
-  return tags.slice(0, 10).map((_, index) => {
+function makeVisualClusters(images: ImageRecord[], scenario: MockScenario): VisualClusterEntry[] {
+  if (images.length < 5) return [];
+  // Mirror the backend's k = (n / 20).clamp(5, 30). Force the full spread for the
+  // "huge" scenario so Explore shows a realistic field of clusters rather than a
+  // fixed handful, and size the counts off a large virtual library so the badges
+  // read like a big collection.
+  const clusterCount = scenario === "huge" ? 30 : Math.min(30, Math.max(5, Math.round(images.length / 20)));
+  const virtualTotal = scenario === "huge" ? 12_000 : images.length;
+  // Long-tailed sizes (a few large clusters, many smaller), like real k-means output.
+  const weights = Array.from({ length: clusterCount }, (_, i) => 1 / (i + 1.5));
+  const weightSum = weights.reduce((sum, weight) => sum + weight, 0);
+  return weights.map((weight, index) => {
     const group = images.filter((image) => image.id % (index + 2) === 0).slice(0, 28);
-    const representative = group[0] ?? images[index];
+    const representative = group[0] ?? images[index % images.length];
     return {
-      count: Math.max(group.length, 1),
+      count: Math.max(1, Math.round((virtualTotal * weight) / weightSum)),
       representative_image_id: representative?.id ?? index + 1,
       thumbnail_path: representative?.thumbnail_path ?? null,
       image_ids: group.length ? group.map((image) => image.id) : [representative?.id ?? 1],
@@ -305,7 +315,7 @@ export function createMockDb(scenario: MockScenario): MockDb {
     albums,
     albumImageIds,
     tagsByImageId: makeTags(images, scenario),
-    tagCloud: makeTagCloud(images),
+    visualClusters: makeVisualClusters(images, scenario),
     exploreTags: makeExploreTags(images, scenario),
     backgroundJobs: makeProgress(folders, scenario),
     duplicateGroups: makeDuplicateGroups(images, scenario),

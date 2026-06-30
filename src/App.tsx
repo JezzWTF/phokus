@@ -5,7 +5,7 @@ import { BackgroundTasks } from "./components/BackgroundTasks";
 import { Toolbar } from "./components/Toolbar";
 import { Gallery } from "./components/Gallery";
 import { Lightbox } from "./components/Lightbox";
-import { TagCloud } from "./components/TagCloud";
+import { ExploreView } from "./components/ExploreView";
 import { DuplicateFinder } from "./components/DuplicateFinder";
 import { Timeline } from "./components/Timeline";
 import { TitleBar } from "./components/TitleBar";
@@ -88,7 +88,7 @@ export default function App() {
           ) : activeView === "explore" ? (
             <>
               <BackgroundTasks />
-              <TagCloud />
+              <ExploreView />
             </>
           ) : activeView === "duplicates" ? (
             <>
