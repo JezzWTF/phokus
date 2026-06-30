@@ -70,6 +70,11 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   is now near-instant. The cluster cache is validated from a lightweight
   image-ID signature instead of re-reading every embedding, so big libraries no
   longer stall for several seconds even when the cached result is reused.
+- **Faster first-time visual clustering** — computing clusters for a large
+  library is now much quicker: centroids are found on a representative sample and
+  every image is then assigned across all CPU cores, instead of iterating over
+  the whole library single-threaded. Density-aware seeding keeps the groupings
+  balanced, so no single cluster swallows a huge share of images.
 - **Tag manager search and sort** — the Manage mode tag list now has a live
   filter input and a sort dropdown (most-used / least-used / A–Z / Z–A). The
   list is virtualised so libraries with thousands of tags scroll without lag,
