@@ -99,6 +99,8 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   GPU) it now uses multiple cores instead of being pinned to one, several times
   faster on multi-core machines. A couple of cores are left free so the rest of
   the app stays responsive. GPU (DirectML) tagging is unchanged.
+- **Goodbye Native Tooltips** — Hello modern tooltip! Replaced the boring, native
+  tooltips for the custom tooltip across the board
 
 ### Fixed
 
@@ -132,9 +134,9 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Explore readability in Subtle Light** — fixed washed-out and unreadable
   elements in the Explore view on the light theme. Cluster cards now use a soft
   dark caption scrim (the previous cream overlay fogged the photos), with a
-  legible label, count, and "Open" button; Tag Cloud words use darker accents and
+  legible label, count, and "Open" button; Cluster Cloud words use darker accents and
   a higher opacity floor instead of near-invisible pale text.
-- **Explore polish** — the Tag Cloud now uses the in-app tooltip instead of the
+- **Explore polish** — the Cluster Cloud now uses the in-app tooltip instead of the
   native browser one (and reads "1 image", not "1 images"), and the folder-scope
   dropdown no longer opens behind the cluster cards.
 - **AI tagging no longer freezes the app** — tagging now runs inference in small
@@ -156,6 +158,8 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   the tagging queue scope to "Selected Folders" previously auto-selected the
   first folder in the list. It now starts with nothing selected so you can
   choose exactly which folders to target.
+- **Colour filtering** — Colour filtering now works within tag search results,
+  you can search/select a tag and then narrow that result set by colour.
 
 ## [0.1.1] — 2026-06-23
 
