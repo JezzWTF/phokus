@@ -327,31 +327,33 @@ export function Toolbar() {
               />
               {searchCommand !== null ? (
                 <div className="absolute left-8 top-1/2 -translate-y-1/2">
-                  <button
-                    type="button"
-                    className="rounded-md border border-white/10 bg-white/[0.05] px-1.5 py-0.5 font-mono text-[11px] text-gray-300 transition-colors hover:bg-white/[0.08] hover:text-white"
-                    onClick={() => { setSearchCommand(null); setTagSuggestions([]); }}
-                    title="Remove search command"
-                  >
-                    {commandPrefix(searchCommand)}
-                  </button>
+                  <Tooltip label="Remove search command" anchorToCursor>
+                    <button
+                      type="button"
+                      className="rounded-md border border-white/10 bg-white/[0.05] px-1.5 py-0.5 font-mono text-[11px] text-gray-300 transition-colors hover:bg-white/[0.08] hover:text-white"
+                      onClick={() => { setSearchCommand(null); setTagSuggestions([]); }}
+                    >
+                      {commandPrefix(searchCommand)}
+                    </button>
+                  </Tooltip>
                 </div>
               ) : null}
               {searchQuery.trim().length > 0 || searchCommand !== null ? (
-                <button
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-500 hover:bg-white/5 hover:text-gray-200 transition-colors"
-                  title="Clear search"
-                  onClick={() => {
-                    setSearchCommand(null);
-                    setSearchQuery("");
-                    setTagSuggestions([]);
-                    clearSearch();
-                  }}
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+                <Tooltip label="Clear search" anchorToCursor className="absolute right-2 top-1/2 -translate-y-1/2">
+                  <button
+                    className="rounded-md p-1 text-gray-500 hover:bg-white/5 hover:text-gray-200 transition-colors"
+                    onClick={() => {
+                      setSearchCommand(null);
+                      setSearchQuery("");
+                      setTagSuggestions([]);
+                      clearSearch();
+                    }}
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </Tooltip>
               ) : null}
             </div>
           </div>

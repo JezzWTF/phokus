@@ -156,15 +156,16 @@ export function WhatsNewModal() {
                 </h3>
                 {entry?.date ? <p className="mt-0.5 text-xs text-gray-600">Released {entry.date}</p> : null}
               </div>
-              <button
-                className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
-                onClick={closeWhatsNew}
-                title="Close"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <Tooltip label="Close" anchorToCursor>
+                <button
+                  className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
+                  onClick={closeWhatsNew}
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </Tooltip>
             </div>
 
             <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">

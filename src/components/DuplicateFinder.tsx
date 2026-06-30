@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { DuplicateGroup, useGalleryStore } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
 import { mediaSrc } from "../lib/mediaSrc";
+import { Tooltip } from "./Tooltip";
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
@@ -70,6 +71,7 @@ function DuplicateGroupCard({ group }: { group: DuplicateGroup }) {
           const isSelected = selectedIds.has(image.id);
           const src = mediaSrc(image.thumbnail_path);
           return (
+            <Tooltip label={image.path} anchorToCursor>
             <button
               key={image.id}
               className={`media-dark-surface group relative overflow-hidden rounded-xl border transition-all ${
@@ -79,7 +81,6 @@ function DuplicateGroupCard({ group }: { group: DuplicateGroup }) {
               }`}
               style={{ width: 140, height: 105 }}
               onClick={() => toggleDuplicateSelected(image.id)}
-              title={image.path}
             >
               {src ? (
                 <img src={src} alt="" className="h-full w-full object-cover" draggable={false} />
@@ -99,6 +100,7 @@ function DuplicateGroupCard({ group }: { group: DuplicateGroup }) {
                 <p className="truncate text-[9px] text-white/60">{image.path.split(/[\\/]/).slice(-2).join("/")}</p>
               </div>
             </button>
+            </Tooltip>
           );
         })}
       </div>
@@ -206,13 +208,14 @@ export function DuplicateFinder() {
             <FolderScopeDropdown />
             {/* Batch select — only shown when there are groups and nothing is selected yet */}
             {hasResults && selectedCount === 0 && !deleting && (
+              <Tooltip label={`Mark ${totalDuplicateImages} duplicate${totalDuplicateImages === 1 ? "" : "s"} for deletion across all groups (keeps first in each)`} anchorToCursor>
               <button
                 className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-white/[0.07] hover:text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                 onClick={selectKeepFirstAllGroups}
-                title={`Mark ${totalDuplicateImages} duplicate${totalDuplicateImages === 1 ? "" : "s"} for deletion across all groups (keeps first in each)`}
               >
                 Select all duplicates
               </button>
+              </Tooltip>
             )}
             {selectedCount > 0 ? (
               <>

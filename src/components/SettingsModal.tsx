@@ -3,6 +3,7 @@ import { AppTheme, CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbn
 import { FfmpegStatusRow } from "./onboarding/StepWelcome";
 import { ThemedDropdown } from "./ThemedDropdown";
 import { getChangelogForVersion } from "../changelog";
+import { Tooltip } from "./Tooltip";
 
 type SettingsSection = "workspace" | "general";
 
@@ -394,15 +395,16 @@ export function SettingsModal() {
           </div>
         </aside>
 
-        <button
-          className="absolute right-4 top-4 z-10 rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
-          onClick={() => setSettingsOpen(false)}
-          title="Close settings"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <Tooltip label="Close settings" anchorToCursor className="absolute right-4 top-4 z-10">
+          <button
+            className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
+            onClick={() => setSettingsOpen(false)}
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </Tooltip>
 
         <main className="min-w-0 flex-1 overflow-y-auto">
           <div className="px-10 py-8">

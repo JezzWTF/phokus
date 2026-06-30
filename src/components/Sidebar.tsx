@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useGalleryStore, Folder, Album, IndexProgress } from "../store";
 import { ThemedDropdown } from "./ThemedDropdown";
 import { mediaSrc } from "../lib/mediaSrc";
+import { Tooltip } from "./Tooltip";
 
 interface ContextMenuState {
   folderId: number;
@@ -181,10 +182,10 @@ function FolderItem({
         onContextMenu={handleContextMenu}
       >
         {customOrdering ? (
+          <Tooltip label={`Drag to reorder ${folder.name}`} followCursor delay={1000}>
           <button
             type="button"
             aria-label={`Reorder ${folder.name}`}
-            title={`Drag to reorder ${folder.name}`}
             className={`-ml-1 flex h-7 w-5 shrink-0 touch-none items-center justify-center rounded-md transition-colors ${
               dragging
                 ? "cursor-grabbing bg-white/10 text-gray-300"
@@ -208,6 +209,7 @@ function FolderItem({
               <circle cx="3" cy="9" r="1" /><circle cx="9" cy="9" r="1" />
             </svg>
           </button>
+          </Tooltip>
         ) : null}
         {isMissing ? (
           <span className="shrink-0 text-amber-400">
@@ -273,26 +275,28 @@ function FolderItem({
             </div>
           ) : (
             <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/8 transition-colors"
-                title="Reindex"
-                onClick={(e) => { e.stopPropagation(); void reindexFolder(folder.id); }}
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75}
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              </button>
-              <button
-                className="p-1 rounded text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                title="Remove from app"
-                onClick={(e) => { e.stopPropagation(); setConfirmingRemoval(true); }}
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75}
-                    d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <Tooltip label="Reindex" anchorToCursor>
+                <button
+                  className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/8 transition-colors"
+                  onClick={(e) => { e.stopPropagation(); void reindexFolder(folder.id); }}
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75}
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </button>
+              </Tooltip>
+              <Tooltip label="Remove from app" anchorToCursor>
+                <button
+                  className="p-1 rounded text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  onClick={(e) => { e.stopPropagation(); setConfirmingRemoval(true); }}
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75}
+                      d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </Tooltip>
             </div>
           )
         )}
@@ -499,10 +503,10 @@ function AlbumItem({
 
       {/* Drag handle — hover-revealed, reorders albums */}
       {reorderable ? (
+        <Tooltip label="Drag to reorder" anchorToCursor>
         <button
           type="button"
           aria-label={`Reorder ${album.name}`}
-          title="Drag to reorder"
           className="-ml-1 flex h-6 w-3.5 shrink-0 cursor-grab touch-none items-center justify-center rounded text-gray-700 opacity-0 transition-opacity hover:text-gray-400 group-hover:opacity-100"
           onPointerDown={(e) => {
             e.stopPropagation();
@@ -517,7 +521,8 @@ function AlbumItem({
             <circle cx="3" cy="9" r="1" /><circle cx="9" cy="9" r="1" />
           </svg>
         </button>
-      ) : null}
+      </Tooltip>
+    ) : null}
 
       {/* Cover thumbnail — distinguishes albums from folder rows */}
       <div className="h-7 w-7 shrink-0 overflow-hidden rounded-md bg-white/[0.05] ring-1 ring-white/10">
@@ -833,15 +838,16 @@ export function Sidebar() {
       {/* Header */}
       <div className="flex items-center justify-between px-4 h-12 border-b border-white/[0.06] shrink-0">
         <span className="text-[13px] font-semibold text-white/80 tracking-wide">Phokus</span>
+        <Tooltip label="Add Media Folder" anchorToCursor>
         <button
           onClick={handleAddFolder}
           className="p-1.5 rounded-lg text-gray-500 hover:text-gray-200 hover:bg-white/8 transition-colors"
-          title="Add Media Folder"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 4v16m8-8H4" />
           </svg>
         </button>
+        </Tooltip>
       </div>
 
       {/* Nav */}
@@ -985,26 +991,28 @@ export function Sidebar() {
           ) : (
             <div className="flex items-center gap-0.5">
               {albums.length > 0 ? (
+                <Tooltip label="Manage albums">
                 <button
                   onClick={() => setManageAlbums(true)}
                   className="rounded p-0.5 text-gray-600 transition-colors hover:bg-white/8 hover:text-gray-200"
-                  title="Manage albums"
                 >
                   <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75}
                       d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
                 </button>
+                </Tooltip>
               ) : null}
+              <Tooltip label="New album">
               <button
                 onClick={startCreatingAlbum}
                 className="rounded p-0.5 text-gray-600 transition-colors hover:bg-white/8 hover:text-gray-200"
-                title="New album"
               >
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 4v16m8-8H4" />
                 </svg>
               </button>
+              </Tooltip>
             </div>
           )}
         </div>

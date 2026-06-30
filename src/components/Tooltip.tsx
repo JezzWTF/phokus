@@ -32,6 +32,7 @@ export function Tooltip({
   block = false,
   anchorToCursor = false,
   followCursor = false,
+  disabled = false,
   className = "",
   children,
 }: {
@@ -47,6 +48,8 @@ export function Tooltip({
   anchorToCursor?: boolean;
   /** Track the cursor (fixed position) instead of anchoring to a side. */
   followCursor?: boolean;
+  /** Render the wrapper but suppress tooltip display. */
+  disabled?: boolean;
   /** Extra classes for the wrapper (e.g. layout). */
   className?: string;
   children: ReactNode;
@@ -83,6 +86,7 @@ export function Tooltip({
     frame.current = undefined;
   };
   const show = (event: MouseEvent<HTMLElement>) => {
+    if (disabled) return;
     clear();
     if (anchorToCursor || followCursor) place(event.clientX, event.clientY);
     if (delay <= 0) {
@@ -109,6 +113,10 @@ export function Tooltip({
     setMounted(true);
     return clear;
   }, []);
+
+  useEffect(() => {
+    if (disabled) hide();
+  }, [disabled]);
 
   const Wrapper = block ? "div" : "span";
   const cursorTooltip = (
@@ -140,7 +148,7 @@ export function Tooltip({
       onPointerDown={hide}
     >
       {children}
-      {anchorToCursor || followCursor ? (
+      {disabled ? null : anchorToCursor || followCursor ? (
         mounted ? createPortal(cursorTooltip, document.body) : null
       ) : (
         <span

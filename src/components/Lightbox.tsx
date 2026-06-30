@@ -5,6 +5,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useGalleryStore, ImageTag, ImageExif, AiRating } from "../store";
 import { VideoPlayer } from "./VideoPlayer";
 import { mediaSrc } from "../lib/mediaSrc";
+import { Tooltip } from "./Tooltip";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -525,15 +526,17 @@ export function Lightbox() {
                     <p className="text-xs text-gray-500">Details</p>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Tooltip label= { selectedImage.favorite ? "Remove favorite" : "Add favorite" } followCursor>
                     <button
                       className={`rounded-full border p-2 ${selectedImage.favorite ? "border-rose-400/40 bg-rose-500/10 text-rose-300" : "border-white/10 bg-white/5 text-gray-400 hover:text-white"}`}
                       onClick={() => void updateImageDetails(selectedImage.id, { favorite: !selectedImage.favorite })}
-                      title={selectedImage.favorite ? "Remove favorite" : "Add favorite"}
                     >
                       <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
                         <path d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" />
                       </svg>
                     </button>
+                    </Tooltip>
+                    <Tooltip label= {canFindSimilar ? "Find similar images" : "Embeddings not ready"} followCursor>
                     <button
                       className={`flex items-center gap-1.5 rounded-full border px-2 py-1.5 text-xs lg:px-3 ${
                         canFindSimilar
@@ -545,7 +548,6 @@ export function Lightbox() {
                         void findSimilar(selectedImage.id, selectedImage.folder_id);
                       }}
                       disabled={!canFindSimilar}
-                      title={canFindSimilar ? "Find similar images" : "Embeddings not ready"}
                     >
                       <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6}
@@ -555,6 +557,7 @@ export function Lightbox() {
                       </svg>
                       <span className="hidden lg:inline">{canFindSimilar ? "Similar" : "Embeddings not ready"}</span>
                     </button>
+                    </Tooltip>
                   </div>
                   <button className="rounded p-1 text-gray-400 hover:text-white" onClick={closeImage}>
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -566,6 +569,7 @@ export function Lightbox() {
                 {/* Search region button row */}
                 {canSearchRegion && (
                   <div className="shrink-0 px-5 pb-3">
+                    <Tooltip label={ regionSelectMode ? "Cancel region selection" : "Draw a region on the image to search for similar content" } followCursor>
                     <button
                       className={`w-full rounded-lg border px-3 py-2 text-xs transition-colors ${
                         regionSelectMode
@@ -581,7 +585,6 @@ export function Lightbox() {
                         setIsDragging(false);
                       }}
                       disabled={regionSearching}
-                      title={regionSelectMode ? "Cancel region selection" : "Draw a region on the image to search for similar content"}
                     >
                       {regionSearching ? (
                         <span className="flex items-center justify-center gap-1.5">
@@ -607,6 +610,7 @@ export function Lightbox() {
                         </span>
                       )}
                     </button>
+                  </Tooltip>
                   </div>
                 )}
 
@@ -618,11 +622,11 @@ export function Lightbox() {
                       {Array.from({ length: 5 }, (_, index) => {
                         const rating = index + 1;
                         return (
+                          <Tooltip label={`Set ${rating} star rating`} followCursor delay={750}>
                           <button
                             key={rating}
                             className="rounded-md p-1"
                             onClick={() => void updateImageDetails(selectedImage.id, { rating })}
-                            title={`Set ${rating} star rating`}
                           >
                             <svg
                               className={`h-5 w-5 ${rating <= selectedImage.rating ? "text-amber-300" : "text-white/20 hover:text-white/50"}`}
@@ -632,18 +636,20 @@ export function Lightbox() {
                               <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81H7.03a1 1 0 00.951-.69l1.07-3.292z" />
                             </svg>
                           </button>
+                          </Tooltip>
                         );
                       })}
                       {selectedImage.rating > 0 ? (
-                        <button
-                          className="ml-2 rounded-md border border-white/10 p-1.5 text-gray-400 hover:bg-white/5 hover:text-white"
-                          onClick={() => void updateImageDetails(selectedImage.id, { rating: 0 })}
-                          title="Remove rating"
-                        >
-                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
+                        <Tooltip label="Remove rating" followCursor>
+                          <button
+                            className="ml-2 rounded-md border border-white/10 p-1.5 text-gray-400 hover:bg-white/5 hover:text-white"
+                            onClick={() => void updateImageDetails(selectedImage.id, { rating: 0 })}
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </Tooltip>
                       ) : null}
                     </div>
                   </div>
@@ -717,10 +723,10 @@ export function Lightbox() {
                           </span>
                         ) : null}
                         {selectedImage.media_kind === "image" ? (
+                          <Tooltip label={!(taggerModelStatus?.ready ?? false) ? "WD Tagger model not downloaded" : "Queue AI tagging for this image"} followCursor>
                           <button
                             className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                             disabled={!(taggerModelStatus?.ready ?? false) || taggingQueued}
-                            title={!(taggerModelStatus?.ready ?? false) ? "WD Tagger model not downloaded" : "Queue AI tagging for this image"}
                             onClick={() => {
                               setTaggingQueued(true);
                               void queueTaggingForImage(selectedImage.id).catch(() => undefined);
@@ -728,7 +734,7 @@ export function Lightbox() {
                           >
                             {taggingQueued ? "Queued" : "AI tags"}
                           </button>
-                        ) : null}
+                        </Tooltip>) : null}
                       </div>
                     </div>
 
@@ -736,30 +742,36 @@ export function Lightbox() {
                       <>
                         <div className="flex flex-wrap gap-1.5">
                           {(tagsExpanded ? imageTags : imageTags.slice(0, 8)).map((t) => (
-                            <span
+                            <Tooltip
                               key={t.id}
-                              className={`group flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs ${
-                                t.source === "ai"
-                                  ? "border-sky-400/20 bg-sky-500/8 text-sky-300"
-                                  : "border-white/10 bg-white/5 text-gray-300"
-                              }`}
-                              title={t.source === "ai" && t.confidence !== null ? `AI confidence: ${(t.confidence * 100).toFixed(0)}%` : undefined}
+                              label={t.source === "ai" && t.confidence !== null ? `AI confidence: ${(t.confidence * 100).toFixed(0)}%` : ""}
+                              followCursor
+                              disabled={t.source !== "ai" || t.confidence === null}
                             >
-                              {t.tag}
-                              <button
-                                className="text-gray-600 opacity-0 transition-opacity hover:text-white group-hover:opacity-100"
-                                onClick={() => {
-                                  void removeTag(t.id).then(() =>
-                                    setImageTags((prev) => prev.filter((x) => x.id !== t.id)),
-                                  );
-                                }}
-                                title="Remove tag"
+                              <span
+                                className={`group flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs ${
+                                  t.source === "ai"
+                                    ? "border-sky-400/20 bg-sky-500/8 text-sky-300"
+                                    : "border-white/10 bg-white/5 text-gray-300"
+                                }`}
                               >
-                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </button>
-                            </span>
+                                {t.tag}
+                                <Tooltip label="Remove tag" followCursor>
+                                  <button
+                                    className="text-gray-600 opacity-0 transition-opacity hover:text-white group-hover:opacity-100"
+                                    onClick={() => {
+                                      void removeTag(t.id).then(() =>
+                                        setImageTags((prev) => prev.filter((x) => x.id !== t.id)),
+                                      );
+                                    }}
+                                  >
+                                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                  </button>
+                                </Tooltip>
+                              </span>
+                            </Tooltip>
                           ))}
                         </div>
                         {imageTags.length > 8 && (
@@ -914,21 +926,22 @@ export function Lightbox() {
                           </div>
                         ) : null}
                         {imageExif.gps_lat != null && imageExif.gps_lon != null ? (
-                          <button
-                            className="inline-flex items-center gap-1 text-xs text-sky-400 transition-colors hover:text-sky-300"
-                            title="Open location in your browser"
-                            onClick={() =>
-                              void invoke("open_map_location", {
-                                params: { lat: imageExif.gps_lat, lon: imageExif.gps_lon },
-                              })
-                            }
-                          >
-                            {imageExif.gps_lat.toFixed(5)}, {imageExif.gps_lon.toFixed(5)}
-                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                            </svg>
-                          </button>
+                          <Tooltip label="Open location in your browser" anchorToCursor>
+                            <button
+                              className="inline-flex items-center gap-1 text-xs text-sky-400 transition-colors hover:text-sky-300"
+                              onClick={() =>
+                                void invoke("open_map_location", {
+                                  params: { lat: imageExif.gps_lat, lon: imageExif.gps_lon },
+                                })
+                              }
+                            >
+                              {imageExif.gps_lat.toFixed(5)}, {imageExif.gps_lon.toFixed(5)}
+                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                              </svg>
+                            </button>
+                          </Tooltip>
                         ) : null}
                       </div>
                     </div>
@@ -937,15 +950,16 @@ export function Lightbox() {
                   <div>
                     <div className="mb-1 flex items-center justify-between">
                       <p className="text-xs uppercase tracking-wider text-gray-500">Path</p>
+                      <Tooltip label="Reveal in Explorer" anchorToCursor>
                       <button
                         className="rounded p-0.5 text-gray-600 transition-colors hover:text-gray-300"
-                        title="Reveal in Explorer"
                         onClick={() => void revealItemInDir(selectedImage.path)}
                       >
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
                         </svg>
                       </button>
+                      </Tooltip>
                     </div>
                     <p className="break-all text-xs text-gray-400">{selectedImage.path}</p>
                   </div>

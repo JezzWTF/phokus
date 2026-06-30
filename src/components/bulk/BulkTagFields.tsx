@@ -1,4 +1,5 @@
 import { useBulkTagEditor } from "./useBulkTagEditor";
+import { Tooltip } from "../Tooltip";
 
 // Presentational tag-editing fields shared by the popover and modal surfaces.
 export function BulkTagFields({ autoFocus = false }: { autoFocus?: boolean }) {
@@ -35,14 +36,14 @@ export function BulkTagFields({ autoFocus = false }: { autoFocus?: boolean }) {
       {suggestions.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {suggestions.map((suggestion) => (
-            <button
-              key={suggestion.tag}
-              className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[11px] text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
-              onClick={() => void addTag(suggestion.tag)}
-              title={`${suggestion.count.toLocaleString()} tagged`}
-            >
-              {suggestion.tag}
-            </button>
+            <Tooltip key={suggestion.tag} label={`${suggestion.count.toLocaleString()} tagged`} anchorToCursor>
+              <button
+                className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[11px] text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+                onClick={() => void addTag(suggestion.tag)}
+              >
+                {suggestion.tag}
+              </button>
+            </Tooltip>
           ))}
         </div>
       ) : null}
@@ -55,15 +56,16 @@ export function BulkTagFields({ autoFocus = false }: { autoFocus?: boolean }) {
               className="group/chip flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-gray-300"
             >
               {tag}
-              <button
-                className="text-gray-600 transition-colors hover:text-white"
-                title="Remove from selected"
-                onClick={() => void removeTag(tag)}
-              >
-                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <Tooltip label="Remove from selected" followCursor>
+                <button
+                  className="text-gray-600 transition-colors hover:text-white"
+                  onClick={() => void removeTag(tag)}
+                >
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </Tooltip>
             </span>
           ))}
         </div>

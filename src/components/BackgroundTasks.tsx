@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useGalleryStore, WorkerKey } from "../store";
+import { Tooltip } from "./Tooltip";
 
 const WORKER_FOR_STAGE: Record<string, WorkerKey> = {
   Thumbnails: "thumbnail",
@@ -52,15 +53,16 @@ function FailedWorkerItemRow({ item }: { item: FailedWorkerItem }) {
           <p className="truncate text-[9px] text-gray-600">{item.error}</p>
         )}
       </div>
+      <Tooltip label="Reveal in Explorer" anchorToCursor>
       <button
         className="shrink-0 text-gray-700 transition-colors hover:text-gray-300 light-theme:text-gray-600 light-theme:hover:text-gray-100"
-        title="Reveal in Explorer"
         onClick={() => void revealItemInDir(item.path)}
       >
         <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
         </svg>
       </button>
+      </Tooltip>
     </div>
   );
 }
@@ -378,9 +380,9 @@ export function BackgroundTasks() {
                   {stage.detail}
                 </span>
                 {workerKey && (
+                  <Tooltip label={isPaused ? `Resume ${stage.label}` : `Pause ${stage.label}`} anchorToCursor>
                   <button
                     className="ml-0.5 opacity-0 group-hover:opacity-100 hover:text-white transition-opacity"
-                    title={isPaused ? `Resume ${stage.label}` : `Pause ${stage.label}`}
                     onClick={(e) => { e.stopPropagation(); toggleWorker(primary.id, workerKey); }}
                   >
                     {isPaused ? (
@@ -393,7 +395,8 @@ export function BackgroundTasks() {
                       </svg>
                     )}
                   </button>
-                )}
+                </Tooltip>
+              )}
               </span>
             );
           })}
@@ -455,16 +458,17 @@ export function BackgroundTasks() {
 
         {/* Dismiss — hidden for system tasks like duplicate scan */}
         {primary.id >= 0 && (
+          <Tooltip label="Dismiss" anchorToCursor>
           <button
             className="p-1 rounded-md text-gray-600 hover:text-gray-300 hover:bg-white/8 transition-colors shrink-0"
-            title="Dismiss"
             onClick={(e) => { e.stopPropagation(); dismissTask(primary.id, primary.snapshot); }}
           >
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
-        )}
+        </Tooltip>
+      )}
       </div>
 
       {/* Expanded panel — one row per folder */}
@@ -508,9 +512,9 @@ export function BackgroundTasks() {
                             {stage.detail}
                           </span>
                           {workerKey && (
+                            <Tooltip label={isPaused ? `Resume ${stage.label}` : `Pause ${stage.label}`} anchorToCursor>
                             <button
                               className="ml-0.5 text-gray-600 hover:text-white transition-colors"
-                              title={isPaused ? `Resume ${stage.label}` : `Pause ${stage.label}`}
                               onClick={() => toggleWorker(task.id, workerKey)}
                             >
                               {isPaused ? (
@@ -523,7 +527,8 @@ export function BackgroundTasks() {
                                 </svg>
                               )}
                             </button>
-                          )}
+                          </Tooltip>
+                        )}
                         </span>
                       );
                     })}
@@ -565,15 +570,16 @@ export function BackgroundTasks() {
                   )}
 
                   {task.id >= 0 && (
+                    <Tooltip label="Dismiss" anchorToCursor>
                     <button
                       className="p-1 rounded-md text-gray-600 hover:text-gray-300 hover:bg-white/8 transition-colors shrink-0"
-                      title="Dismiss"
                       onClick={() => dismissTask(task.id, task.snapshot)}
                     >
                       <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     </button>
+                    </Tooltip>
                   )}
                 </div>
 

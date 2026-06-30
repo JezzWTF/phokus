@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useGalleryStore } from "../store";
+import { Tooltip } from "./Tooltip";
 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 const CONTROLS_HIDE_DELAY_MS = 2500;
@@ -26,23 +27,24 @@ interface BufferedRange {
   end: number;
 }
 
-function ControlButton({ onClick, title, active = false, children }: {
+function ControlButton({ onClick, label, active = false, children }: {
   onClick: () => void;
-  title: string;
+  label: string;
   active?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <button
-      className={`rounded-md p-1.5 transition-colors ${active ? "text-white" : "text-gray-300 hover:text-white"} hover:bg-white/10`}
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
-      title={title}
-    >
-      {children}
-    </button>
+    <Tooltip label={label} anchorToCursor>
+      <button
+        className={`rounded-md p-1.5 transition-colors ${active ? "text-white" : "text-gray-300 hover:text-white"} hover:bg-white/10`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -352,7 +354,7 @@ export function VideoPlayer({ src }: { src: string }) {
 
             {/* Control row */}
             <div className="mt-1 flex items-center gap-1.5">
-              <ControlButton onClick={togglePlay} title={playing ? "Pause (Space)" : "Play (Space)"}>
+              <ControlButton onClick={togglePlay} label={playing ? "Pause (Space)" : "Play (Space)"}>
                 {playing ? (
                   <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
@@ -371,7 +373,7 @@ export function VideoPlayer({ src }: { src: string }) {
               <div className="flex-1" />
 
               {/* Volume */}
-              <ControlButton onClick={toggleMute} title={muted ? "Unmute (M)" : "Mute (M)"}>
+              <ControlButton onClick={toggleMute} label={muted ? "Unmute (M)" : "Mute (M)"}>
                 {effectiveVolume === 0 ? (
                   <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
@@ -384,30 +386,32 @@ export function VideoPlayer({ src }: { src: string }) {
                   </svg>
                 )}
               </ControlButton>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.02}
-                value={effectiveVolume}
-                className="h-1 w-20 cursor-pointer accent-white"
-                onChange={(event) => applyVolume(parseFloat(event.target.value), false)}
-                onClick={(event) => event.stopPropagation()}
-                title="Volume (↑/↓)"
-              />
+              <Tooltip label="Volume (↑/↓)" anchorToCursor>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.02}
+                  value={effectiveVolume}
+                  className="h-1 w-20 cursor-pointer accent-white"
+                  onChange={(event) => applyVolume(parseFloat(event.target.value), false)}
+                  onClick={(event) => event.stopPropagation()}
+                />
+              </Tooltip>
 
               {/* Playback speed */}
               <div className="relative">
-                <button
-                  className={`min-w-12 rounded-md px-2 py-1.5 text-xs tabular-nums transition-colors hover:bg-white/10 ${playbackRate !== 1 ? "text-white" : "text-gray-300 hover:text-white"}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSpeedMenuOpen((value) => !value);
-                  }}
-                  title="Playback speed"
-                >
-                  {playbackRate}×
-                </button>
+                <Tooltip label="Playback speed" anchorToCursor>
+                  <button
+                    className={`min-w-12 rounded-md px-2 py-1.5 text-xs tabular-nums transition-colors hover:bg-white/10 ${playbackRate !== 1 ? "text-white" : "text-gray-300 hover:text-white"}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSpeedMenuOpen((value) => !value);
+                    }}
+                  >
+                    {playbackRate}×
+                  </button>
+                </Tooltip>
                 {speedMenuOpen ? (
                   <div className="absolute bottom-full right-0 z-20 mb-2 min-w-20 rounded-lg border border-white/10 bg-gray-950/95 p-1 shadow-2xl backdrop-blur">
                     {SPEED_OPTIONS.map((rate) => (
@@ -429,14 +433,14 @@ export function VideoPlayer({ src }: { src: string }) {
               </div>
 
               {/* Loop */}
-              <ControlButton onClick={toggleLoop} title={loop ? "Loop on (L)" : "Loop off (L)"} active={loop}>
+              <ControlButton onClick={toggleLoop} label={loop ? "Loop on (L)" : "Loop off (L)"} active={loop}>
                 <svg className={`h-4.5 w-4.5 ${loop ? "text-emerald-300" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M4 9a8 8 0 0114-3M20 15a8 8 0 01-14 3" />
                 </svg>
               </ControlButton>
 
               {/* Fullscreen */}
-              <ControlButton onClick={toggleFullscreen} title={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}>
+              <ControlButton onClick={toggleFullscreen} label={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}>
                 {fullscreen ? (
                   <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 9H4m5 0V4m6 5h5m-5 0V4M9 15H4m5 0v5m6-5h5m-5 0v5" />

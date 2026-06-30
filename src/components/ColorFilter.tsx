@@ -59,7 +59,7 @@ export function ColorFilter() {
     <div ref={ref} className="relative ml-1 flex shrink-0 items-center border-l border-white/6 pl-2">
       {/* Trigger — a single palette icon; shows the active color as a dot when a
           filter is applied so the collapsed state still communicates it. */}
-      <Tooltip label={isActive ? "Color filter active" : "Filter by color"} delay={400}>
+      <Tooltip label={isActive ? "Color filter active" : "Filter by color"} delay={400} anchorToCursor>
         <button
           className={`relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 transition-colors ${
             open || isActive ? "bg-white/10 text-white" : "text-gray-500 hover:bg-white/5 hover:text-gray-200"
@@ -130,27 +130,28 @@ export function ColorFilter() {
                   value={colorFilter ? toHex(colorFilter) : "#3b7dd8"}
                   onChange={(event) => setColorFilter(fromHex(event.target.value))}
                 />
-              </label></Tooltip>
+              </label>
+              </Tooltip>
             </div>
 
             {isActive || (colorBackfill && colorBackfill.total > 0) ? (
               <div className="mt-2 flex items-center justify-between gap-3 border-t border-white/6 pt-2 light-theme:border-gray-700/40">
                 {colorBackfill && colorBackfill.total > 0 ? (
-                  <span
-                    className="text-[10px] text-gray-600"
-                    title="Sampling colors from existing thumbnails — color search fills in as this runs"
-                  >
-                    sampling {colorBackfill.processed.toLocaleString()}/{colorBackfill.total.toLocaleString()}
-                  </span>
+                  <Tooltip label="Sampling colours from existing thumbnails — colour search fills in as this runs" anchorToCursor>
+                    <span className="text-[10px] text-gray-600">
+                      sampling {colorBackfill.processed.toLocaleString()}/{colorBackfill.total.toLocaleString()}
+                    </span>
+                  </Tooltip>
                 ) : <span />}
                 {isActive ? (
+                  <Tooltip label="Clear colour filter" anchorToCursor>
                   <button
                     className="shrink-0 rounded px-1 text-[11px] text-gray-500 transition-colors hover:text-gray-200"
                     onClick={() => setColorFilter(null)}
-                    title="Clear color filter"
                   >
                     Clear
                   </button>
+                  </Tooltip>
                 ) : null}
               </div>
             ) : null}

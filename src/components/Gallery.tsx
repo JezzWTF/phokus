@@ -75,31 +75,32 @@ export function ContextMenu({
         {Array.from({ length: 5 }, (_, index) => {
           const rating = index + 1;
           return (
-            <button
-              key={rating}
-              className="rounded-md p-1 transition-colors hover:bg-white/5"
-              onClick={async () => { await updateImageDetails(image.id, { rating }); onClose(); }}
-              title={`Set ${rating} star rating`}
-            >
-              <svg
-                className={`h-4 w-4 ${rating <= image.rating ? "text-amber-300" : "text-white/20 hover:text-white/40"}`}
-                fill="currentColor" viewBox="0 0 20 20"
+            <Tooltip key={rating} label={`Set ${rating} star rating`} followCursor>
+              <button
+                className="rounded-md p-1 transition-colors hover:bg-white/5"
+                onClick={async () => { await updateImageDetails(image.id, { rating }); onClose(); }}
               >
-                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81H7.03a1 1 0 00.951-.69l1.07-3.292z" />
-              </svg>
-            </button>
+                <svg
+                  className={`h-4 w-4 ${rating <= image.rating ? "text-amber-300" : "text-white/20 hover:text-white/40"}`}
+                  fill="currentColor" viewBox="0 0 20 20"
+                >
+                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81H7.03a1 1 0 00.951-.69l1.07-3.292z" />
+                </svg>
+              </button>
+            </Tooltip>
           );
         })}
         {image.rating > 0 ? (
-          <button
-            className="ml-1 rounded-md p-1 text-gray-600 hover:bg-white/5 hover:text-gray-300 transition-colors"
-            onClick={async () => { await updateImageDetails(image.id, { rating: 0 }); onClose(); }}
-            title="Remove rating"
-          >
-            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <Tooltip label="Remove rating" followCursor>
+            <button
+              className="ml-1 rounded-md p-1 text-gray-600 hover:bg-white/5 hover:text-gray-300 transition-colors"
+              onClick={async () => { await updateImageDetails(image.id, { rating: 0 }); onClose(); }}
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </Tooltip>
         ) : null}
       </div>
     </div>
@@ -126,7 +127,6 @@ export function ImageTile({
   const src = mediaSrc(image.thumbnail_path);
 
   return (
-    <Tooltip label={image.filename} delay={500} block followCursor>
     <div
       className={`media-dark-surface group relative overflow-hidden rounded-xl bg-white/[0.04] text-left focus:outline-none transition-shadow ${
         selected ? "ring-2 ring-inset ring-blue-400/80" : ""
@@ -221,15 +221,14 @@ export function ImageTile({
       {/* Persistent badges — only shown when meaningful */}
       <div className="absolute top-2 right-2 flex flex-col items-end gap-1 pointer-events-none">
         {image.embedding_status === "failed" && (
-          <div
-            className="flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 backdrop-blur-sm"
-            title={image.embedding_error ?? "Embedding failed"}
-          >
-            <svg className="h-2.5 w-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-                d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-            </svg>
-          </div>
+          <Tooltip label={image.embedding_error ?? "Embedding failed"} followCursor className="pointer-events-auto">
+            <div className="flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 backdrop-blur-sm">
+              <svg className="h-2.5 w-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+                  d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
+            </div>
+          </Tooltip>
         )}
         {image.favorite && (
           <div className="rounded-full bg-black/50 p-1 text-rose-400 backdrop-blur-sm">
@@ -258,8 +257,8 @@ export function ImageTile({
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none" />
 
       {/* Hover info — appears with overlay */}
-      <div className="absolute bottom-0 left-0 right-0 p-2.5 translate-y-1 group-hover:translate-y-0 opacity-0 group-hover:opacity-100 transition-all duration-200">
-        <p className="truncate text-[12px] font-medium text-white leading-tight">{image.filename}</p>
+      <div className="absolute bottom-0 left-0 right-0 z-20 p-2.5 translate-y-1 group-hover:translate-y-0 opacity-0 group-hover:opacity-100 transition-all duration-200">
+        <TruncatedFilename filename={image.filename} />
         <div className="mt-1.5 flex items-center justify-between gap-2">
           {image.rating > 0 ? (
             <div className="flex items-center gap-0.5">
@@ -290,6 +289,37 @@ export function ImageTile({
         </div>
       </div>
     </div>
+  );
+}
+
+function TruncatedFilename({ filename }: { filename: string }) {
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const [isTruncated, setIsTruncated] = useState(false);
+
+  useLayoutEffect(() => {
+    const text = textRef.current;
+    if (!text) return;
+
+    const update = () => {
+      setIsTruncated(text.scrollWidth > text.clientWidth);
+    };
+
+    update();
+
+    const observer = new ResizeObserver(update);
+    observer.observe(text);
+    return () => observer.disconnect();
+  }, [filename]);
+
+  const label = (
+    <p ref={textRef} className="truncate text-[12px] font-medium leading-tight text-white">
+      {filename}
+    </p>
+  );
+
+  return (
+    <Tooltip label={filename} delay={500} block followCursor disabled={!isTruncated}>
+      {label}
     </Tooltip>
   );
 }

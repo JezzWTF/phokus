@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useGalleryStore } from "../store";
+import { Tooltip } from "./Tooltip";
 
 /**
  * In-view folder scope picker for feature views (Timeline / Explore /
@@ -34,26 +35,27 @@ export function FolderScopeDropdown() {
 
   return (
     <div ref={ref} className="feature-scope-dropdown relative">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className={`feature-scope-trigger flex max-w-56 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors ${
-          open
-            ? "border-white/15 bg-white/8 text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white"
-            : "border-white/8 bg-transparent text-gray-400 hover:border-white/15 hover:text-gray-200 light-theme:border-gray-700/40 light-theme:text-gray-600 light-theme:hover:border-gray-700 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
-        }`}
-        title="Change folder scope"
-      >
-        <svg className="h-3.5 w-3.5 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-        </svg>
-        <span className="truncate">{currentLabel}</span>
-        <svg
-          className={`h-3 w-3 shrink-0 text-gray-500 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor"
+      <Tooltip label="Change folder scope" anchorToCursor>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className={`feature-scope-trigger flex max-w-56 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+            open
+              ? "border-white/15 bg-white/8 text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white"
+              : "border-white/8 bg-transparent text-gray-400 hover:border-white/15 hover:text-gray-200 light-theme:border-gray-700/40 light-theme:text-gray-600 light-theme:hover:border-gray-700 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
+          }`}
         >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
+          <svg className="h-3.5 w-3.5 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          </svg>
+          <span className="truncate">{currentLabel}</span>
+          <svg
+            className={`h-3 w-3 shrink-0 text-gray-500 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+      </Tooltip>
       {open ? (
         <div className="feature-scope-menu absolute right-0 top-full z-30 mt-1.5 max-h-80 min-w-52 overflow-y-auto rounded-xl border border-white/10 bg-gray-950/98 p-1 shadow-2xl backdrop-blur light-theme:border-gray-700/50">
           <button

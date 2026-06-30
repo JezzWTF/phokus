@@ -1,4 +1,5 @@
 import { BulkTagFields } from "./BulkTagFields";
+import { Tooltip } from "../Tooltip";
 
 // Inline popover surface for bulk tagging — the default editing surface.
 // Anchored above the bar by the parent; closes on outside click via the
@@ -12,15 +13,16 @@ export function BulkTagPopover({ onClose }: { onClose: () => void }) {
     >
       <div className="mb-2 flex items-center justify-between">
         <p className="text-[11px] uppercase tracking-wider text-gray-500">Add tags</p>
-        <button
-          className="text-gray-600 transition-colors hover:text-white"
-          onClick={onClose}
-          title="Close"
-        >
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <Tooltip label="Close" anchorToCursor>
+          <button
+            className="text-gray-600 transition-colors hover:text-white"
+            onClick={onClose}
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </Tooltip>
       </div>
       <BulkTagFields autoFocus />
     </div>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGalleryStore } from "../store";
 import { BulkTagPopover } from "./bulk/BulkTagPopover";
+import { Tooltip } from "./Tooltip"
 
 type Panel = "tag" | "rating" | "album" | "delete" | null;
 
@@ -93,14 +94,15 @@ export function BulkActionBar() {
       <div className="flex items-center gap-2 px-1.5">
         <span className="text-xs font-medium text-white">{selectedCount} selected</span>
         {loadedCount < totalImages || loadedCount > selectedCount ? (
+          <Tooltip label={loadedCount < totalImages ? "Selects loaded items only" : "Select all loaded"}>
           <button
             className="text-[11px] text-gray-500 transition-colors hover:text-gray-300"
             onClick={selectAllGallery}
-            title={loadedCount < totalImages ? "Selects loaded items only" : "Select all loaded"}
           >
             Select all{loadedCount < totalImages ? " loaded" : ""}
           </button>
-        ) : null}
+        </Tooltip>
+      ) : null}
       </div>
 
       <div className="h-5 w-px bg-white/10" />
@@ -124,6 +126,7 @@ export function BulkActionBar() {
             {Array.from({ length: 5 }, (_, index) => {
               const rating = index + 1;
               return (
+                <Tooltip label={`Set ${rating} star${rating === 1 ? "" : "s"}`}>
                 <button
                   key={rating}
                   className="rounded-md p-1 text-white/25 transition-colors hover:bg-white/5 hover:text-amber-300"
@@ -131,12 +134,12 @@ export function BulkActionBar() {
                     await bulkSetRating(rating);
                     setPanel(null);
                   }}
-                  title={`Set ${rating} star${rating === 1 ? "" : "s"}`}
                 >
                   <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
                     <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81H7.03a1 1 0 00.951-.69l1.07-3.292z" />
                   </svg>
                 </button>
+                </Tooltip>
               );
             })}
             <button
@@ -151,11 +154,11 @@ export function BulkActionBar() {
           </div>
         ) : null}
       </div>
-
-      <button className={btnIdle} onClick={() => void bulkSetFavorite(true)} title="Mark as favorite">
-        Favorite
-      </button>
-
+      <Tooltip label="Mark as favorite" followCursor>
+        <button className={btnIdle} onClick={() => void bulkSetFavorite(true)}>
+          Favorite
+        </button>
+      </Tooltip>
       <div className="relative">
         <button className={panel === "album" ? btnActive : btnIdle} onClick={() => togglePanel("album")}>
           Add to album
@@ -219,14 +222,15 @@ export function BulkActionBar() {
       <div className="h-5 w-px bg-white/10" />
 
       <div className="relative">
+        <Tooltip label="Delete files from disk" followCursor>
         <button
           className={panel === "delete" ? `${btn} bg-red-500/15 text-red-300` : `${btn} text-gray-300 hover:bg-red-500/10 hover:text-red-300`}
           onClick={() => togglePanel("delete")}
           disabled={deleting}
-          title="Delete files from disk"
         >
           {deleting ? "Deleting…" : "Delete"}
         </button>
+        </Tooltip>
         {panel === "delete" ? (
           <div
             data-bulk-popover
@@ -261,16 +265,16 @@ export function BulkActionBar() {
           </div>
         ) : null}
       </div>
-
+        <Tooltip label="Clear selection" followCursor>
       <button
         className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
         onClick={clearGallerySelection}
-        title="Clear selection"
       >
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>
+      </Tooltip>
     </div>
   );
 }

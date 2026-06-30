@@ -161,6 +161,7 @@ function CloudCard({ node, onOpen, animated }: { node: PlacedNode; onOpen: (imag
   };
 
   return (
+    <Tooltip label={`Open cluster — ${node.entry.count.toLocaleString()} ${node.entry.count === 1 ? "image" : "images"}`} followCursor>
     <motion.button
       className="explore-cluster-card group absolute overflow-hidden rounded-2xl border border-white/8 bg-white/[0.04] text-left shadow-[0_8px_28px_rgba(0,0,0,0.38)] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
       style={{ width: w, height: h, left: node.x - w / 2, top: node.y - h / 2, zIndex: node.zIndex }}
@@ -189,7 +190,6 @@ function CloudCard({ node, onOpen, animated }: { node: PlacedNode; onOpen: (imag
       }
       whileHover={{ scale: 1.06, rotate: 0, zIndex: 500, transition: { duration: 0.18 } }}
       onClick={() => onOpen(node.entry.image_ids)}
-      title={`Open cluster — ${node.entry.count.toLocaleString()} ${node.entry.count === 1 ? "image" : "images"}`}
     >
       {src ? (
         <img
@@ -223,6 +223,7 @@ function CloudCard({ node, onOpen, animated }: { node: PlacedNode; onOpen: (imag
         Open
       </span>
     </motion.button>
+    </Tooltip>
   );
 }
 
