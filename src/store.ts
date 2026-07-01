@@ -15,6 +15,8 @@ const NOTIFICATION_DEBOUNCE_MS = 6000;
 const THEME_KEY = "phokus-theme";
 const LIGHTBOX_AUTOPLAY_KEY = "phokus.lightboxAutoplay";
 const LIGHTBOX_AUTO_MUTE_KEY = "phokus.lightboxAutoMute";
+const SLIDESHOW_INTERVAL_KEY = "phokus.slideshowIntervalSeconds";
+const SLIDESHOW_ORDER_KEY = "phokus.slideshowOrder";
 
 export interface Folder {
   id: number;
@@ -57,6 +59,7 @@ export type TaggingQueueScope = "all" | "selected";
 export type SimilarScope = "all_media" | "current_folder" | "current_album";
 export type ExploreMode = "visual" | "tags";
 export type AppTheme = "phokus" | "subtle-light" | "conventional-dark";
+export type SlideshowOrder = "sequential" | "random";
 
 export interface ImageRecord {
   id: number;
@@ -414,6 +417,8 @@ interface GalleryState {
   theme: AppTheme;
   lightboxAutoplay: boolean;
   lightboxAutoMute: boolean;
+  slideshowIntervalSeconds: number;
+  slideshowOrder: SlideshowOrder;
   // Per-folder background-worker pause flags, shared by the BackgroundTasks
   // bar and the sidebar folder context menu.
   workerPaused: Record<number, Record<WorkerKey, boolean>>;
@@ -542,6 +547,8 @@ interface GalleryState {
   setTheme: (theme: AppTheme) => void;
   setLightboxAutoplay: (enabled: boolean) => void;
   setLightboxAutoMute: (enabled: boolean) => void;
+  setSlideshowIntervalSeconds: (seconds: number) => void;
+  setSlideshowOrder: (order: SlideshowOrder) => void;
   loadWorkerStates: () => Promise<void>;
   setWorkerPaused: (folderId: number, worker: WorkerKey, paused: boolean) => void;
   setAllWorkersPaused: (folderId: number, paused: boolean) => void;
@@ -650,6 +657,21 @@ function initialBoolSetting(key: string, fallback: boolean): boolean {
   if (typeof window === "undefined") return fallback;
   const stored = window.localStorage.getItem(key);
   return stored === null ? fallback : stored === "true";
+}
+
+function initialNumberSetting(key: string, fallback: number, min: number, max: number): number {
+  if (typeof window === "undefined") return fallback;
+  const raw = window.localStorage.getItem(key);
+  if (raw === null) return fallback;
+  const stored = Number(raw);
+  if (!Number.isFinite(stored)) return fallback;
+  return Math.min(max, Math.max(min, stored));
+}
+
+function initialSlideshowOrder(): SlideshowOrder {
+  if (typeof window === "undefined") return "sequential";
+  const stored = window.localStorage.getItem(SLIDESHOW_ORDER_KEY);
+  return stored === "random" ? "random" : "sequential";
 }
 
 function initialTheme(): AppTheme {
@@ -912,6 +934,8 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   theme: initialTheme(),
   lightboxAutoplay: initialBoolSetting(LIGHTBOX_AUTOPLAY_KEY, true),
   lightboxAutoMute: initialBoolSetting(LIGHTBOX_AUTO_MUTE_KEY, false),
+  slideshowIntervalSeconds: initialNumberSetting(SLIDESHOW_INTERVAL_KEY, 6, 3, 60),
+  slideshowOrder: initialSlideshowOrder(),
   workerPaused: {},
 
   appVersion: null,
@@ -2000,6 +2024,17 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   setLightboxAutoMute: (enabled) => {
     window.localStorage.setItem(LIGHTBOX_AUTO_MUTE_KEY, String(enabled));
     set({ lightboxAutoMute: enabled });
+  },
+
+  setSlideshowIntervalSeconds: (seconds) => {
+    const next = Math.min(60, Math.max(3, Math.round(seconds)));
+    window.localStorage.setItem(SLIDESHOW_INTERVAL_KEY, String(next));
+    set({ slideshowIntervalSeconds: next });
+  },
+
+  setSlideshowOrder: (order) => {
+    window.localStorage.setItem(SLIDESHOW_ORDER_KEY, order);
+    set({ slideshowOrder: order });
   },
 
   loadWorkerStates: async () => {

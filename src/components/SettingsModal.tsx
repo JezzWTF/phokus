@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppTheme, CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, TaggerAcceleration, TaggerModel, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
+import { AppTheme, CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, SlideshowOrder, TaggerAcceleration, TaggerModel, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
 import { FfmpegStatusRow } from "./onboarding/StepWelcome";
 import { ThemedDropdown } from "./ThemedDropdown";
 import { getChangelogForVersion } from "../changelog";
@@ -257,6 +257,10 @@ export function SettingsModal() {
   const setLightboxAutoplay = useGalleryStore((state) => state.setLightboxAutoplay);
   const lightboxAutoMute = useGalleryStore((state) => state.lightboxAutoMute);
   const setLightboxAutoMute = useGalleryStore((state) => state.setLightboxAutoMute);
+  const slideshowIntervalSeconds = useGalleryStore((state) => state.slideshowIntervalSeconds);
+  const setSlideshowIntervalSeconds = useGalleryStore((state) => state.setSlideshowIntervalSeconds);
+  const slideshowOrder = useGalleryStore((state) => state.slideshowOrder);
+  const setSlideshowOrder = useGalleryStore((state) => state.setSlideshowOrder);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -811,6 +815,41 @@ export function SettingsModal() {
                     >
                       <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${lightboxAutoMute ? "translate-x-4" : "translate-x-0"}`} />
                     </button>
+                  </SettingsItem>
+                </SettingsGroup>
+
+                <SettingsGroup title="Slideshow">
+                  <SettingsItem
+                    label="Slide duration"
+                    description="How long each image stays on screen before the slideshow advances."
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={3}
+                        max={60}
+                        step={1}
+                        value={slideshowIntervalSeconds}
+                        aria-label="Slide duration"
+                        className="w-32 accent-sky-500"
+                        onChange={(event) => setSlideshowIntervalSeconds(Number(event.currentTarget.value))}
+                      />
+                      <span className="min-w-10 text-right text-xs tabular-nums text-gray-400">{slideshowIntervalSeconds}s</span>
+                    </div>
+                  </SettingsItem>
+                  <SettingsItem
+                    label="Playback order"
+                    description="Sequential follows the current lightbox order. Random picks another image from the same collection."
+                  >
+                    <ThemedDropdown
+                      value={slideshowOrder}
+                      onChange={(value) => setSlideshowOrder(value as SlideshowOrder)}
+                      ariaLabel="Slideshow order"
+                      options={[
+                        { value: "sequential", label: "Sequential" },
+                        { value: "random", label: "Random" },
+                      ]}
+                    />
                   </SettingsItem>
                 </SettingsGroup>
 

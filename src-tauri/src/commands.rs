@@ -2400,8 +2400,8 @@ pub async fn reset_ai_tags(
             (None, false) => {
                 let mut total = 0usize;
                 for &folder_id in &requested_folder_ids {
-                    total += db::reset_ai_tags(&conn, Some(folder_id))
-                        .map_err(|e| e.to_string())?;
+                    total +=
+                        db::reset_ai_tags(&conn, Some(folder_id)).map_err(|e| e.to_string())?;
                 }
                 (total, requested_folder_ids)
             }

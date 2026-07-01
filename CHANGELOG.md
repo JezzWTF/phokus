@@ -52,6 +52,10 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   library but leave out of background processing for now.
 - **Editable folder path** — the folder picker now has an address bar, so you can
   paste a path directly while still using breadcrumbs for quick jumps.
+- **Slideshow mode** — turn the lightbox into a fullscreen, image-only slideshow
+  from whatever collection you are already browsing. Videos are skipped, controls
+  tuck themselves away after a few seconds, and Settings lets you pick the pace
+  and whether playback follows the current order or goes random.
 
 ### Changed
 
