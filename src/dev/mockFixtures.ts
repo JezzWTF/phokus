@@ -280,11 +280,14 @@ function makeExploreTags(images: ImageRecord[], scenario: MockScenario): Explore
   return vocabulary.map((tag, index) => {
     const representative = images[index % Math.max(images.length, 1)];
     const divisor = scenario === "huge" ? 2 + Math.pow(index + 1, 0.58) : index + 3;
+    const sourceCycle = index % 3;
     return {
       tag,
       count: Math.max(1, Math.round(images.length / divisor)),
       representative_image_id: representative?.id ?? index + 1,
       thumbnail_path: representative?.thumbnail_path ?? null,
+      has_ai_source: sourceCycle !== 1,
+      has_user_source: sourceCycle !== 0,
     };
   }).sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag));
 }

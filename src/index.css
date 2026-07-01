@@ -259,6 +259,33 @@ html[data-theme="subtle-light"] .tag-manager-filter:focus {
   border-color: #7aa2e3 !important;
 }
 
+html[data-theme="subtle-light"] .tag-manager-reset-button,
+html[data-theme="subtle-light"] .tag-manager-reset-cancel {
+  background: #ebe8df !important;
+  border-color: #c9c1b4 !important;
+  color: #5f5a52 !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.58) !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-reset-button:hover,
+html[data-theme="subtle-light"] .tag-manager-reset-cancel:hover {
+  background: #e2ded3 !important;
+  border-color: #b9b0a2 !important;
+  color: #24201b !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-reset-button-confirm {
+  background: rgb(254 242 242 / 0.95) !important;
+  border-color: rgb(220 38 38 / 0.34) !important;
+  color: #991b1b !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-reset-button-confirm:hover {
+  background: #fee2e2 !important;
+  border-color: rgb(220 38 38 / 0.48) !important;
+  color: #7f1d1d !important;
+}
+
 html[data-theme="subtle-light"] .tag-manager-clear {
   color: #6b645a !important;
 }
@@ -290,6 +317,20 @@ html[data-theme="subtle-light"] .tag-manager-name:hover {
 html[data-theme="subtle-light"] .tag-manager-count {
   background: rgb(31 41 55 / 0.07) !important;
   color: #6b645a !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-tile-ai {
+  box-shadow: inset 0 1px 0 rgb(14 116 144 / 0.08) !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-count-ai {
+  background: rgb(14 116 144 / 0.1) !important;
+  border-color: rgb(14 116 144 / 0.18) !important;
+  color: #0d5f6f !important;
+}
+
+html[data-theme="subtle-light"] .tag-manager-ai-glyph {
+  color: #0d5f6f !important;
 }
 
 html[data-theme="subtle-light"] .tag-manager-edit-input {

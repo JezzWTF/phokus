@@ -166,6 +166,8 @@ export function SettingsModal() {
   const [taggerQueueStatus, setTaggerQueueStatus] = useState<string | null>(null);
   const [taggerQueueing, setTaggerQueueing] = useState(false);
   const [taggerClearing, setTaggerClearing] = useState(false);
+  const [taggerResetConfirming, setTaggerResetConfirming] = useState(false);
+  const [taggerResetting, setTaggerResetting] = useState(false);
   const [taggerAccelerationSaving, setTaggerAccelerationSaving] = useState(false);
   const [taggerAccelerationError, setTaggerAccelerationError] = useState<string | null>(null);
   const [taggerModelSwitching, setTaggerModelSwitching] = useState(false);
@@ -226,6 +228,8 @@ export function SettingsModal() {
   const queueTaggingJobsForFolders = useGalleryStore((state) => state.queueTaggingJobsForFolders);
   const clearTaggingJobs = useGalleryStore((state) => state.clearTaggingJobs);
   const clearTaggingJobsForFolders = useGalleryStore((state) => state.clearTaggingJobsForFolders);
+  const resetAiTags = useGalleryStore((state) => state.resetAiTags);
+  const resetAiTagsForFolders = useGalleryStore((state) => state.resetAiTagsForFolders);
   const openAppDataFolder = useGalleryStore((state) => state.openAppDataFolder);
   const notificationsPaused = useGalleryStore((state) => state.notificationsPaused);
   const setNotificationsPaused = useGalleryStore((state) => state.setNotificationsPaused);
@@ -341,6 +345,7 @@ export function SettingsModal() {
       setTaggerClearing(true);
     }
     setTaggerQueueStatus(null);
+    setTaggerResetConfirming(false);
 
     void perform
       .then((count) => {
@@ -365,6 +370,45 @@ export function SettingsModal() {
         } else {
           setTaggerClearing(false);
         }
+      });
+  };
+
+  const runResetAiTags = () => {
+    if (!taggerResetConfirming) {
+      setTaggerResetConfirming(true);
+      setTaggerQueueStatus(
+        `Reset AI tags for ${queueScopeLabel}? User tags are preserved, and retagging is not queued automatically.`,
+      );
+      return;
+    }
+
+    const selectedIds = taggingQueueFolderIds;
+    const perform =
+      taggingQueueScope === "all"
+        ? resetAiTags(null)
+        : selectedIds.length > 0
+          ? resetAiTagsForFolders(selectedIds)
+          : Promise.resolve(0);
+
+    setTaggerResetting(true);
+    setTaggerQueueStatus(null);
+
+    void perform
+      .then((count) => {
+        if (taggingQueueScope === "selected" && selectedIds.length === 0) {
+          setTaggerQueueStatus("Choose at least one folder before resetting AI tags.");
+          return;
+        }
+        setTaggerQueueStatus(
+          count === 0
+            ? "No AI tag data found for the current target."
+            : `Reset AI tags for ${count.toLocaleString()} image${count === 1 ? "" : "s"}. Queue tagging when you're ready to retag.`,
+        );
+      })
+      .catch((error) => setTaggerQueueStatus(String(error)))
+      .finally(() => {
+        setTaggerResetting(false);
+        setTaggerResetConfirming(false);
       });
   };
 
@@ -673,17 +717,40 @@ export function SettingsModal() {
                       <button
                         className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
                         onClick={() => runQueueAction("queue")}
-                        disabled={!taggerReady || taggerQueueing || taggerClearing || (taggingQueueScope === "selected" && taggingQueueFolderIds.length === 0)}
+                        disabled={!taggerReady || taggerQueueing || taggerClearing || taggerResetting || (taggingQueueScope === "selected" && taggingQueueFolderIds.length === 0)}
                       >
                         {taggerQueueing ? "Queueing..." : "Queue tagging"}
                       </button>
                       <button
                         className="rounded-md border border-amber-400/20 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200 transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-amber-500/50 light-theme:bg-amber-50 light-theme:text-amber-700 light-theme:hover:bg-amber-100"
                         onClick={() => runQueueAction("clear")}
-                        disabled={taggerQueueing || taggerClearing || (taggingQueueScope === "selected" && taggingQueueFolderIds.length === 0)}
+                        disabled={taggerQueueing || taggerClearing || taggerResetting || (taggingQueueScope === "selected" && taggingQueueFolderIds.length === 0)}
                       >
                         {taggerClearing ? "Clearing..." : "Clear queued jobs"}
                       </button>
+                      <button
+                        className={`rounded-md border px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                          taggerResetConfirming
+                            ? "border-red-400/30 bg-red-500/15 text-red-200 hover:bg-red-500/25 light-theme:border-red-500/50 light-theme:bg-red-50 light-theme:text-red-700 light-theme:hover:bg-red-100"
+                            : "border-white/10 bg-white/[0.055] text-gray-300 hover:bg-white/10 hover:text-white light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
+                        }`}
+                        onClick={runResetAiTags}
+                        disabled={taggerQueueing || taggerClearing || taggerResetting || (taggingQueueScope === "selected" && taggingQueueFolderIds.length === 0)}
+                      >
+                        {taggerResetting ? "Resetting..." : taggerResetConfirming ? "Confirm reset" : "Reset AI tags"}
+                      </button>
+                      {taggerResetConfirming ? (
+                        <button
+                          className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-white/[0.06] hover:text-white light-theme:border-gray-700/50 light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
+                          onClick={() => {
+                            setTaggerResetConfirming(false);
+                            setTaggerQueueStatus(null);
+                          }}
+                          disabled={taggerResetting}
+                        >
+                          Cancel
+                        </button>
+                      ) : null}
                     </div>
                   </SettingsItem>
 

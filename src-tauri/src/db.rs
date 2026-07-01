@@ -146,6 +146,8 @@ pub struct ExploreTagEntry {
     pub count: i64,
     pub representative_image_id: i64,
     pub thumbnail_path: Option<String>,
+    pub has_ai_source: bool,
+    pub has_user_source: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -2341,7 +2343,9 @@ pub fn search_tags_autocomplete(
 ) -> Result<Vec<ExploreTagEntry>> {
     let pattern = format!("%{}%", query.to_lowercase());
     let mut stmt = conn.prepare(
-        "SELECT t.tag, COUNT(DISTINCT t.image_id) AS tag_count, MIN(t.image_id) AS representative_image_id
+        "SELECT t.tag, COUNT(DISTINCT t.image_id) AS tag_count, MIN(t.image_id) AS representative_image_id,
+                MAX(CASE WHEN t.source = 'ai' THEN 1 ELSE 0 END) AS has_ai_source,
+                MAX(CASE WHEN t.source = 'user' THEN 1 ELSE 0 END) AS has_user_source
          FROM image_tags t
          JOIN images i ON i.id = t.image_id
          WHERE (?1 IS NULL OR i.folder_id = ?1)
@@ -2357,6 +2361,8 @@ pub fn search_tags_autocomplete(
                 count: row.get(1)?,
                 representative_image_id: row.get(2)?,
                 thumbnail_path: None, // skip per-suggestion thumbnail for speed
+                has_ai_source: row.get::<_, i64>(3)? != 0,
+                has_user_source: row.get::<_, i64>(4)? != 0,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2440,7 +2446,9 @@ pub fn get_explore_tags(
     limit: usize,
 ) -> Result<Vec<ExploreTagEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT t.tag, COUNT(DISTINCT t.image_id) AS tag_count, MIN(t.image_id) AS representative_image_id
+        "SELECT t.tag, COUNT(DISTINCT t.image_id) AS tag_count, MIN(t.image_id) AS representative_image_id,
+                MAX(CASE WHEN t.source = 'ai' THEN 1 ELSE 0 END) AS has_ai_source,
+                MAX(CASE WHEN t.source = 'user' THEN 1 ELSE 0 END) AS has_user_source
          FROM image_tags t
          JOIN images i ON i.id = t.image_id
          WHERE (?1 IS NULL OR i.folder_id = ?1)
@@ -2462,6 +2470,8 @@ pub fn get_explore_tags(
                 count: row.get(1)?,
                 representative_image_id,
                 thumbnail_path,
+                has_ai_source: row.get::<_, i64>(3)? != 0,
+                has_user_source: row.get::<_, i64>(4)? != 0,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2846,6 +2856,110 @@ pub fn delete_tag(conn: &Connection, name: &str) -> Result<i64> {
     tx.execute("DELETE FROM visual_cluster_cache", [])?;
     tx.commit()?;
     Ok(removed)
+}
+
+pub fn reset_ai_tags(conn: &Connection, folder_id: Option<i64>) -> Result<usize> {
+    let image_ids = match folder_id {
+        Some(folder_id) => {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT i.id
+                 FROM images i
+                 LEFT JOIN image_tags t ON t.image_id = i.id AND t.source = 'ai'
+                 LEFT JOIN tagging_jobs j ON j.image_id = i.id
+                 WHERE i.folder_id = ?1
+                   AND i.media_kind = 'image'
+                   AND (
+                     t.id IS NOT NULL
+                     OR i.ai_rating IS NOT NULL
+                     OR i.ai_tagger_model IS NOT NULL
+                     OR i.ai_tagged_at IS NOT NULL
+                     OR i.ai_tagger_error IS NOT NULL
+                     OR j.image_id IS NOT NULL
+                   )",
+            )?;
+            let rows = stmt.query_map([folder_id], |row| row.get::<_, i64>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        }
+        None => {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT i.id
+                 FROM images i
+                 LEFT JOIN image_tags t ON t.image_id = i.id AND t.source = 'ai'
+                 LEFT JOIN tagging_jobs j ON j.image_id = i.id
+                 WHERE i.media_kind = 'image'
+                   AND (
+                     t.id IS NOT NULL
+                     OR i.ai_rating IS NOT NULL
+                     OR i.ai_tagger_model IS NOT NULL
+                     OR i.ai_tagged_at IS NOT NULL
+                     OR i.ai_tagger_error IS NOT NULL
+                     OR j.image_id IS NOT NULL
+                   )",
+            )?;
+            let rows = stmt.query_map([], |row| row.get::<_, i64>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        }
+    };
+
+    let tx = conn.unchecked_transaction()?;
+    match folder_id {
+        Some(folder_id) => {
+            tx.execute(
+                "DELETE FROM image_tags
+                 WHERE source = 'ai'
+                   AND image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
+                [folder_id],
+            )?;
+            tx.execute(
+                "UPDATE images
+                 SET ai_rating = NULL,
+                     ai_tagger_model = NULL,
+                     ai_tagged_at = NULL,
+                     ai_tagger_error = NULL
+                 WHERE folder_id = ?1
+                   AND media_kind = 'image'",
+                [folder_id],
+            )?;
+            tx.execute(
+                "UPDATE tagging_jobs
+                 SET status = 'cancelled', last_error = NULL, updated_at = datetime('now')
+                 WHERE status = 'processing'
+                   AND image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
+                [folder_id],
+            )?;
+            tx.execute(
+                "DELETE FROM tagging_jobs
+                 WHERE status NOT IN ('processing', 'cancelled')
+                   AND image_id IN (SELECT id FROM images WHERE folder_id = ?1)",
+                [folder_id],
+            )?;
+        }
+        None => {
+            tx.execute("DELETE FROM image_tags WHERE source = 'ai'", [])?;
+            tx.execute(
+                "UPDATE images
+                 SET ai_rating = NULL,
+                     ai_tagger_model = NULL,
+                     ai_tagged_at = NULL,
+                     ai_tagger_error = NULL
+                 WHERE media_kind = 'image'",
+                [],
+            )?;
+            tx.execute(
+                "UPDATE tagging_jobs
+                 SET status = 'cancelled', last_error = NULL, updated_at = datetime('now')
+                 WHERE status = 'processing'",
+                [],
+            )?;
+            tx.execute(
+                "DELETE FROM tagging_jobs WHERE status NOT IN ('processing', 'cancelled')",
+                [],
+            )?;
+        }
+    }
+    tx.execute("DELETE FROM visual_cluster_cache", [])?;
+    tx.commit()?;
+    Ok(image_ids.len())
 }
 
 pub fn enqueue_missing_tagging_jobs_for_folder(conn: &Connection, folder_id: i64) -> Result<usize> {

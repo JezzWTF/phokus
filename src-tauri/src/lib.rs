@@ -218,6 +218,7 @@ pub fn run() {
             commands::delete_tagger_model,
             commands::queue_tagging_jobs,
             commands::clear_tagging_jobs,
+            commands::reset_ai_tags,
             commands::get_image_tags,
             commands::add_user_tag,
             commands::remove_tag,

@@ -2180,6 +2180,12 @@ pub struct ClearTaggingJobsParams {
 }
 
 #[derive(Deserialize)]
+pub struct ResetAiTagsParams {
+    pub folder_id: Option<i64>,
+    pub folder_ids: Option<Vec<i64>>,
+}
+
+#[derive(Deserialize)]
 pub struct GetImageTagsParams {
     pub image_id: i64,
 }
@@ -2365,6 +2371,42 @@ pub async fn clear_tagging_jobs(
             }
             (None, true) => (
                 db::clear_tagging_jobs(&conn, None).map_err(|e| e.to_string())?,
+                db::get_folders(&conn)
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .map(|f| f.id)
+                    .collect(),
+            ),
+        };
+    drop(conn);
+    indexer::emit_folder_job_progress(&app, db.inner(), &folder_ids, true);
+    Ok(n)
+}
+
+#[tauri::command]
+pub async fn reset_ai_tags(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    params: ResetAiTagsParams,
+) -> Result<usize, String> {
+    let conn = db.get().map_err(|e| e.to_string())?;
+    let requested_folder_ids = params.folder_ids.unwrap_or_default();
+    let (n, folder_ids): (usize, Vec<i64>) =
+        match (params.folder_id, requested_folder_ids.is_empty()) {
+            (Some(id), _) => (
+                db::reset_ai_tags(&conn, Some(id)).map_err(|e| e.to_string())?,
+                vec![id],
+            ),
+            (None, false) => {
+                let mut total = 0usize;
+                for &folder_id in &requested_folder_ids {
+                    total += db::reset_ai_tags(&conn, Some(folder_id))
+                        .map_err(|e| e.to_string())?;
+                }
+                (total, requested_folder_ids)
+            }
+            (None, true) => (
+                db::reset_ai_tags(&conn, None).map_err(|e| e.to_string())?,
                 db::get_folders(&conn)
                     .map_err(|e| e.to_string())?
                     .into_iter()
