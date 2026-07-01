@@ -1,4 +1,4 @@
-export type MockScenario = "rich" | "empty" | "busy" | "duplicates" | "album" | "errors" | "huge";
+export type MockScenario = "rich" | "empty" | "busy" | "duplicates" | "album" | "errors" | "huge" | "extreme";
 
 const SCENARIOS = new Set<MockScenario>([
   "rich",
@@ -8,6 +8,7 @@ const SCENARIOS = new Set<MockScenario>([
   "album",
   "errors",
   "huge",
+  "extreme",
 ]);
 
 export function getMockScenario(): MockScenario {

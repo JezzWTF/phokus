@@ -206,7 +206,7 @@ function updateImages(ids: number[], updates: { favorite?: boolean | null; ratin
 function refreshAlbumCounts() {
   for (const album of db.albums) {
     const ids = db.albumImageIds[album.id] ?? [];
-    album.image_count = ids.length;
+    if (db.scenario !== "extreme") album.image_count = ids.length;
     album.cover_image_id = ids[0] ?? null;
     album.cover_thumbnail_path = db.images.find((image) => image.id === ids[0])?.thumbnail_path ?? null;
     album.updated_at = new Date().toISOString();
@@ -317,7 +317,11 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
     case "get_visual_clusters":
       return db.scenario === "empty" ? [] : db.visualClusters;
     case "get_explore_tags":
-      return db.scenario === "empty" ? [] : db.exploreTags.slice(0, Number(p.limit ?? 180));
+      return db.scenario === "empty"
+        ? []
+        : db.scenario === "extreme"
+          ? db.exploreTags
+          : db.exploreTags.slice(0, Number(p.limit ?? 180));
     case "get_related_tags": {
       const relatedCounts = new Map<string, number>();
       for (const imageTags of Object.values(db.tagsByImageId)) {

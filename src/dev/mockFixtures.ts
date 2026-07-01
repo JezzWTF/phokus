@@ -29,6 +29,17 @@ export interface MockDb {
 }
 
 const folderNames = ["Camera Roll", "Client Selects", "Video Archive"];
+const extremeFolderNames = [
+  "Camera Roll",
+  "Client Selects",
+  "Video Archive",
+  "Commercial Library",
+  "Archive Vault",
+  "Reference Pulls",
+  "Delivery Selects",
+  "Personal Work",
+];
+const extremeFolderCounts = [98_420, 76_880, 52_340, 44_900, 31_760, 24_180, 16_540, 12_920];
 const mediaNames = [
   "alpine-lake",
   "city-after-rain",
@@ -119,6 +130,16 @@ const hugeTags = [
   }),
   ...Array.from({ length: 320 }, (_, index) => `fixture concept ${String(index + 1).padStart(3, "0")}`),
 ];
+const extremeTags = [
+  ...tags,
+  ...Array.from({ length: hugeTagThemes.length * hugeTagSubjects.length }, (_, index) => {
+    const theme = hugeTagThemes[index % hugeTagThemes.length];
+    const subject = hugeTagSubjects[Math.floor(index / hugeTagThemes.length) % hugeTagSubjects.length];
+    return `${theme} ${subject}`;
+  }),
+  ...Array.from({ length: 780 }, (_, index) => `extreme concept ${String(index + 1).padStart(4, "0")}`),
+  ...Array.from({ length: 240 }, (_, index) => `client taxonomy ${String(index + 1).padStart(3, "0")}`),
+];
 const aiRatings: AiRating[] = ["general", "sensitive", "questionable"];
 
 function daysAgo(days: number): string {
@@ -177,7 +198,8 @@ function makeImage(index: number, folderId: number, scenario: MockScenario): Ima
 
 function makeFolders(scenario: MockScenario): Folder[] {
   if (scenario === "empty") return [];
-  return folderNames.map((name, index) => ({
+  const names = scenario === "extreme" ? extremeFolderNames : folderNames;
+  return names.map((name, index) => ({
     id: index + 1,
     path: `C:\\Users\\phokus\\Pictures\\${name.replace(/ /g, "")}`,
     name,
@@ -190,21 +212,25 @@ function makeFolders(scenario: MockScenario): Folder[] {
 
 function makeImages(scenario: MockScenario, folders: Folder[]): ImageRecord[] {
   if (scenario === "empty") return [];
-  const count = scenario === "huge" ? 720 : scenario === "errors" ? 54 : 72;
+  const count = scenario === "extreme" ? 1_440 : scenario === "huge" ? 720 : scenario === "errors" ? 54 : 72;
   const images = Array.from({ length: count }, (_, index) => makeImage(index, folders[index % folders.length].id, scenario));
   for (const folder of folders) {
-    folder.image_count = images.filter((image) => image.folder_id === folder.id).length;
+    folder.image_count =
+      scenario === "extreme"
+        ? extremeFolderCounts[folder.id - 1] ?? images.filter((image) => image.folder_id === folder.id).length
+        : images.filter((image) => image.folder_id === folder.id).length;
   }
   return images;
 }
 
 function tagVocabularyForScenario(scenario: MockScenario): string[] {
+  if (scenario === "extreme") return extremeTags;
   return scenario === "huge" ? hugeTags : tags;
 }
 
 function makeTags(images: ImageRecord[], scenario: MockScenario): Record<number, ImageTag[]> {
   const vocabulary = tagVocabularyForScenario(scenario);
-  const tagCount = scenario === "huge" ? 9 : 3;
+  const tagCount = scenario === "extreme" ? 14 : scenario === "huge" ? 9 : 3;
   return Object.fromEntries(
     images.map((image, index) => [
       image.id,
@@ -227,10 +253,13 @@ function makeAlbums(images: ImageRecord[], scenario: MockScenario): { albums: Al
   const motion = images.filter((image) => image.media_kind === "video").map((image) => image.id);
   const favorites = images.filter((image) => image.favorite).slice(0, 40).map((image) => image.id);
   const albumImageIds = { 1: selects, 2: motion, 3: favorites };
+  const portfolioCount = scenario === "extreme" ? 18_450 : selects.length;
+  const motionCount = scenario === "extreme" ? 7_820 : motion.length;
+  const favoritesCount = scenario === "extreme" ? 42_610 : favorites.length;
   const albums: Album[] = [
-    { id: 1, name: "Portfolio Shortlist", cover_image_id: selects[0] ?? null, cover_thumbnail_path: images.find((image) => image.id === selects[0])?.thumbnail_path ?? null, image_count: selects.length, sort_order: 1, created_at: daysAgo(40), updated_at: daysAgo(2) },
-    { id: 2, name: "Motion Tests", cover_image_id: motion[0] ?? null, cover_thumbnail_path: images.find((image) => image.id === motion[0])?.thumbnail_path ?? null, image_count: motion.length, sort_order: 2, created_at: daysAgo(38), updated_at: daysAgo(3) },
-    { id: 3, name: "Favorites", cover_image_id: favorites[0] ?? null, cover_thumbnail_path: images.find((image) => image.id === favorites[0])?.thumbnail_path ?? null, image_count: favorites.length, sort_order: 3, created_at: daysAgo(20), updated_at: daysAgo(1) },
+    { id: 1, name: "Portfolio Shortlist", cover_image_id: selects[0] ?? null, cover_thumbnail_path: images.find((image) => image.id === selects[0])?.thumbnail_path ?? null, image_count: portfolioCount, sort_order: 1, created_at: daysAgo(40), updated_at: daysAgo(2) },
+    { id: 2, name: "Motion Tests", cover_image_id: motion[0] ?? null, cover_thumbnail_path: images.find((image) => image.id === motion[0])?.thumbnail_path ?? null, image_count: motionCount, sort_order: 2, created_at: daysAgo(38), updated_at: daysAgo(3) },
+    { id: 3, name: "Favorites", cover_image_id: favorites[0] ?? null, cover_thumbnail_path: images.find((image) => image.id === favorites[0])?.thumbnail_path ?? null, image_count: favoritesCount, sort_order: 3, created_at: daysAgo(20), updated_at: daysAgo(1) },
   ];
   return { albums, albumImageIds };
 }
@@ -238,15 +267,15 @@ function makeAlbums(images: ImageRecord[], scenario: MockScenario): { albums: Al
 function makeProgress(folders: Folder[], scenario: MockScenario): FolderJobProgress[] {
   return folders.map((folder, index) => ({
     folder_id: folder.id,
-    thumbnail_pending: scenario === "busy" ? 18 - index * 3 : 0,
-    metadata_pending: scenario === "busy" ? 12 - index * 2 : 0,
-    embedding_pending: scenario === "busy" ? 36 - index * 4 : scenario === "errors" ? 4 : 0,
+    thumbnail_pending: scenario === "extreme" ? 180 - index * 9 : scenario === "busy" ? 18 - index * 3 : 0,
+    metadata_pending: scenario === "extreme" ? 140 - index * 7 : scenario === "busy" ? 12 - index * 2 : 0,
+    embedding_pending: scenario === "extreme" ? 260 - index * 11 : scenario === "busy" ? 36 - index * 4 : scenario === "errors" ? 4 : 0,
     embedding_ready: Math.max(0, folder.image_count - (scenario === "busy" ? 20 : 2)),
     embedding_failed: scenario === "errors" ? 3 + index : 0,
-    caption_pending: scenario === "busy" ? 24 - index * 2 : 0,
+    caption_pending: scenario === "extreme" ? 210 - index * 10 : scenario === "busy" ? 24 - index * 2 : 0,
     caption_ready: Math.max(0, Math.floor(folder.image_count * 0.5)),
     caption_failed: scenario === "errors" ? 2 : 0,
-    tagging_pending: scenario === "busy" ? 30 - index * 5 : 0,
+    tagging_pending: scenario === "extreme" ? 320 - index * 13 : scenario === "busy" ? 30 - index * 5 : 0,
     tagging_ready: Math.max(0, Math.floor(folder.image_count * 0.65)),
     tagging_failed: scenario === "errors" ? 4 : 0,
   }));
@@ -258,8 +287,8 @@ function makeVisualClusters(images: ImageRecord[], scenario: MockScenario): Visu
   // "huge" scenario so Explore shows a realistic field of clusters rather than a
   // fixed handful, and size the counts off a large virtual library so the badges
   // read like a big collection.
-  const clusterCount = scenario === "huge" ? 30 : Math.min(30, Math.max(5, Math.round(images.length / 20)));
-  const virtualTotal = scenario === "huge" ? 12_000 : images.length;
+  const clusterCount = scenario === "huge" || scenario === "extreme" ? 30 : Math.min(30, Math.max(5, Math.round(images.length / 20)));
+  const virtualTotal = scenario === "extreme" ? 250_000 : scenario === "huge" ? 12_000 : images.length;
   // Long-tailed sizes (a few large clusters, many smaller), like real k-means output.
   const weights = Array.from({ length: clusterCount }, (_, i) => 1 / (i + 1.5));
   const weightSum = weights.reduce((sum, weight) => sum + weight, 0);
@@ -279,11 +308,19 @@ function makeExploreTags(images: ImageRecord[], scenario: MockScenario): Explore
   const vocabulary = tagVocabularyForScenario(scenario);
   return vocabulary.map((tag, index) => {
     const representative = images[index % Math.max(images.length, 1)];
-    const divisor = scenario === "huge" ? 2 + Math.pow(index + 1, 0.58) : index + 3;
+    const divisor =
+      scenario === "extreme"
+        ? 1 + Math.pow(index + 1, 0.42)
+        : scenario === "huge"
+          ? 2 + Math.pow(index + 1, 0.58)
+          : index + 3;
     const sourceCycle = index % 3;
     return {
       tag,
-      count: Math.max(1, Math.round(images.length / divisor)),
+      count:
+        scenario === "extreme"
+          ? Math.max(10_000, Math.min(100_000, Math.round(200_000 / divisor)))
+          : Math.max(1, Math.round(images.length / divisor)),
       representative_image_id: representative?.id ?? index + 1,
       thumbnail_path: representative?.thumbnail_path ?? null,
       has_ai_source: sourceCycle !== 1,
