@@ -215,6 +215,8 @@ export interface ExploreTagEntry {
   count: number;
   representative_image_id: number;
   thumbnail_path: string | null;
+  has_ai_source: boolean;
+  has_user_source: boolean;
 }
 
 export interface RelatedTagEntry {
@@ -585,6 +587,8 @@ interface GalleryState {
   queueTaggingForImage: (imageId: number) => Promise<number>;
   clearTaggingJobs: (folderId?: number | null) => Promise<number>;
   clearTaggingJobsForFolders: (folderIds: number[]) => Promise<number>;
+  resetAiTags: (folderId?: number | null) => Promise<number>;
+  resetAiTagsForFolders: (folderIds: number[]) => Promise<number>;
   loadDuplicateScanCache: (folderId?: number | null) => Promise<void>;
   scanDuplicates: (folderId?: number | null) => Promise<void>;
   toggleDuplicateSelected: (imageId: number) => void;
@@ -2381,6 +2385,26 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     });
     await get().loadBackgroundJobProgress();
     return cleared;
+  },
+
+  resetAiTags: async (folderId = get().selectedFolderId) => {
+    const reset = await invoke<number>("reset_ai_tags", {
+      params: { folder_id: folderId ?? null, folder_ids: null },
+    });
+    set({ exploreTagsFolderId: undefined, visualClusterFolderId: undefined, visualClusterEntries: [] });
+    await get().loadBackgroundJobProgress();
+    await get().loadImages(true);
+    return reset;
+  },
+
+  resetAiTagsForFolders: async (folderIds) => {
+    const reset = await invoke<number>("reset_ai_tags", {
+      params: { folder_id: null, folder_ids: folderIds },
+    });
+    set({ exploreTagsFolderId: undefined, visualClusterFolderId: undefined, visualClusterEntries: [] });
+    await get().loadBackgroundJobProgress();
+    await get().loadImages(true);
+    return reset;
   },
 
   getImageTags: async (imageId) => {

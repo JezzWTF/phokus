@@ -106,6 +106,38 @@ function searchTagsAutocomplete(payload: unknown): ExploreTagEntry[] {
     .slice(0, limit);
 }
 
+function rebuildExploreTags(): ExploreTagEntry[] {
+  const entries = new Map<
+    string,
+    { imageIds: Set<number>; representativeImageId: number; hasAiSource: boolean; hasUserSource: boolean }
+  >();
+  for (const [imageIdString, imageTags] of Object.entries(db.tagsByImageId)) {
+    const imageId = Number(imageIdString);
+    for (const imageTag of imageTags) {
+      const entry =
+        entries.get(imageTag.tag) ??
+        { imageIds: new Set<number>(), representativeImageId: imageId, hasAiSource: false, hasUserSource: false };
+      entry.imageIds.add(imageId);
+      if (imageTag.source === "ai") entry.hasAiSource = true;
+      if (imageTag.source === "user") entry.hasUserSource = true;
+      entries.set(imageTag.tag, entry);
+    }
+  }
+  return [...entries.entries()]
+    .map(([tag, entry]) => {
+      const representative = db.images.find((image) => image.id === entry.representativeImageId);
+      return {
+        tag,
+        count: entry.imageIds.size,
+        representative_image_id: entry.representativeImageId,
+        thumbnail_path: representative?.thumbnail_path ?? null,
+        has_ai_source: entry.hasAiSource,
+        has_user_source: entry.hasUserSource,
+      };
+    })
+    .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag));
+}
+
 function semanticSearch(payload: unknown): ImageRecord[] {
   const p = params(payload);
   const query = String(p.query ?? "").toLowerCase();
@@ -174,7 +206,7 @@ function updateImages(ids: number[], updates: { favorite?: boolean | null; ratin
 function refreshAlbumCounts() {
   for (const album of db.albums) {
     const ids = db.albumImageIds[album.id] ?? [];
-    album.image_count = ids.length;
+    if (db.scenario !== "extreme") album.image_count = ids.length;
     album.cover_image_id = ids[0] ?? null;
     album.cover_thumbnail_path = db.images.find((image) => image.id === ids[0])?.thumbnail_path ?? null;
     album.updated_at = new Date().toISOString();
@@ -285,7 +317,11 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
     case "get_visual_clusters":
       return db.scenario === "empty" ? [] : db.visualClusters;
     case "get_explore_tags":
-      return db.scenario === "empty" ? [] : db.exploreTags.slice(0, Number(p.limit ?? 180));
+      return db.scenario === "empty"
+        ? []
+        : db.scenario === "extreme"
+          ? db.exploreTags
+          : db.exploreTags.slice(0, Number(p.limit ?? 180));
     case "get_related_tags": {
       const relatedCounts = new Map<string, number>();
       for (const imageTags of Object.values(db.tagsByImageId)) {
@@ -400,6 +436,32 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
     case "queue_tagging_jobs":
     case "clear_tagging_jobs":
       return 12;
+    case "reset_ai_tags": {
+      const folderIds = p.folder_ids as number[] | undefined;
+      const folderId = p.folder_id as number | null | undefined;
+      const scopedImages = db.images.filter((image) =>
+        folderIds && folderIds.length > 0
+          ? folderIds.includes(image.folder_id)
+          : folderId != null
+            ? image.folder_id === folderId
+            : true,
+      );
+      let reset = 0;
+      for (const image of scopedImages) {
+        const tags = db.tagsByImageId[image.id] ?? [];
+        const aiTags = tags.filter((tag) => tag.source === "ai");
+        if (aiTags.length > 0 || image.ai_tagged_at || image.ai_tagger_error || image.ai_tagger_model || image.ai_rating) {
+          reset += 1;
+        }
+        db.tagsByImageId[image.id] = tags.filter((tag) => tag.source !== "ai");
+        image.ai_rating = null;
+        image.ai_tagger_model = null;
+        image.ai_tagged_at = null;
+        image.ai_tagger_error = null;
+      }
+      db.exploreTags = rebuildExploreTags();
+      return reset;
+    }
     case "get_tagger_model_status":
       return { model_id: "SmilingWolf/wd-vit-tagger-v3", model_name: "WD ViT Tagger", local_dir: "mock://models/tagger", ready: true, missing_files: [] };
     case "get_tagger_model":
