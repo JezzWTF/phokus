@@ -326,7 +326,7 @@ export function Toolbar() {
                 className={`w-40 bg-transparent py-1.5 pr-9 text-sm text-white placeholder:text-gray-600 focus:outline-none transition-colors lg:w-52 xl:w-64 ${searchCommand !== null ? "pl-16" : "pl-8"}`}
               />
               {searchCommand !== null ? (
-                <div className="absolute left-8 top-1/2 -translate-y-1/2">
+                <div className="absolute left-8 top-1/2 flex -translate-y-1/2">
                   <Tooltip label="Remove search command" anchorToCursor>
                     <button
                       type="button"
@@ -339,7 +339,7 @@ export function Toolbar() {
                 </div>
               ) : null}
               {searchQuery.trim().length > 0 || searchCommand !== null ? (
-                <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                <div className="absolute right-2 top-1/2 flex -translate-y-1/2">
                   <Tooltip label="Clear search" anchorToCursor>
                     <button
                       aria-label="Clear search"
