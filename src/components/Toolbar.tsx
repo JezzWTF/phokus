@@ -339,21 +339,24 @@ export function Toolbar() {
                 </div>
               ) : null}
               {searchQuery.trim().length > 0 || searchCommand !== null ? (
-                <Tooltip label="Clear search" anchorToCursor className="absolute right-2 top-1/2 -translate-y-1/2">
-                  <button
-                    className="rounded-md p-1 text-gray-500 hover:bg-white/5 hover:text-gray-200 transition-colors"
-                    onClick={() => {
-                      setSearchCommand(null);
-                      setSearchQuery("");
-                      setTagSuggestions([]);
-                      clearSearch();
-                    }}
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </Tooltip>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                  <Tooltip label="Clear search" anchorToCursor>
+                    <button
+                      aria-label="Clear search"
+                      className="rounded-md p-1 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200"
+                      onClick={() => {
+                        setSearchCommand(null);
+                        setSearchQuery("");
+                        setTagSuggestions([]);
+                        clearSearch();
+                      }}
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </Tooltip>
+                </div>
               ) : null}
             </div>
           </div>

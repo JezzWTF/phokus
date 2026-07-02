@@ -1,5 +1,5 @@
-import { useEffect, useCallback, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useEffect, useCallback, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence, type Transition } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useGalleryStore, ImageTag, ImageExif, AiRating } from "../store";
@@ -128,6 +128,9 @@ interface ViewTransform {
 }
 
 const IDENTITY_VIEW: ViewTransform = { zoom: 1, panX: 0, panY: 0 };
+const SLIDESHOW_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+const SLIDESHOW_CONTROLS_IDLE_MS = 5000;
+const SLIDESHOW_LOAD_MORE_THRESHOLD = 3;
 
 /** Re-anchor the pan so the point at (anchorX, anchorY) — measured from the
  *  viewport centre — stays under the cursor across a zoom change. */
@@ -158,6 +161,12 @@ export function Lightbox() {
   const addToAlbum = useGalleryStore((state) => state.addToAlbum);
   const createAlbum = useGalleryStore((state) => state.createAlbum);
   const getImageExif = useGalleryStore((state) => state.getImageExif);
+  const loadMoreImages = useGalleryStore((state) => state.loadMoreImages);
+  const loadedCount = useGalleryStore((state) => state.loadedCount);
+  const totalImages = useGalleryStore((state) => state.totalImages);
+  const slideshowIntervalSeconds = useGalleryStore((state) => state.slideshowIntervalSeconds);
+  const slideshowOrder = useGalleryStore((state) => state.slideshowOrder);
+  const slideshowTransition = useGalleryStore((state) => state.slideshowTransition);
 
   // Tracks the image id that is currently displayed, used to discard async
   // tag mutations that resolve after the user has navigated to another image.
@@ -184,11 +193,65 @@ export function Lightbox() {
   const [isDragging, setIsDragging] = useState(false);
   const [dragRect, setDragRect] = useState<DragRect | null>(null);
   const [regionSearching, setRegionSearching] = useState(false);
+  const [slideshowActive, setSlideshowActive] = useState(false);
+  const [slideshowPaused, setSlideshowPaused] = useState(false);
+  const [slideshowControlsVisible, setSlideshowControlsVisible] = useState(true);
+  const [slideshowLoadingMore, setSlideshowLoadingMore] = useState(false);
+  const [slideshowMotionStep, setSlideshowMotionStep] = useState(0);
 
+  const lightboxRootRef = useRef<HTMLDivElement>(null);
   const imageViewportRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  const slideshowControlsIdleTimeoutRef = useRef<number | null>(null);
+  const slideshowPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const slideshowRandomSeenRef = useRef<Set<number>>(new Set());
 
   const currentIndex = selectedImage ? images.findIndex((image) => image.id === selectedImage.id) : -1;
+  const slideshowImages = useMemo(
+    () => images.filter((image) => image.media_kind === "image"),
+    [images],
+  );
+  const slideshowIndex = selectedImage
+    ? slideshowImages.findIndex((image) => image.id === selectedImage.id)
+    : -1;
+  const slideshowPosition = slideshowIndex >= 0 ? slideshowIndex + 1 : Math.min(slideshowImages.length, 1);
+  const slideshowControlsShown = slideshowControlsVisible;
+  const slideshowMotionDirections = [
+    { x: -1, y: 0.45 },
+    { x: 1, y: -0.45 },
+    { x: -0.7, y: -0.55 },
+    { x: 0.7, y: 0.55 },
+  ];
+  const slideshowMotionDirection =
+    slideshowMotionDirections[slideshowMotionStep % slideshowMotionDirections.length];
+  const slideshowImageInitial = { opacity: 0, filter: "blur(8px)" };
+  const slideshowImageAnimate = { opacity: 1, filter: "blur(0px)" };
+  const slideshowImageExit = { opacity: 0, filter: "blur(4px)" };
+  const slideshowImageTransition: Transition = { duration: 0.72, ease: SLIDESHOW_EASE };
+  const slideshowImageContentInitial =
+    slideshowTransition === "gentle-motion"
+      ? {
+          scale: 1.012,
+          x: -8 * slideshowMotionDirection.x,
+          y: 8 * slideshowMotionDirection.y,
+        }
+      : { scale: 1.012 };
+  const slideshowImageContentAnimate =
+    slideshowTransition === "gentle-motion"
+      ? {
+          scale: 1.026,
+          x: 8 * slideshowMotionDirection.x,
+          y: -8 * slideshowMotionDirection.y,
+        }
+      : { scale: 1 };
+  const slideshowImageContentTransition: Transition =
+    slideshowTransition === "gentle-motion"
+      ? {
+          duration: slideshowIntervalSeconds + 0.75,
+          ease: "linear",
+        }
+      : { duration: 0.72, ease: SLIDESHOW_EASE };
+  const canStartSlideshow = slideshowImages.length > 0;
   const canFindSimilar = selectedImage?.embedding_status === "ready";
   const canSearchRegion = canFindSimilar && selectedImage?.media_kind === "image";
 
@@ -205,6 +268,106 @@ export function Lightbox() {
     setIsDragging(false);
     setDragRect(null);
   }, []);
+
+  const showSlideshowControls = useCallback(() => {
+    if (slideshowControlsIdleTimeoutRef.current !== null) {
+      window.clearTimeout(slideshowControlsIdleTimeoutRef.current);
+      slideshowControlsIdleTimeoutRef.current = null;
+    }
+    setSlideshowControlsVisible(true);
+    if (slideshowActive) {
+      slideshowControlsIdleTimeoutRef.current = window.setTimeout(() => {
+        setSlideshowControlsVisible(false);
+        slideshowControlsIdleTimeoutRef.current = null;
+      }, SLIDESHOW_CONTROLS_IDLE_MS);
+    }
+  }, [slideshowActive]);
+
+  const exitSlideshow = useCallback(() => {
+    setSlideshowActive(false);
+    setSlideshowPaused(false);
+    setSlideshowControlsVisible(true);
+    if (document.fullscreenElement === lightboxRootRef.current) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+  }, []);
+
+  const goSlideshow = useCallback(
+    (direction: -1 | 1, revealControls = true) => {
+      if (slideshowImages.length === 0) return;
+      if (slideshowImages.length === 1) {
+        openImage(slideshowImages[0]);
+        return;
+      }
+
+      const currentSlideshowIndex = slideshowIndex >= 0 ? slideshowIndex : 0;
+      let nextIndex =
+        (currentSlideshowIndex + direction + slideshowImages.length) % slideshowImages.length;
+      if (slideshowOrder === "random") {
+        const currentId = slideshowImages[currentSlideshowIndex]?.id;
+        let candidates = slideshowImages.filter(
+          (image) => image.id !== currentId && !slideshowRandomSeenRef.current.has(image.id),
+        );
+        if (candidates.length === 0) {
+          slideshowRandomSeenRef.current = new Set(currentId == null ? [] : [currentId]);
+          candidates = slideshowImages.filter((image) => image.id !== currentId);
+        }
+        const nextImage = candidates[Math.floor(Math.random() * candidates.length)];
+        nextIndex = slideshowImages.findIndex((image) => image.id === nextImage.id);
+        slideshowRandomSeenRef.current.add(nextImage.id);
+      }
+      setSlideshowMotionStep((step) => step + 1);
+      openImage(slideshowImages[nextIndex]);
+      if (revealControls) {
+        showSlideshowControls();
+      }
+    },
+    [openImage, showSlideshowControls, slideshowImages, slideshowIndex, slideshowOrder],
+  );
+
+  const handleSlideshowPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const previous = slideshowPointerRef.current;
+      const next = { x: event.clientX, y: event.clientY };
+      slideshowPointerRef.current = next;
+
+      if (!previous) {
+        if (!slideshowControlsVisible) {
+          showSlideshowControls();
+        }
+        return;
+      }
+
+      if (Math.abs(previous.x - next.x) > 2 || Math.abs(previous.y - next.y) > 2) {
+        showSlideshowControls();
+      }
+    },
+    [showSlideshowControls, slideshowControlsVisible],
+  );
+
+  const startSlideshow = useCallback(() => {
+    if (!selectedImage || slideshowImages.length === 0) return;
+
+    const nextImage =
+      selectedImage.media_kind === "image"
+        ? selectedImage
+        : images.slice(Math.max(0, currentIndex + 1)).find((image) => image.media_kind === "image") ??
+          slideshowImages[0];
+
+    if (nextImage.id !== selectedImage.id) {
+      openImage(nextImage);
+    }
+
+    slideshowRandomSeenRef.current = new Set([nextImage.id]);
+    setSlideshowMotionStep(0);
+    exitRegionMode();
+    setView(IDENTITY_VIEW);
+    setSlideshowPaused(false);
+    setSlideshowControlsVisible(true);
+    slideshowPointerRef.current = null;
+    setSlideshowActive(true);
+    void lightboxRootRef.current?.requestFullscreen().catch(() => undefined);
+  }, [currentIndex, exitRegionMode, images, openImage, selectedImage, slideshowImages]);
 
   // Keep the pan within bounds: when the scaled image overflows the viewport
   // the image edge may not be dragged past the viewport edge; when it fits,
@@ -264,8 +427,70 @@ export function Lightbox() {
   }, [selectedImage?.ai_tagged_at]);
 
   useEffect(() => {
+    if (selectedImage) return;
+    setSlideshowActive(false);
+    setSlideshowPaused(false);
+    setSlideshowControlsVisible(true);
+  }, [selectedImage]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      if (!slideshowActive) return;
+      if (document.fullscreenElement !== lightboxRootRef.current) {
+        setSlideshowActive(false);
+        setSlideshowPaused(false);
+        setSlideshowControlsVisible(true);
+      }
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, [slideshowActive]);
+
+  useEffect(() => {
+    showSlideshowControls();
+    return () => {
+      if (slideshowControlsIdleTimeoutRef.current !== null) {
+        window.clearTimeout(slideshowControlsIdleTimeoutRef.current);
+        slideshowControlsIdleTimeoutRef.current = null;
+      }
+    };
+  }, [showSlideshowControls, slideshowActive, slideshowPaused]);
+
+  useEffect(() => {
+    if (!slideshowActive || slideshowPaused || slideshowImages.length <= 1) return;
+    const timeout = window.setTimeout(() => {
+      goSlideshow(1, false);
+    }, slideshowIntervalSeconds * 1000);
+    return () => window.clearTimeout(timeout);
+  }, [goSlideshow, selectedImage?.id, slideshowActive, slideshowImages.length, slideshowIntervalSeconds, slideshowPaused]);
+
+  useEffect(() => {
+    if (
+      !slideshowActive ||
+      slideshowLoadingMore ||
+      loadedCount >= totalImages ||
+      slideshowImages.length === 0 ||
+      slideshowIndex < slideshowImages.length - SLIDESHOW_LOAD_MORE_THRESHOLD
+    ) {
+      return;
+    }
+
+    setSlideshowLoadingMore(true);
+    void loadMoreImages().finally(() => setSlideshowLoadingMore(false));
+  }, [
+    loadedCount,
+    loadMoreImages,
+    slideshowActive,
+    slideshowImages.length,
+    slideshowIndex,
+    slideshowLoadingMore,
+    totalImages,
+  ]);
+
+  useEffect(() => {
     const viewport = imageViewportRef.current;
-    if (!viewport || !selectedImage || selectedImage.media_kind !== "image") return;
+    if (!viewport || !selectedImage || selectedImage.media_kind !== "image" || slideshowActive) return;
 
     const handleWheel = (event: WheelEvent) => {
       if (regionSelectMode) return; // don't zoom during selection
@@ -283,11 +508,35 @@ export function Lightbox() {
 
     viewport.addEventListener("wheel", handleWheel, { passive: false });
     return () => viewport.removeEventListener("wheel", handleWheel);
-  }, [selectedImage, regionSelectMode, clampPan]);
+  }, [selectedImage, regionSelectMode, clampPan, slideshowActive]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (!selectedImage) return;
+      if (slideshowActive) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          exitSlideshow();
+          return;
+        }
+        if (event.key === " ") {
+          event.preventDefault();
+          setSlideshowPaused((paused) => !paused);
+          showSlideshowControls();
+          return;
+        }
+        if (event.key === "ArrowLeft" && !event.shiftKey) {
+          event.preventDefault();
+          goSlideshow(-1);
+          return;
+        }
+        if (event.key === "ArrowRight" && !event.shiftKey) {
+          event.preventDefault();
+          goSlideshow(1);
+          return;
+        }
+        return;
+      }
       if (event.key === "Escape") {
         if (regionSelectMode) {
           exitRegionMode();
@@ -307,7 +556,19 @@ export function Lightbox() {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selectedImage, closeImage, goPrev, goNext, regionSelectMode, exitRegionMode, clampPan]);
+  }, [
+    selectedImage,
+    closeImage,
+    exitSlideshow,
+    goPrev,
+    goNext,
+    goSlideshow,
+    regionSelectMode,
+    exitRegionMode,
+    clampPan,
+    showSlideshowControls,
+    slideshowActive,
+  ]);
 
   // ── Region selection / pan pointer handlers ─────────────────────────────────
   const handleRegionPointerDown = useCallback(
@@ -400,14 +661,159 @@ export function Lightbox() {
     <AnimatePresence>
       {selectedImage ? (
         <motion.div
+          ref={lightboxRootRef}
           key="lightbox"
-          className="media-dark-surface fixed inset-0 z-50 flex bg-black/90 backdrop-blur-sm"
+          className={`media-dark-surface fixed inset-0 z-50 flex ${
+            slideshowActive ? "bg-black" : "bg-black/90 backdrop-blur-sm"
+          }`}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.15 }}
-          onClick={regionSelectMode ? undefined : closeImage}
+          onClick={slideshowActive ? showSlideshowControls : regionSelectMode ? undefined : closeImage}
         >
+          {slideshowActive ? (
+            <div
+              className={`relative flex h-full w-full items-center justify-center overflow-hidden bg-black ${
+                slideshowControlsShown ? "" : "cursor-none"
+              }`}
+              onClick={(event) => {
+                event.stopPropagation();
+                showSlideshowControls();
+              }}
+              onPointerMove={handleSlideshowPointerMove}
+            >
+              <AnimatePresence initial={false}>
+                {selectedImage.media_kind === "image" ? (
+                  <motion.div
+                    key={selectedImage.id}
+                    className="absolute inset-0 flex items-center justify-center"
+                    initial={slideshowImageInitial}
+                    animate={slideshowImageAnimate}
+                    exit={slideshowImageExit}
+                    transition={slideshowImageTransition}
+                  >
+                    <motion.img
+                      src={mediaSrc(selectedImage.path) ?? ""}
+                      alt={selectedImage.filename}
+                      className="max-h-full max-w-full object-contain"
+                      draggable={false}
+                      initial={slideshowImageContentInitial}
+                      animate={slideshowImageContentAnimate}
+                      transition={slideshowImageContentTransition}
+                    />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="slideshow-waiting"
+                    className="text-sm text-gray-500"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                  >
+                    Finding next image…
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <motion.div
+                className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-5"
+                initial={false}
+                animate={{ opacity: slideshowControlsShown ? 1 : 0, y: slideshowControlsShown ? 0 : -6 }}
+                transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <div className="max-w-[60vw] whitespace-nowrap rounded-full border border-white/10 bg-black/45 px-3 py-1.5 text-xs text-gray-300 shadow-2xl shadow-black/30 backdrop-blur-md">
+                  <span className="font-medium text-white">{slideshowPosition}</span>
+                  <span className="mx-1 text-gray-600">/</span>
+                  <span>{slideshowImages.length}</span>
+                  <span className="mx-2 text-gray-700">•</span>
+                  <span className="inline-block max-w-[42vw] truncate align-bottom text-gray-400">{selectedImage.filename}</span>
+                </div>
+                <Tooltip label="Exit slideshow" followCursor>
+                  <button
+                    aria-label="Exit slideshow"
+                    className="pointer-events-auto rounded-full border border-white/10 bg-black/45 p-2 text-gray-300 shadow-2xl shadow-black/30 backdrop-blur-md transition-colors hover:bg-white/10 hover:text-white"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      exitSlideshow();
+                    }}
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </Tooltip>
+              </motion.div>
+
+              <motion.div
+                className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-center p-6"
+                initial={false}
+                animate={{ opacity: slideshowControlsShown ? 1 : 0, y: slideshowControlsShown ? 0 : 8 }}
+                transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-black/50 p-1.5 shadow-2xl shadow-black/30 backdrop-blur-md">
+                  <Tooltip label="Previous image" followCursor>
+                    <button
+                      aria-label="Previous image"
+                      className="rounded-full p-2 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                      disabled={slideshowImages.length <= 1}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        goSlideshow(-1);
+                      }}
+                    >
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                  </Tooltip>
+                  <Tooltip label={slideshowPaused ? "Resume slideshow" : "Pause slideshow"} followCursor>
+                    <button
+                      aria-label={slideshowPaused ? "Resume slideshow" : "Pause slideshow"}
+                      className="rounded-full border border-white/10 bg-white/10 p-2.5 text-white transition-colors hover:bg-white/15"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSlideshowPaused((paused) => !paused);
+                        showSlideshowControls();
+                      }}
+                    >
+                      {slideshowPaused ? (
+                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5.14v13.72a1 1 0 001.52.86l10.55-6.86a1 1 0 000-1.72L9.52 4.28A1 1 0 008 5.14z" />
+                        </svg>
+                      ) : (
+                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M7 5a1 1 0 00-1 1v12a1 1 0 001 1h2a1 1 0 001-1V6a1 1 0 00-1-1H7zM15 5a1 1 0 00-1 1v12a1 1 0 001 1h2a1 1 0 001-1V6a1 1 0 00-1-1h-2z" />
+                        </svg>
+                      )}
+                    </button>
+                  </Tooltip>
+                  <Tooltip label="Next image" followCursor>
+                    <button
+                      aria-label="Next image"
+                      className="rounded-full p-2 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                      disabled={slideshowImages.length <= 1}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        goSlideshow(1);
+                      }}
+                    >
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </Tooltip>
+                </div>
+              </motion.div>
+
+              {slideshowLoadingMore ? (
+                <div className="pointer-events-none absolute bottom-6 right-6 rounded-full border border-white/10 bg-black/45 px-3 py-1.5 text-xs text-gray-500 backdrop-blur-md">
+                  Loading more…
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <>
           <button
             className="absolute left-4 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white transition-colors hover:bg-white/20 disabled:opacity-20"
             disabled={currentIndex <= 0 || regionSelectMode}
@@ -494,29 +900,56 @@ export function Lightbox() {
                             ...(regionSelectMode ? { opacity: 0.85 } : {}),
                           }}
                         />
-                        {!regionSelectMode && (
-                          <div className="pointer-events-none absolute right-6 top-6 opacity-0 transition-opacity group-hover:opacity-100">
-                            <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-black/55 px-2 py-1 backdrop-blur">
-                              <button
-                                className="px-2 text-sm text-gray-300 hover:text-white"
-                                onClick={() => setView((v) => clampPan(zoomViewAt(v, Math.max(MIN_ZOOM, v.zoom - 0.25), 0, 0)))}
-                              >
-                                -
-                              </button>
-                              <span className="min-w-14 text-center text-xs text-gray-300">{Math.round(zoom * 100)}%</span>
-                              <button
-                                className="px-2 text-sm text-gray-300 hover:text-white"
-                                onClick={() => setView((v) => clampPan(zoomViewAt(v, Math.min(MAX_ZOOM, v.zoom + 0.25), 0, 0)))}
-                              >
-                                +
-                              </button>
-                            </div>
-                          </div>
-                        )}
                       </>
                     )}
                   </motion.div>
                 </AnimatePresence>
+
+                {!regionSelectMode && (
+                  <div className="pointer-events-none absolute right-6 top-6 opacity-75 transition-opacity group-hover:opacity-100">
+                    <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-black/55 p-1 shadow-2xl shadow-black/25 backdrop-blur">
+                      <Tooltip label={canStartSlideshow ? "Start slideshow" : "No images available for slideshow"} followCursor>
+                        <button
+                          aria-label="Start slideshow"
+                          className={`rounded-full p-2 transition-colors ${
+                            canStartSlideshow
+                              ? "text-gray-300 hover:bg-white/10 hover:text-white"
+                              : "cursor-not-allowed text-gray-600"
+                          }`}
+                          disabled={!canStartSlideshow}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            startSlideshow();
+                          }}
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8 5.5v13l10-6.5-10-6.5z" />
+                          </svg>
+                        </button>
+                      </Tooltip>
+                      {selectedImage.media_kind === "image" ? (
+                        <>
+                          <div className="mx-0.5 h-5 w-px bg-white/10" />
+                          <button
+                            aria-label="Zoom out"
+                            className="rounded-full px-2 py-1 text-sm text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                            onClick={() => setView((v) => clampPan(zoomViewAt(v, Math.max(MIN_ZOOM, v.zoom - 0.25), 0, 0)))}
+                          >
+                            -
+                          </button>
+                          <span className="min-w-14 text-center text-xs text-gray-300">{Math.round(zoom * 100)}%</span>
+                          <button
+                            aria-label="Zoom in"
+                            className="rounded-full px-2 py-1 text-sm text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                            onClick={() => setView((v) => clampPan(zoomViewAt(v, Math.min(MAX_ZOOM, v.zoom + 0.25), 0, 0)))}
+                          >
+                            +
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="lightbox-panel flex w-64 shrink-0 flex-col border-l border-white/5 bg-gray-900/95 lg:w-72">
@@ -984,6 +1417,8 @@ export function Lightbox() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
           </button>
+            </>
+          )}
         </motion.div>
       ) : null}
     </AnimatePresence>
