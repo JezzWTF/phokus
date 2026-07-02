@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, type Transition } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useGalleryStore, ImageTag, ImageExif, AiRating } from "../store";
@@ -128,6 +128,7 @@ interface ViewTransform {
 }
 
 const IDENTITY_VIEW: ViewTransform = { zoom: 1, panX: 0, panY: 0 };
+const SLIDESHOW_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 const SLIDESHOW_CONTROLS_IDLE_MS = 5000;
 const SLIDESHOW_LOAD_MORE_THRESHOLD = 3;
 
@@ -165,6 +166,7 @@ export function Lightbox() {
   const totalImages = useGalleryStore((state) => state.totalImages);
   const slideshowIntervalSeconds = useGalleryStore((state) => state.slideshowIntervalSeconds);
   const slideshowOrder = useGalleryStore((state) => state.slideshowOrder);
+  const slideshowTransition = useGalleryStore((state) => state.slideshowTransition);
 
   // Tracks the image id that is currently displayed, used to discard async
   // tag mutations that resolve after the user has navigated to another image.
@@ -195,12 +197,14 @@ export function Lightbox() {
   const [slideshowPaused, setSlideshowPaused] = useState(false);
   const [slideshowControlsVisible, setSlideshowControlsVisible] = useState(true);
   const [slideshowLoadingMore, setSlideshowLoadingMore] = useState(false);
+  const [slideshowMotionStep, setSlideshowMotionStep] = useState(0);
 
   const lightboxRootRef = useRef<HTMLDivElement>(null);
   const imageViewportRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const slideshowControlsIdleTimeoutRef = useRef<number | null>(null);
   const slideshowPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const slideshowRandomSeenRef = useRef<Set<number>>(new Set());
 
   const currentIndex = selectedImage ? images.findIndex((image) => image.id === selectedImage.id) : -1;
   const slideshowImages = useMemo(
@@ -212,6 +216,41 @@ export function Lightbox() {
     : -1;
   const slideshowPosition = slideshowIndex >= 0 ? slideshowIndex + 1 : Math.min(slideshowImages.length, 1);
   const slideshowControlsShown = slideshowControlsVisible;
+  const slideshowMotionDirections = [
+    { x: -1, y: 0.45 },
+    { x: 1, y: -0.45 },
+    { x: -0.7, y: -0.55 },
+    { x: 0.7, y: 0.55 },
+  ];
+  const slideshowMotionDirection =
+    slideshowMotionDirections[slideshowMotionStep % slideshowMotionDirections.length];
+  const slideshowImageInitial = { opacity: 0, filter: "blur(8px)" };
+  const slideshowImageAnimate = { opacity: 1, filter: "blur(0px)" };
+  const slideshowImageExit = { opacity: 0, filter: "blur(4px)" };
+  const slideshowImageTransition: Transition = { duration: 0.72, ease: SLIDESHOW_EASE };
+  const slideshowImageContentInitial =
+    slideshowTransition === "gentle-motion"
+      ? {
+          scale: 1.012,
+          x: -8 * slideshowMotionDirection.x,
+          y: 8 * slideshowMotionDirection.y,
+        }
+      : { scale: 1.012 };
+  const slideshowImageContentAnimate =
+    slideshowTransition === "gentle-motion"
+      ? {
+          scale: 1.026,
+          x: 8 * slideshowMotionDirection.x,
+          y: -8 * slideshowMotionDirection.y,
+        }
+      : { scale: 1 };
+  const slideshowImageContentTransition: Transition =
+    slideshowTransition === "gentle-motion"
+      ? {
+          duration: slideshowIntervalSeconds + 0.75,
+          ease: "linear",
+        }
+      : { duration: 0.72, ease: SLIDESHOW_EASE };
   const canStartSlideshow = slideshowImages.length > 0;
   const canFindSimilar = selectedImage?.embedding_status === "ready";
   const canSearchRegion = canFindSimilar && selectedImage?.media_kind === "image";
@@ -265,9 +304,19 @@ export function Lightbox() {
       let nextIndex =
         (currentSlideshowIndex + direction + slideshowImages.length) % slideshowImages.length;
       if (slideshowOrder === "random") {
-        nextIndex = Math.floor(Math.random() * (slideshowImages.length - 1));
-        if (nextIndex >= currentSlideshowIndex) nextIndex += 1;
+        const currentId = slideshowImages[currentSlideshowIndex]?.id;
+        let candidates = slideshowImages.filter(
+          (image) => image.id !== currentId && !slideshowRandomSeenRef.current.has(image.id),
+        );
+        if (candidates.length === 0) {
+          slideshowRandomSeenRef.current = new Set(currentId == null ? [] : [currentId]);
+          candidates = slideshowImages.filter((image) => image.id !== currentId);
+        }
+        const nextImage = candidates[Math.floor(Math.random() * candidates.length)];
+        nextIndex = slideshowImages.findIndex((image) => image.id === nextImage.id);
+        slideshowRandomSeenRef.current.add(nextImage.id);
       }
+      setSlideshowMotionStep((step) => step + 1);
       openImage(slideshowImages[nextIndex]);
       if (revealControls) {
         showSlideshowControls();
@@ -309,6 +358,8 @@ export function Lightbox() {
       openImage(nextImage);
     }
 
+    slideshowRandomSeenRef.current = new Set([nextImage.id]);
+    setSlideshowMotionStep(0);
     exitRegionMode();
     setView(IDENTITY_VIEW);
     setSlideshowPaused(false);
@@ -632,19 +683,26 @@ export function Lightbox() {
               }}
               onPointerMove={handleSlideshowPointerMove}
             >
-              <AnimatePresence mode="wait">
+              <AnimatePresence initial={false}>
                 {selectedImage.media_kind === "image" ? (
-                  <motion.img
+                  <motion.div
                     key={selectedImage.id}
-                    src={mediaSrc(selectedImage.path) ?? ""}
-                    alt={selectedImage.filename}
-                    className="max-h-full max-w-full object-contain"
-                    draggable={false}
-                    initial={{ opacity: 0, scale: 1.012, filter: "blur(8px)" }}
-                    animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-                    exit={{ opacity: 0, scale: 0.992, filter: "blur(4px)" }}
-                    transition={{ duration: 0.72, ease: [0.22, 1, 0.36, 1] }}
-                  />
+                    className="absolute inset-0 flex items-center justify-center"
+                    initial={slideshowImageInitial}
+                    animate={slideshowImageAnimate}
+                    exit={slideshowImageExit}
+                    transition={slideshowImageTransition}
+                  >
+                    <motion.img
+                      src={mediaSrc(selectedImage.path) ?? ""}
+                      alt={selectedImage.filename}
+                      className="max-h-full max-w-full object-contain"
+                      draggable={false}
+                      initial={slideshowImageContentInitial}
+                      animate={slideshowImageContentAnimate}
+                      transition={slideshowImageContentTransition}
+                    />
+                  </motion.div>
                 ) : (
                   <motion.div
                     key="slideshow-waiting"

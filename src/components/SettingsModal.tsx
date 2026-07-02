@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppTheme, CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, SlideshowOrder, TaggerAcceleration, TaggerModel, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
+import { AppTheme, CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, SlideshowOrder, SlideshowTransition, TaggerAcceleration, TaggerModel, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
 import { FfmpegStatusRow } from "./onboarding/StepWelcome";
 import { ThemedDropdown } from "./ThemedDropdown";
 import { getChangelogForVersion } from "../changelog";
@@ -261,6 +261,8 @@ export function SettingsModal() {
   const setSlideshowIntervalSeconds = useGalleryStore((state) => state.setSlideshowIntervalSeconds);
   const slideshowOrder = useGalleryStore((state) => state.slideshowOrder);
   const setSlideshowOrder = useGalleryStore((state) => state.setSlideshowOrder);
+  const slideshowTransition = useGalleryStore((state) => state.slideshowTransition);
+  const setSlideshowTransition = useGalleryStore((state) => state.setSlideshowTransition);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -848,6 +850,20 @@ export function SettingsModal() {
                       options={[
                         { value: "sequential", label: "Sequential" },
                         { value: "random", label: "Random" },
+                      ]}
+                    />
+                  </SettingsItem>
+                  <SettingsItem
+                    label="Transition"
+                    description="Soft fade keeps images still. Gentle motion adds a slow, subtle drift while the next image settles in."
+                  >
+                    <ThemedDropdown
+                      value={slideshowTransition}
+                      onChange={(value) => setSlideshowTransition(value as SlideshowTransition)}
+                      ariaLabel="Slideshow transition"
+                      options={[
+                        { value: "soft-fade", label: "Soft fade" },
+                        { value: "gentle-motion", label: "Gentle motion" },
                       ]}
                     />
                   </SettingsItem>

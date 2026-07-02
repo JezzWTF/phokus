@@ -17,6 +17,7 @@ const LIGHTBOX_AUTOPLAY_KEY = "phokus.lightboxAutoplay";
 const LIGHTBOX_AUTO_MUTE_KEY = "phokus.lightboxAutoMute";
 const SLIDESHOW_INTERVAL_KEY = "phokus.slideshowIntervalSeconds";
 const SLIDESHOW_ORDER_KEY = "phokus.slideshowOrder";
+const SLIDESHOW_TRANSITION_KEY = "phokus.slideshowTransition";
 
 export interface Folder {
   id: number;
@@ -60,6 +61,7 @@ export type SimilarScope = "all_media" | "current_folder" | "current_album";
 export type ExploreMode = "visual" | "tags";
 export type AppTheme = "phokus" | "subtle-light" | "conventional-dark";
 export type SlideshowOrder = "sequential" | "random";
+export type SlideshowTransition = "soft-fade" | "gentle-motion";
 
 export interface ImageRecord {
   id: number;
@@ -419,6 +421,7 @@ interface GalleryState {
   lightboxAutoMute: boolean;
   slideshowIntervalSeconds: number;
   slideshowOrder: SlideshowOrder;
+  slideshowTransition: SlideshowTransition;
   // Per-folder background-worker pause flags, shared by the BackgroundTasks
   // bar and the sidebar folder context menu.
   workerPaused: Record<number, Record<WorkerKey, boolean>>;
@@ -549,6 +552,7 @@ interface GalleryState {
   setLightboxAutoMute: (enabled: boolean) => void;
   setSlideshowIntervalSeconds: (seconds: number) => void;
   setSlideshowOrder: (order: SlideshowOrder) => void;
+  setSlideshowTransition: (transition: SlideshowTransition) => void;
   loadWorkerStates: () => Promise<void>;
   setWorkerPaused: (folderId: number, worker: WorkerKey, paused: boolean) => void;
   setAllWorkersPaused: (folderId: number, paused: boolean) => void;
@@ -672,6 +676,12 @@ function initialSlideshowOrder(): SlideshowOrder {
   if (typeof window === "undefined") return "sequential";
   const stored = window.localStorage.getItem(SLIDESHOW_ORDER_KEY);
   return stored === "random" ? "random" : "sequential";
+}
+
+function initialSlideshowTransition(): SlideshowTransition {
+  if (typeof window === "undefined") return "soft-fade";
+  const stored = window.localStorage.getItem(SLIDESHOW_TRANSITION_KEY);
+  return stored === "gentle-motion" ? "gentle-motion" : "soft-fade";
 }
 
 function initialTheme(): AppTheme {
@@ -936,6 +946,7 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   lightboxAutoMute: initialBoolSetting(LIGHTBOX_AUTO_MUTE_KEY, false),
   slideshowIntervalSeconds: initialNumberSetting(SLIDESHOW_INTERVAL_KEY, 6, 3, 60),
   slideshowOrder: initialSlideshowOrder(),
+  slideshowTransition: initialSlideshowTransition(),
   workerPaused: {},
 
   appVersion: null,
@@ -2035,6 +2046,11 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   setSlideshowOrder: (order) => {
     window.localStorage.setItem(SLIDESHOW_ORDER_KEY, order);
     set({ slideshowOrder: order });
+  },
+
+  setSlideshowTransition: (transition) => {
+    window.localStorage.setItem(SLIDESHOW_TRANSITION_KEY, transition);
+    set({ slideshowTransition: transition });
   },
 
   loadWorkerStates: async () => {
