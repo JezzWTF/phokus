@@ -23,6 +23,8 @@ export default function App() {
   const loadBackgroundJobProgress = useGalleryStore((state) => state.loadBackgroundJobProgress);
   const loadImages = useGalleryStore((state) => state.loadImages);
   const loadCaptionModelStatus = useGalleryStore((state) => state.loadCaptionModelStatus);
+  const loadTaggerModelStatus = useGalleryStore((state) => state.loadTaggerModelStatus);
+  const loadTaggerModel = useGalleryStore((state) => state.loadTaggerModel);
   const loadDuplicateScanCache = useGalleryStore((state) => state.loadDuplicateScanCache);
   const loadAlbums = useGalleryStore((state) => state.loadAlbums);
   const loadMutedFolderIds = useGalleryStore((state) => state.loadMutedFolderIds);
@@ -53,6 +55,8 @@ export default function App() {
     loadFolders().then(async () => {
       void loadBackgroundJobProgress();
       void loadCaptionModelStatus();
+      void loadTaggerModel();
+      void loadTaggerModelStatus();
       void loadDuplicateScanCache();
       await loadAlbums();
       await loadImages(true);

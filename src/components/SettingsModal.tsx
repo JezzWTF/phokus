@@ -322,7 +322,7 @@ export function SettingsModal() {
     : taggerModelProgress
       ? `Downloading ${taggerModelProgress.completed_files}/${taggerModelProgress.total_files}`
       : taggerModelPreparing
-        ? "Preparing WD Tagger..."
+        ? "Preparing AI tagger..."
         : taggerReady
           ? "Installed"
           : "Install model";

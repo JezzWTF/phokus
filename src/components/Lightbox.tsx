@@ -156,6 +156,7 @@ export function Lightbox() {
   const addUserTag = useGalleryStore((state) => state.addUserTag);
   const removeTag = useGalleryStore((state) => state.removeTag);
   const taggerModelStatus = useGalleryStore((state) => state.taggerModelStatus);
+  const loadTaggerModelStatus = useGalleryStore((state) => state.loadTaggerModelStatus);
   const queueTaggingForImage = useGalleryStore((state) => state.queueTaggingForImage);
   const albums = useGalleryStore((state) => state.albums);
   const addToAlbum = useGalleryStore((state) => state.addToAlbum);
@@ -254,6 +255,13 @@ export function Lightbox() {
   const canStartSlideshow = slideshowImages.length > 0;
   const canFindSimilar = selectedImage?.embedding_status === "ready";
   const canSearchRegion = canFindSimilar && selectedImage?.media_kind === "image";
+  const taggerReady = taggerModelStatus?.ready ?? false;
+  const taggerStatusKnown = taggerModelStatus !== null;
+  const taggerButtonTooltip = !taggerStatusKnown
+    ? "Checking AI tagger model..."
+    : taggerReady
+      ? "Queue AI tagging for this image"
+      : "AI tagger model not installed";
 
   const goPrev = useCallback(() => {
     if (currentIndex > 0) openImage(images[currentIndex - 1]);
@@ -420,6 +428,11 @@ export function Lightbox() {
       .catch(() => { if (!cancelled) setImageExif(null); });
     return () => { cancelled = true; };
   }, [selectedImage?.id, selectedImage?.media_kind, getImageExif]);
+
+  useEffect(() => {
+    if (selectedImage?.media_kind !== "image" || taggerStatusKnown) return;
+    void loadTaggerModelStatus();
+  }, [loadTaggerModelStatus, selectedImage?.media_kind, taggerStatusKnown]);
 
   // Reset the queued state once the worker finishes so the button is usable again
   useEffect(() => {
@@ -1156,10 +1169,10 @@ export function Lightbox() {
                           </span>
                         ) : null}
                         {selectedImage.media_kind === "image" ? (
-                          <Tooltip label={!(taggerModelStatus?.ready ?? false) ? "WD Tagger model not downloaded" : "Queue AI tagging for this image"} followCursor>
+                          <Tooltip label={taggerButtonTooltip} followCursor>
                           <button
                             className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                            disabled={!(taggerModelStatus?.ready ?? false) || taggingQueued}
+                            disabled={!taggerReady || taggingQueued}
                             onClick={() => {
                               setTaggingQueued(true);
                               void queueTaggingForImage(selectedImage.id).catch(() => undefined);

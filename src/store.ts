@@ -3010,6 +3010,9 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
         taggerModelProgress: event.payload.done ? null : event.payload,
         taggerModelPreparing: !event.payload.done,
       });
+      if (event.payload.done) {
+        void get().loadTaggerModelStatus();
+      }
     });
 
     const unlistenImages = await listen<IndexedImagesBatch>("indexed-images", (event) => {

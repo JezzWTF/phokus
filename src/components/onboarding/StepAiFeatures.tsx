@@ -43,7 +43,7 @@ export function StepAiFeatures() {
             <div className="min-w-0">
               <p className="text-sm text-white">Automatic tags for every image</p>
               <p className="mt-1 text-xs leading-relaxed text-gray-500">
-                The WD tagger model (~1.3 GB download) labels images so you can search with{" "}
+                The AI tagger model labels images so you can search with{" "}
                 <code className="rounded bg-gray-900 px-1 py-0.5 text-[11px] text-gray-200 light-theme:bg-gray-800 light-theme:text-gray-100">/t</code> — tags look like:
               </p>
               <span className="mt-2 flex flex-wrap gap-1.5">

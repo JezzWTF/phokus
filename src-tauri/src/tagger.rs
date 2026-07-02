@@ -466,7 +466,8 @@ pub fn probe_tagger_runtime(app_data_dir: &Path) -> Result<TaggerRuntimeProbe> {
     let status = tagger_model_status(app_data_dir);
     if !status.ready {
         anyhow::bail!(
-            "WD Tagger model is missing {} required file(s): {}",
+            "{} is missing {} required file(s): {}",
+            status.model_name,
             status.missing_files.len(),
             status.missing_files.join(", ")
         );
