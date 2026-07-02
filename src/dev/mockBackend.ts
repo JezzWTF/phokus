@@ -1,5 +1,15 @@
 import { emit } from "@tauri-apps/api/event";
-import type { Album, ExploreTagEntry, Folder, ImageRecord, ImageTag, SortOrder } from "../store";
+import type {
+  Album,
+  ExploreTagEntry,
+  Folder,
+  ImageRecord,
+  ImageTag,
+  SortOrder,
+  TaggerModel,
+  TaggerModelStatus,
+  TaggerRuntimeProbe,
+} from "../store";
 import { compareImages, createMockDb, mockExif } from "./mockFixtures";
 import { getMockScenario } from "./mockScenarios";
 
@@ -7,6 +17,8 @@ const db = createMockDb(getMockScenario());
 let nextFolderId = 100;
 let nextAlbumId = 100;
 let nextTagId = 10_000;
+let mockTaggerModel: TaggerModel = db.scenario === "joytag-unready" ? "joytag" : "wd";
+let mockTaggerReady = db.scenario !== "unready" && db.scenario !== "joytag-unready";
 
 type AnyPayload = Record<string, any> | undefined;
 type Rgb = [number, number, number];
@@ -52,6 +64,42 @@ function page<T>(items: T[], offset = 0, limit = 200) {
     total: items.length,
     offset,
     limit,
+  };
+}
+
+function mockTaggerStatus(): TaggerModelStatus {
+  const modelInfo =
+    mockTaggerModel === "joytag"
+      ? {
+          model_id: "fancyfeast/joytag",
+          model_name: "JoyTag",
+          local_dir: "mock://models/joytag",
+          label_file: "top_tags.txt",
+        }
+      : {
+          model_id: "SmilingWolf/wd-swinv2-tagger-v3",
+          model_name: "wd-swinv2-tagger-v3",
+          local_dir: "mock://models/wd-swinv2-tagger-v3",
+          label_file: "selected_tags.csv",
+        };
+
+  return {
+    model_id: modelInfo.model_id,
+    model_name: modelInfo.model_name,
+    local_dir: modelInfo.local_dir,
+    ready: mockTaggerReady,
+    missing_files: mockTaggerReady ? [] : ["model.onnx", modelInfo.label_file],
+  };
+}
+
+function mockTaggerRuntimeProbe(): TaggerRuntimeProbe {
+  if (!mockTaggerReady) {
+    throw new Error(`${mockTaggerStatus().model_name} is missing required model files`);
+  }
+  return {
+    ready: true,
+    acceleration: "auto",
+    session: { file: "model.onnx", inputs: ["input"], outputs: ["tags"] },
   };
 }
 
@@ -463,10 +511,19 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
       return reset;
     }
     case "get_tagger_model_status":
-      return { model_id: "SmilingWolf/wd-vit-tagger-v3", model_name: "WD ViT Tagger", local_dir: "mock://models/tagger", ready: true, missing_files: [] };
+      return mockTaggerStatus();
     case "get_tagger_model":
+      return mockTaggerModel;
     case "set_tagger_model":
-      return p.model ?? "wd";
+      mockTaggerModel = p.model ?? "wd";
+      mockTaggerReady = db.scenario !== "unready" && db.scenario !== "joytag-unready";
+      return mockTaggerModel;
+    case "prepare_tagger_model":
+      mockTaggerReady = true;
+      return mockTaggerStatus();
+    case "delete_tagger_model":
+      mockTaggerReady = false;
+      return mockTaggerStatus();
     case "get_tagger_acceleration":
     case "set_tagger_acceleration":
       return p.acceleration ?? "auto";
@@ -477,7 +534,7 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
     case "set_tagger_batch_size":
       return p.batch_size ?? 8;
     case "probe_tagger_runtime":
-      return { ready: true, acceleration: "auto", session: { file: "model.onnx", inputs: ["input"], outputs: ["tags"] } };
+      return mockTaggerRuntimeProbe();
     case "get_tagging_queue_scope":
       return "all";
     case "get_tagging_queue_folder_ids":
