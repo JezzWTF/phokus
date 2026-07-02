@@ -147,6 +147,7 @@ export function TitleBar() {
         <Tooltip label="Settings (right-click to switch theme)" anchorToCursor>
         <button
           ref={settingsBtnRef}
+          aria-label="Settings"
           onClick={() => setSettingsOpen(true)}
           onContextMenu={handleSettingsContextMenu}
           className="group flex h-full w-10 items-center justify-center text-gray-600 transition-colors duration-100 hover:bg-white/6 hover:text-gray-300"
