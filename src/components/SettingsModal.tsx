@@ -4,6 +4,7 @@ import { FfmpegStatusRow } from "./onboarding/StepWelcome";
 import { ThemedDropdown } from "./ThemedDropdown";
 import { getChangelogForVersion } from "../changelog";
 import { Tooltip } from "./Tooltip";
+import { TAGGER_MODELS } from "../taggerModels";
 
 type SettingsSection = "workspace" | "general";
 
@@ -100,22 +101,6 @@ function ScopeButton({ scope, current, onSelect, children }: {
     </button>
   );
 }
-
-// Display metadata for each selectable tagging model.
-const TAGGER_MODELS: Record<TaggerModel, { name: string; tab: string; description: string }> = {
-  wd: {
-    name: "WD SwinV2 Tagger v3",
-    tab: "WD (anime)",
-    description:
-      "Anime-focused vision model by SmilingWolf. Generates booru-style tags with configurable confidence thresholds.",
-  },
-  joytag: {
-    name: "JoyTag",
-    tab: "JoyTag (general)",
-    description:
-      "Booru-schema tagger that also handles photographic content and is strong on NSFW concepts. The explicitness rating is derived from its tags.",
-  },
-};
 
 function TaggerModelButton({ model, current, onSelect, children }: {
   model: TaggerModel;
@@ -445,16 +430,18 @@ export function SettingsModal() {
           </div>
         </aside>
 
-        <Tooltip label="Close settings" anchorToCursor className="absolute right-4 top-4 z-10">
-          <button
-            className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
-            onClick={() => setSettingsOpen(false)}
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </Tooltip>
+        <div className="absolute right-4 top-4 z-10">
+          <Tooltip label="Close settings" anchorToCursor>
+            <button
+              className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
+              onClick={() => setSettingsOpen(false)}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </Tooltip>
+        </div>
 
         <main className="min-w-0 flex-1 overflow-y-auto">
           <div className="px-10 py-8">

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { TaggerModelProgress, useGalleryStore } from "../../store";
+import { TaggerModel, TaggerModelProgress, useGalleryStore } from "../../store";
+import { TAGGER_MODELS } from "../../taggerModels";
 import { FakeProgressBar, formatBytes } from "./fakes";
 
 const FAKE_TAGS = ["landscape", "sunset", "outdoors", "no_humans", "ocean", "cloudy_sky"];
@@ -15,19 +16,47 @@ function taggerDownloadFraction(progress: TaggerModelProgress | null): number | 
   return null;
 }
 
+function TaggerModelChoice({ model, current, disabled, onSelect }: {
+  model: TaggerModel;
+  current: TaggerModel;
+  disabled: boolean;
+  onSelect: (model: TaggerModel) => void;
+}) {
+  const active = model === current;
+  return (
+    <button
+      type="button"
+      className={`rounded-md border px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+        active
+          ? "border-emerald-400/35 bg-emerald-500/15 text-emerald-200 light-theme:border-emerald-600/50 light-theme:bg-emerald-100 light-theme:text-emerald-700"
+          : "border-transparent text-gray-500 hover:bg-white/[0.06] hover:text-gray-200 light-theme:text-gray-600 light-theme:hover:bg-gray-900 light-theme:hover:text-white"
+      }`}
+      disabled={disabled}
+      onClick={() => onSelect(model)}
+    >
+      {TAGGER_MODELS[model].tab}
+    </button>
+  );
+}
+
 export function StepAiFeatures() {
   const taggerModelStatus = useGalleryStore((s) => s.taggerModelStatus);
   const taggerModelPreparing = useGalleryStore((s) => s.taggerModelPreparing);
   const taggerModelProgress = useGalleryStore((s) => s.taggerModelProgress);
   const taggerModelError = useGalleryStore((s) => s.taggerModelError);
+  const taggerModel = useGalleryStore((s) => s.taggerModel);
   const prepareTaggerModel = useGalleryStore((s) => s.prepareTaggerModel);
+  const loadTaggerModel = useGalleryStore((s) => s.loadTaggerModel);
   const loadTaggerModelStatus = useGalleryStore((s) => s.loadTaggerModelStatus);
+  const setTaggerModel = useGalleryStore((s) => s.setTaggerModel);
 
   useEffect(() => {
+    void loadTaggerModel();
     void loadTaggerModelStatus();
-  }, [loadTaggerModelStatus]);
+  }, [loadTaggerModel, loadTaggerModelStatus]);
 
   const taggerReady = taggerModelStatus?.ready ?? false;
+  const taggerStatusLabel = taggerReady ? "Installed" : taggerModelPreparing ? "Preparing" : "Not installed";
 
   return (
     <div>
@@ -45,6 +74,26 @@ export function StepAiFeatures() {
               <p className="mt-1 text-xs leading-relaxed text-gray-500">
                 The AI tagger model labels images so you can search with{" "}
                 <code className="rounded bg-gray-900 px-1 py-0.5 text-[11px] text-gray-200 light-theme:bg-gray-800 light-theme:text-gray-100">/t</code> — tags look like:
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-1 rounded-lg border border-white/[0.07] p-0.5 light-theme:border-gray-300/80">
+                {(["wd", "joytag"] as const).map((model) => (
+                  <TaggerModelChoice
+                    key={model}
+                    model={model}
+                    current={taggerModel}
+                    disabled={taggerModelPreparing}
+                    onSelect={(nextModel) => {
+                      if (nextModel === taggerModel) return;
+                      void setTaggerModel(nextModel);
+                    }}
+                  />
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] text-gray-600">
+                Current: {TAGGER_MODELS[taggerModel].name} · {taggerStatusLabel}
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-gray-500">
+                {TAGGER_MODELS[taggerModel].description}
               </p>
               <span className="mt-2 flex flex-wrap gap-1.5">
                 {FAKE_TAGS.map((tag) => (
