@@ -6,10 +6,13 @@ import { getChangelogForVersion } from "../changelog";
 import { Tooltip } from "./Tooltip";
 import { TAGGER_MODELS } from "../taggerModels";
 
-type SettingsSection = "workspace" | "general";
+type SettingsSection = "general" | "media" | "updates" | "storage" | "workspace";
 
 const SECTIONS: { id: SettingsSection; label: string; detail: string }[] = [
-  { id: "general", label: "General", detail: "App data and diagnostics" },
+  { id: "general", label: "General", detail: "Theme and notifications" },
+  { id: "media", label: "Media", detail: "Playback and slideshow" },
+  { id: "updates", label: "Updates & Setup", detail: "Versions, setup, and tour" },
+  { id: "storage", label: "Storage", detail: "App data and maintenance" },
   { id: "workspace", label: "AI Workspace", detail: "Tagging models and queue targets" },
 ];
 
@@ -267,7 +270,7 @@ export function SettingsModal() {
   }, [settingsOpen, loadTaggerModelStatus, loadTaggerModel, loadTaggerAcceleration, loadTaggerThreshold, loadTaggerBatchSize, loadTaggingQueueScope, loadTaggingQueueFolderIds, setSettingsOpen]);
 
   useEffect(() => {
-    if (!settingsOpen || activeSection !== "general") return;
+    if (!settingsOpen || activeSection !== "storage") return;
     setVacuumResult(null);
     setThumbnailCleanupResult(null);
     void getDatabaseInfo().then(setDbInfo).catch(() => {});
@@ -289,6 +292,7 @@ export function SettingsModal() {
 
   if (!settingsOpen) return null;
 
+  const activeSectionMeta = SECTIONS.find((section) => section.id === activeSection) ?? SECTIONS[0];
   const taggerReady = taggerModelStatus?.ready ?? false;
   const queueScopeLabel =
     taggingQueueScope === "all"
@@ -445,8 +449,8 @@ export function SettingsModal() {
 
         <main className="min-w-0 flex-1 overflow-y-auto">
           <div className="px-10 py-8">
-            <h3 className="text-lg font-semibold text-white">{activeSection === "workspace" ? "AI Workspace" : "General"}</h3>
-            <p className="mt-1 text-xs text-gray-600">{activeSection === "workspace" ? "Model setup and queue targets" : "App data and diagnostics"}</p>
+            <h3 className="text-lg font-semibold text-white">{activeSectionMeta.label}</h3>
+            <p className="mt-1 text-xs text-gray-600">{activeSectionMeta.detail}</p>
 
             {activeSection === "workspace" ? (
               <div className="mt-8 space-y-9">
@@ -496,34 +500,45 @@ export function SettingsModal() {
                     }
                     description={TAGGER_MODELS[taggerModel].description}
                   >
-                    <div className="flex items-center gap-2">
-                      {taggerReady ? (
-                        <>
+                    <div className="flex flex-col items-end gap-1.5">
+                      <div className="flex items-center gap-2">
+                        {taggerReady ? (
+                          <>
+                            <button
+                              className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
+                              onClick={() => void probeTaggerRuntime()}
+                              disabled={taggerRuntimeChecking}
+                            >
+                              {taggerRuntimeChecking ? "Checking runtime..." : "Check runtime"}
+                            </button>
+                            <button
+                              className="rounded-md border border-red-400/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-200 transition-colors hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-red-400/50 light-theme:bg-red-50 light-theme:text-red-700 light-theme:hover:bg-red-100"
+                              onClick={() => void deleteTaggerModel()}
+                              disabled={taggerModelPreparing}
+                            >
+                              Delete model files
+                            </button>
+                          </>
+                        ) : (
                           <button
-                            className="rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
-                            onClick={() => void probeTaggerRuntime()}
-                            disabled={taggerRuntimeChecking}
-                          >
-                            {taggerRuntimeChecking ? "Checking runtime..." : "Check runtime"}
-                          </button>
-                          <button
-                            className="rounded-md border border-red-400/20 bg-red-500/10 px-3 py-1.5 text-xs text-red-200 transition-colors hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-red-400/50 light-theme:bg-red-50 light-theme:text-red-700 light-theme:hover:bg-red-100"
-                            onClick={() => void deleteTaggerModel()}
+                            className="relative overflow-hidden rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
+                            onClick={() => void prepareTaggerModel()}
                             disabled={taggerModelPreparing}
                           >
-                            Delete model files
+                            {taggerModelProgress ? <span className="absolute inset-y-0 left-0 bg-emerald-400/15 transition-[width] duration-200" style={{ width: `${taggerDownloadPercent}%` }} /> : null}
+                            <span className="relative">{taggerDownloadLabel}</span>
                           </button>
-                        </>
-                      ) : (
-                        <button
-                          className="relative overflow-hidden rounded-md border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45 light-theme:border-gray-700/50 light-theme:bg-gray-900 light-theme:text-white light-theme:hover:bg-gray-800 light-theme:hover:text-white"
-                          onClick={() => void prepareTaggerModel()}
-                          disabled={taggerModelPreparing}
-                        >
-                          {taggerModelProgress ? <span className="absolute inset-y-0 left-0 bg-emerald-400/15 transition-[width] duration-200" style={{ width: `${taggerDownloadPercent}%` }} /> : null}
-                          <span className="relative">{taggerDownloadLabel}</span>
-                        </button>
-                      )}
+                        )}
+                      </div>
+                      {taggerRuntimeProbe ? (
+                        <div className="text-right">
+                          <p className="text-xs text-gray-400">
+                            Runtime check <span className="ml-1.5 align-middle"><StatusPill tone="ready">Ready</StatusPill></span>
+                            {" "}<span className="ml-2 text-gray-600">· acceleration: {taggerRuntimeProbe.acceleration}</span>
+                          </p>
+                          <p className="mt-1 break-all font-mono text-xs text-gray-600">{taggerRuntimeProbe.session.file}</p>
+                        </div>
+                      ) : null}
                     </div>
                   </SettingsItem>
 
@@ -636,15 +651,6 @@ export function SettingsModal() {
                       </p>
                       {taggerModelProgress?.current_file ? <p className="mt-2 break-all text-xs text-gray-500">{taggerModelProgress.current_file}</p> : null}
                       {taggerModelError ? <p className="mt-2 text-xs text-amber-300">{taggerModelError}</p> : null}
-                      {taggerRuntimeProbe ? (
-                        <div className="mt-3">
-                          <p className="text-xs text-gray-400">
-                            Runtime check <span className="ml-1.5 align-middle"><StatusPill tone="ready">Ready</StatusPill></span>
-                            <span className="ml-2 text-gray-600">acceleration: {taggerRuntimeProbe.acceleration}</span>
-                          </p>
-                          <p className="mt-1.5 break-all font-mono text-xs text-gray-600">{taggerRuntimeProbe.session.file}</p>
-                        </div>
-                      ) : null}
                     </div>
                   </SettingsItem>
                 </SettingsGroup>
@@ -766,6 +772,8 @@ export function SettingsModal() {
               </div>
             ) : (
               <div className="mt-8 space-y-9">
+                {activeSection === "general" ? (
+                  <>
                 <SettingsGroup title="Appearance">
                   <SettingsItem label="Theme" description="Choose the app palette. Subtle Light uses a warm, low-glare background.">
                     <ThemedDropdown
@@ -781,6 +789,39 @@ export function SettingsModal() {
                   </SettingsItem>
                 </SettingsGroup>
 
+                <SettingsGroup title="Notifications">
+                  <SettingsItem
+                    label="Pause all notifications"
+                    description="Notifications are batched per folder — a single alert fires once activity settles. Mute individual folders from their right-click menu."
+                  >
+                    <button
+                      role="switch"
+                      aria-checked={notificationsPaused}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${notificationsPaused ? "bg-sky-500" : "bg-white/15"}`}
+                      onClick={() => setNotificationsPaused(!notificationsPaused)}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${notificationsPaused ? "translate-x-4" : "translate-x-0"}`} />
+                    </button>
+                  </SettingsItem>
+                  <SettingsItem
+                    label="Keep background pauses after restart"
+                    description="When enabled, folders you pause from the sidebar or background bar stay paused the next time Phokus opens."
+                  >
+                    <button
+                      role="switch"
+                      aria-checked={workerPausesPersist}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${workerPausesPersist ? "bg-sky-500" : "bg-white/15"}`}
+                      onClick={() => setWorkerPausesPersist(!workerPausesPersist)}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${workerPausesPersist ? "translate-x-4" : "translate-x-0"}`} />
+                    </button>
+                  </SettingsItem>
+                </SettingsGroup>
+                  </>
+                ) : null}
+
+                {activeSection === "media" ? (
+                  <>
                 <SettingsGroup title="Video playback">
                   <SettingsItem
                     label="Autoplay in lightbox"
@@ -859,6 +900,11 @@ export function SettingsModal() {
                   </SettingsItem>
                 </SettingsGroup>
 
+                  </>
+                ) : null}
+
+                {activeSection === "updates" ? (
+                  <>
                 <SettingsGroup title="Updates">
                   <SettingsItem
                     label={
@@ -953,7 +999,12 @@ export function SettingsModal() {
                   </SettingsItem>
                 </SettingsGroup>
 
-                <SettingsGroup title="Storage & notifications">
+                  </>
+                ) : null}
+
+                {activeSection === "storage" ? (
+                  <>
+                <SettingsGroup title="App data">
                   <SettingsItem
                     label="App data folder"
                     description="Open the folder in Explorer to inspect or back up the database, thumbnails, and models."
@@ -967,32 +1018,6 @@ export function SettingsModal() {
                       disabled={openingDataFolder}
                     >
                       {openingDataFolder ? "Opening..." : "Open data folder"}
-                    </button>
-                  </SettingsItem>
-                  <SettingsItem
-                    label="Pause all notifications"
-                    description="Notifications are batched per folder — a single alert fires once activity settles. Mute individual folders from their right-click menu."
-                  >
-                    <button
-                      role="switch"
-                      aria-checked={notificationsPaused}
-                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${notificationsPaused ? "bg-sky-500" : "bg-white/15"}`}
-                      onClick={() => setNotificationsPaused(!notificationsPaused)}
-                    >
-                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${notificationsPaused ? "translate-x-4" : "translate-x-0"}`} />
-                    </button>
-                  </SettingsItem>
-                  <SettingsItem
-                    label="Keep background pauses after restart"
-                    description="When enabled, folders you pause from the sidebar or background bar stay paused the next time Phokus opens."
-                  >
-                    <button
-                      role="switch"
-                      aria-checked={workerPausesPersist}
-                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${workerPausesPersist ? "bg-sky-500" : "bg-white/15"}`}
-                      onClick={() => setWorkerPausesPersist(!workerPausesPersist)}
-                    >
-                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${workerPausesPersist ? "translate-x-4" : "translate-x-0"}`} />
                     </button>
                   </SettingsItem>
                 </SettingsGroup>
@@ -1151,6 +1176,8 @@ export function SettingsModal() {
                     </button>
                   </SettingsItem>
                 </SettingsGroup>
+                  </>
+                ) : null}
               </div>
             )}
           </div>
