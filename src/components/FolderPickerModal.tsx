@@ -41,7 +41,7 @@ function buildBreadcrumbs(path: string | null): { label: string; path: string | 
   const windowsDrive = normalized.match(/^[A-Za-z]:/);
 
   if (windowsDrive) {
-    const drive = windowsDrive[0] + "\\";
+    const drive = windowsDrive[0];
     const rest = normalized.slice(2).split(/[\\/]+/).filter(Boolean);
     let current = drive;
     return [
