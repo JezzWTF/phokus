@@ -303,6 +303,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_image_tags_image_id ON image_tags(image_id);
         CREATE INDEX IF NOT EXISTS idx_image_tags_source ON image_tags(source);
         CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags(tag);
+        CREATE INDEX IF NOT EXISTS idx_image_tags_tag_image_id ON image_tags(tag, image_id);
 
         CREATE TABLE IF NOT EXISTS albums (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2446,32 +2447,42 @@ pub fn get_explore_tags(
     limit: usize,
 ) -> Result<Vec<ExploreTagEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT t.tag, COUNT(DISTINCT t.image_id) AS tag_count, MIN(t.image_id) AS representative_image_id,
-                MAX(CASE WHEN t.source = 'ai' THEN 1 ELSE 0 END) AS has_ai_source,
-                MAX(CASE WHEN t.source = 'user' THEN 1 ELSE 0 END) AS has_user_source
-         FROM image_tags t
-         JOIN images i ON i.id = t.image_id
-         WHERE (?1 IS NULL OR i.folder_id = ?1)
-         GROUP BY t.tag
-         HAVING COUNT(DISTINCT t.image_id) >= 1
-         ORDER BY tag_count DESC, t.tag ASC
-         LIMIT ?2",
+        "WITH tag_counts AS (
+             SELECT t.tag,
+                    COUNT(DISTINCT t.image_id) AS tag_count,
+                    MIN(t.image_id) AS representative_image_id,
+                    MAX(CASE WHEN t.source = 'ai' THEN 1 ELSE 0 END) AS has_ai_source,
+                    MAX(CASE WHEN t.source = 'user' THEN 1 ELSE 0 END) AS has_user_source
+             FROM image_tags t
+             JOIN images i ON i.id = t.image_id
+             WHERE (?1 IS NULL OR i.folder_id = ?1)
+             GROUP BY t.tag
+             HAVING COUNT(DISTINCT t.image_id) >= 1
+             ORDER BY tag_count DESC, t.tag ASC
+             LIMIT ?2
+         )
+         SELECT c.tag,
+                c.tag_count,
+                c.representative_image_id,
+                i.thumbnail_path,
+                c.has_ai_source,
+                c.has_user_source
+         FROM tag_counts c
+         JOIN images i ON i.id = c.representative_image_id
+         ORDER BY c.tag_count DESC, c.tag ASC",
     )?;
 
     let rows = stmt
         .query_map(params![folder_id, limit as i64], |row| {
             let representative_image_id = row.get::<_, i64>(2)?;
-            let thumbnail_path = get_image_by_id(conn, representative_image_id)
-                .ok()
-                .and_then(|image| image.thumbnail_path);
 
             Ok(ExploreTagEntry {
                 tag: row.get(0)?,
                 count: row.get(1)?,
                 representative_image_id,
-                thumbnail_path,
-                has_ai_source: row.get::<_, i64>(3)? != 0,
-                has_user_source: row.get::<_, i64>(4)? != 0,
+                thumbnail_path: row.get(3)?,
+                has_ai_source: row.get::<_, i64>(4)? != 0,
+                has_user_source: row.get::<_, i64>(5)? != 0,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;

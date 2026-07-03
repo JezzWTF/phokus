@@ -63,6 +63,9 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   so the info panel shows more at a glance with less scrolling.
 - **Faster Explore revisits** — returning to a folder's visual clusters should
   feel much faster now, even in big libraries.
+- **Calmer Tag Cloud during AI tagging** — Explore no longer keeps hammering the
+  tag list while a folder is actively being tagged, so tagging stays smoother and
+  the cloud catches up once the work settles.
 - **Faster first-time clustering** — large libraries build their first visual
   clusters much more quickly, while still keeping the groups nicely balanced.
 - **Better tag browsing** — the Tag manager now has live search, sorting

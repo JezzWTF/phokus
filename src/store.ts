@@ -651,6 +651,34 @@ let galleryRequestToken = 0;
 let visualClusterRequestToken = 0;
 let exploreTagRequestToken = 0;
 let exploreTagRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+const EXPLORE_TAG_REFRESH_IDLE_MS = 900;
+const EXPLORE_TAG_REFRESH_WHILE_TAGGING_MS = 4500;
+
+function scopeHasTaggingPending(
+  progressByFolder: Record<number, FolderJobProgress>,
+  folderId: number | null,
+): boolean {
+  if (folderId === null) {
+    return Object.values(progressByFolder).some((progress) => progress.tagging_pending > 0);
+  }
+  return (progressByFolder[folderId]?.tagging_pending ?? 0) > 0;
+}
+
+function taggingProgressAffectsScope(progressFolderId: number, scopeFolderId: number | null): boolean {
+  return scopeFolderId === null || scopeFolderId === progressFolderId;
+}
+
+function imagesAffectScope(images: ImageRecord[], scopeFolderId: number | null): boolean {
+  return scopeFolderId === null || images.some((image) => image.folder_id === scopeFolderId);
+}
+
+function scheduleExploreTagRefresh(load: () => void, delayMs: number) {
+  if (exploreTagRefreshTimer) clearTimeout(exploreTagRefreshTimer);
+  exploreTagRefreshTimer = setTimeout(() => {
+    exploreTagRefreshTimer = null;
+    load();
+  }, delayMs);
+}
 
 function initialAiCaptionsEnabled(): boolean {
   if (typeof window === "undefined") return false;
@@ -1498,6 +1526,9 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
   loadExploreTags: async (options) => {
     const { selectedFolderId, exploreTagsFolderId, exploreTagLoading } = get();
     const force = options?.force ?? false;
+    if (!force && exploreTagLoading) {
+      return;
+    }
     if (!force && !exploreTagLoading && exploreTagsFolderId !== undefined && exploreTagsFolderId === selectedFolderId) {
       return;
     }
@@ -2984,9 +3015,18 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
             notificationTimers.set(taggingKey, setTimeout(() => {
               notificationTimers.delete(taggingKey);
               void notifyTaskComplete("AI tagging complete", body);
-              // New tags landed — invalidate Explore tag cache.
-              set({ exploreTagsFolderId: undefined });
             }, NOTIFICATION_DEBOUNCE_MS));
+            const state = get();
+            if (taggingProgressAffectsScope(progress.folder_id, state.selectedFolderId)) {
+              // New tags landed — refresh the Explore tag cloud after the worker
+              // settles instead of waiting for the user to revisit Explore.
+              set({ exploreTagsFolderId: undefined });
+              if (state.activeView === "explore" && state.exploreMode === "tags") {
+                scheduleExploreTagRefresh(() => {
+                  void get().loadExploreTags({ force: true });
+                }, EXPLORE_TAG_REFRESH_IDLE_MS);
+              }
+            }
           } else if (previous.tagging_pending === 0 && progress.tagging_pending > 0) {
             clearTimeout(notificationTimers.get(taggingKey));
             notificationTimers.delete(taggingKey);
@@ -3067,15 +3107,16 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     const unlistenThumbnails = await listen<ThumbnailBatch>("media-updated", (event) => {
       const batch = event.payload;
       const taggingUpdated = batch.images.some((image) => image.ai_tagged_at !== null || image.ai_tagger_error !== null);
-      if (taggingUpdated) {
+      const state = get();
+      if (taggingUpdated && imagesAffectScope(batch.images, state.selectedFolderId)) {
         set({ exploreTagsFolderId: undefined });
-        if (get().activeView === "explore") {
-          if (!exploreTagRefreshTimer) {
-            exploreTagRefreshTimer = setTimeout(() => {
-              exploreTagRefreshTimer = null;
-              void get().loadExploreTags({ force: true });
-            }, 700);
-          }
+        if (state.activeView === "explore" && state.exploreMode === "tags") {
+          const delay = scopeHasTaggingPending(state.mediaJobProgress, state.selectedFolderId)
+            ? EXPLORE_TAG_REFRESH_WHILE_TAGGING_MS
+            : EXPLORE_TAG_REFRESH_IDLE_MS;
+          scheduleExploreTagRefresh(() => {
+            void get().loadExploreTags({ force: true });
+          }, delay);
         }
       }
 
@@ -3179,6 +3220,10 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     );
 
     return () => {
+      if (exploreTagRefreshTimer) {
+        clearTimeout(exploreTagRefreshTimer);
+        exploreTagRefreshTimer = null;
+      }
       unlistenProgress();
       unlistenMediaJobs();
       unlistenCaptionModelProgress();
