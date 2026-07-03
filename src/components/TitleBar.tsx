@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useGalleryStore, AppTheme } from "../store";
+import { ContextMenu, MenuItem, MenuLabel } from "./menu";
 import { PhokusMark } from "./PhokusMark";
 import { Tooltip } from "./Tooltip";
 
@@ -57,28 +58,13 @@ export function TitleBar() {
   // Right-clicking the settings cog opens a quick theme switcher, anchored under
   // the cog so it never overflows the right edge of the window.
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
-  const themeMenuRef = useRef<HTMLDivElement>(null);
-  const [themeMenu, setThemeMenu] = useState<{ top: number; right: number } | null>(null);
-
-  useEffect(() => {
-    if (!themeMenu) return;
-    const handleDown = (e: MouseEvent) => {
-      if (themeMenuRef.current && !themeMenuRef.current.contains(e.target as Node)) setThemeMenu(null);
-    };
-    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") setThemeMenu(null); };
-    document.addEventListener("mousedown", handleDown);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleDown);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [themeMenu]);
+  const [themeMenu, setThemeMenu] = useState<{ x: number; y: number } | null>(null);
 
   const handleSettingsContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     const rect = settingsBtnRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setThemeMenu({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    setThemeMenu({ x: rect.right, y: rect.bottom + 4 });
   };
 
   useEffect(() => {
@@ -188,32 +174,17 @@ export function TitleBar() {
 
       {/* Quick theme switcher — opened by right-clicking the settings cog. */}
       {themeMenu && (
-        <div
-          ref={themeMenuRef}
-          className="fixed z-50 min-w-[170px] py-1 px-1 rounded-lg bg-gray-900 border border-white/10 shadow-xl shadow-black/50"
-          style={{ top: themeMenu.top, right: themeMenu.right, WebkitAppRegion: "no-drag" } as React.CSSProperties}
-        >
-          <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Theme</div>
-          {THEME_OPTIONS.map((opt) => {
-            const active = theme === opt.value;
-            return (
-              <button
-                key={opt.value}
-                className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-1.5 text-left text-[12px] transition-colors ${
-                  active ? "bg-white/8 text-white" : "text-gray-300 hover:bg-white/8 hover:text-white"
-                }`}
-                onClick={() => { setTheme(opt.value); setThemeMenu(null); }}
-              >
-                {opt.label}
-                {active && (
-                  <svg className="h-3.5 w-3.5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
-              </button>
-            );
-          })}
-        </div>
+        <ContextMenu x={themeMenu.x} y={themeMenu.y} size="sm" align="end" onClose={() => setThemeMenu(null)}>
+          <MenuLabel>Theme</MenuLabel>
+          {THEME_OPTIONS.map((opt) => (
+            <MenuItem
+              key={opt.value}
+              label={opt.label}
+              checked={theme === opt.value}
+              onSelect={() => setTheme(opt.value)}
+            />
+          ))}
+        </ContextMenu>
       )}
     </div>
   );

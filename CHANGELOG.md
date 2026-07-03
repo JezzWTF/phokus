@@ -59,6 +59,9 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- **Consistent right-click menus** — the folder, album, image, and theme menus
+  now share one look and behavior: they stay inside the window instead of
+  spilling off the edge, close on Escape, and support proper submenus.
 - **Neater lightbox details** — image and video metadata now sits in two columns,
   so the info panel shows more at a glance with less scrolling.
 - **Faster Explore revisits** — returning to a folder's visual clusters should

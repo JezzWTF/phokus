@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ImageRecord, tileSizeForZoom, useGalleryStore } from "../store";
-import { ContextMenu, ImageTile } from "./Gallery";
+import { ImageTile } from "./Gallery";
+import { ImageContextMenu } from "./ImageContextMenu";
 import { Tooltip } from "./Tooltip";
 
 const GAP = 6;
@@ -204,22 +205,6 @@ export function Timeline() {
     return () => el.removeEventListener("scroll", handleScroll);
   }, [handleScroll]);
 
-  useEffect(() => {
-    const close = (e: PointerEvent) => {
-      if ((e.target as HTMLElement | null)?.closest("[data-gallery-context-menu]")) return;
-      setContextMenu(null);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setContextMenu(null);
-    };
-    window.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", close);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, []);
-
   const scrollToGroup = useCallback(
     (groupIndex: number) => {
       const row = groupFirstRowRef.current[groupIndex] ?? 0;
@@ -353,7 +338,7 @@ export function Timeline() {
       ) : null}
 
       {contextMenu ? (
-        <ContextMenu
+        <ImageContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
           image={contextMenu.image}

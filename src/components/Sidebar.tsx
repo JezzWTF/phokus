@@ -3,87 +3,12 @@ import { Reorder, useDragControls } from "framer-motion";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useGalleryStore, Folder, Album, IndexProgress } from "../store";
 import { ThemedDropdown } from "./ThemedDropdown";
+import { ContextMenu, MenuItem, MenuSeparator } from "./menu";
 import { mediaSrc } from "../lib/mediaSrc";
 import { Tooltip } from "./Tooltip";
 
-interface ContextMenuState {
-  folderId: number;
-  x: number;
-  y: number;
-}
-
 type LibrarySort = "az" | "za" | "custom";
 const LIBRARY_SORT_KEY = "phokus-library-sort";
-
-function FolderContextMenu({
-  menu,
-  folder,
-  isMuted,
-  isPausedAll,
-  onClose,
-  onRename,
-  onReindex,
-  onLocate,
-  onToggleMute,
-  onTogglePauseAll,
-  onRemove,
-}: {
-  menu: ContextMenuState;
-  folder: Folder;
-  isMuted: boolean;
-  isPausedAll: boolean;
-  onClose: () => void;
-  onRename: () => void;
-  onReindex: () => void;
-  onLocate: () => void;
-  onToggleMute: () => void;
-  onTogglePauseAll: () => void;
-  onRemove: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("mousedown", handleDown);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleDown);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [onClose]);
-
-  const item = (label: string, onClick: () => void, danger = false) => (
-    <button
-      className={`w-full text-left px-3 py-1.5 text-[12px] rounded-md transition-colors ${
-        danger
-          ? "text-red-400 hover:bg-red-500/15 hover:text-red-300"
-          : "text-gray-300 hover:bg-white/8 hover:text-white"
-      }`}
-      onClick={() => { onClick(); onClose(); }}
-    >
-      {label}
-    </button>
-  );
-
-  return (
-    <div
-      ref={ref}
-      className="fixed z-50 min-w-[160px] py-1 px-1 rounded-lg bg-gray-900 border border-white/10 shadow-xl shadow-black/50"
-      style={{ left: menu.x, top: menu.y }}
-    >
-      {item("Reindex", onReindex)}
-      {item("Rename", onRename)}
-      {item(isPausedAll ? "Resume background work" : "Pause background work", onTogglePauseAll)}
-      {item(isMuted ? "Unmute notifications" : "Mute notifications", onToggleMute)}
-      {folder.scan_error && item("Locate Folder", onLocate)}
-      <div className="my-1 border-t border-white/[0.06]" />
-      {item("Remove from app", onRemove, true)}
-    </div>
-  );
-}
 
 function FolderItem({
   folder,
@@ -116,7 +41,7 @@ function FolderItem({
   const isIndexing = progress && !progress.done;
   const isMissing = !!folder.scan_error && !isIndexing;
 
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(folder.name);
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
@@ -132,10 +57,7 @@ function FolderItem({
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    // Keep menu inside viewport
-    const x = Math.min(e.clientX, window.innerWidth - 180);
-    const y = Math.min(e.clientY, window.innerHeight - 160);
-    setContextMenu({ folderId: folder.id, x, y });
+    setContextMenu({ x: e.clientX, y: e.clientY });
   };
 
   const handleLocateFolder = async () => {
@@ -325,81 +247,24 @@ function FolderItem({
         </div>
       )}
 
-      {contextMenu && contextMenu.folderId === folder.id && (
-        <FolderContextMenu
-          menu={contextMenu}
-          folder={folder}
-          isMuted={isMuted}
-          isPausedAll={isPausedAll}
-          onClose={() => setContextMenu(null)}
-          onRename={() => setRenaming(true)}
-          onReindex={() => void reindexFolder(folder.id)}
-          onLocate={() => void handleLocateFolder()}
-          onToggleMute={() => toggleMutedFolder(folder.id)}
-          onTogglePauseAll={() => setAllWorkersPaused(folder.id, !isPausedAll)}
-          onRemove={() => setConfirmingRemoval(true)}
-        />
+      {contextMenu && (
+        <ContextMenu x={contextMenu.x} y={contextMenu.y} size="sm" onClose={() => setContextMenu(null)}>
+          <MenuItem label="Reindex" onSelect={() => void reindexFolder(folder.id)} />
+          <MenuItem label="Rename" onSelect={() => setRenaming(true)} />
+          <MenuItem
+            label={isPausedAll ? "Resume background work" : "Pause background work"}
+            onSelect={() => setAllWorkersPaused(folder.id, !isPausedAll)}
+          />
+          <MenuItem
+            label={isMuted ? "Unmute notifications" : "Mute notifications"}
+            onSelect={() => toggleMutedFolder(folder.id)}
+          />
+          {folder.scan_error ? <MenuItem label="Locate Folder" onSelect={() => void handleLocateFolder()} /> : null}
+          <MenuSeparator />
+          <MenuItem label="Remove from app" danger onSelect={() => setConfirmingRemoval(true)} />
+        </ContextMenu>
       )}
     </Reorder.Item>
-  );
-}
-
-function AlbumContextMenu({
-  x,
-  y,
-  onClose,
-  onRename,
-  onDelete,
-}: {
-  x: number;
-  y: number;
-  onClose: () => void;
-  onRename: () => void;
-  onDelete: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const handleDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("mousedown", handleDown);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleDown);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [onClose]);
-
-  const item = (label: string, onClick: () => void, danger = false) => (
-    <button
-      className={`w-full text-left px-3 py-1.5 text-[12px] rounded-md transition-colors ${
-        danger
-          ? "text-red-400 hover:bg-red-500/15 hover:text-red-300"
-          : "text-gray-300 hover:bg-white/8 hover:text-white"
-      }`}
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-        onClose();
-      }}
-    >
-      {label}
-    </button>
-  );
-
-  return (
-    <div
-      ref={ref}
-      className="fixed z-50 min-w-[160px] py-1 px-1 rounded-lg bg-gray-900 border border-white/10 shadow-xl shadow-black/50"
-      style={{ left: x, top: y }}
-    >
-      {item("Rename", onRename)}
-      <div className="my-1 border-t border-white/[0.06]" />
-      {item("Delete album", onDelete, true)}
-    </div>
   );
 }
 
@@ -485,7 +350,7 @@ function AlbumItem({
         if (manageMode) return;
         e.preventDefault();
         e.stopPropagation();
-        setMenu({ x: Math.min(e.clientX, window.innerWidth - 180), y: Math.min(e.clientY, window.innerHeight - 120) });
+        setMenu({ x: e.clientX, y: e.clientY });
       }}
     >
       {/* Manage-mode selection checkbox */}
@@ -578,13 +443,11 @@ function AlbumItem({
       ) : null}
 
       {menu ? (
-        <AlbumContextMenu
-          x={menu.x}
-          y={menu.y}
-          onClose={() => setMenu(null)}
-          onRename={() => setRenaming(true)}
-          onDelete={() => setConfirmingRemoval(true)}
-        />
+        <ContextMenu x={menu.x} y={menu.y} size="sm" onClose={() => setMenu(null)}>
+          <MenuItem label="Rename" onSelect={() => setRenaming(true)} />
+          <MenuSeparator />
+          <MenuItem label="Delete album" danger onSelect={() => setConfirmingRemoval(true)} />
+        </ContextMenu>
       ) : null}
     </div>
   );
