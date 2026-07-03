@@ -1,5 +1,5 @@
 import { ImageRecord, useGalleryStore } from "../store";
-import { ContextMenu, MenuItem, MenuLabel, MenuSeparator } from "./menu";
+import { ContextMenu, MenuItem, MenuLabel, MenuSeparator, SubMenu } from "./menu";
 import { Tooltip } from "./Tooltip";
 
 /** Right-click menu for an image tile. Shared by the Gallery grid and the Timeline. */
@@ -17,6 +17,8 @@ export function ImageContextMenu({
   const openImage = useGalleryStore((state) => state.openImage);
   const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
   const findSimilar = useGalleryStore((state) => state.findSimilar);
+  const albums = useGalleryStore((state) => state.albums);
+  const addToAlbum = useGalleryStore((state) => state.addToAlbum);
   const canFindSimilar = image.embedding_status === "ready";
 
   return (
@@ -31,6 +33,20 @@ export function ImageContextMenu({
         disabled={!canFindSimilar}
         onSelect={() => findSimilar(image.id, image.folder_id)}
       />
+      <SubMenu label="Add to Album" panelClassName="max-h-64 overflow-y-auto">
+        {albums.length === 0 ? (
+          <MenuItem label="No albums yet" disabled />
+        ) : (
+          albums.map((album) => (
+            <MenuItem
+              key={album.id}
+              label={album.name}
+              hint={album.image_count.toLocaleString()}
+              onSelect={() => void addToAlbum(album.id, [image.id])}
+            />
+          ))
+        )}
+      </SubMenu>
       <MenuSeparator />
       <MenuLabel>Rating</MenuLabel>
       <div className="flex items-center gap-0.5 px-2 pb-1.5">

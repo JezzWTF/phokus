@@ -56,12 +56,16 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   from whatever collection you are already browsing. Videos are skipped, controls
   tuck themselves away after a few seconds, and Settings lets you pick the pace
   and whether playback follows the current order or goes random.
+- **Add to album from the right-click menu** — right-click any image in the
+  Gallery or Timeline and file it straight into an album from the new "Add to
+  Album" submenu. One image, one click, zero ceremony.
 
 ### Changed
 
-- **Consistent right-click menus** — the folder, album, image, and theme menus
-  now share one look and behavior: they stay inside the window instead of
-  spilling off the edge, close on Escape, and support proper submenus.
+- **Right-click menus got their act together** — images, folders, albums, and
+  the theme switcher now share one menu style with one set of manners: they
+  stay on screen instead of wandering off the edge, all close on Escape, and
+  they can do proper submenus now.
 - **Neater lightbox details** — image and video metadata now sits in two columns,
   so the info panel shows more at a glance with less scrolling.
 - **Faster Explore revisits** — returning to a folder's visual clusters should
