@@ -2159,6 +2159,7 @@ pub struct SetTaggerModelParams {
 #[derive(Deserialize)]
 pub struct SetTaggerThresholdParams {
     pub threshold: f32,
+    pub model: Option<TaggerModel>,
 }
 
 #[derive(Deserialize)]
@@ -2258,7 +2259,11 @@ pub async fn set_tagger_threshold(
     params: SetTaggerThresholdParams,
 ) -> Result<f32, String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    tagger::set_tagger_threshold(&app_dir, params.threshold).map_err(|e| e.to_string())
+    match params.model {
+        Some(model) => tagger::set_tagger_threshold_for_model(&app_dir, model, params.threshold),
+        None => tagger::set_tagger_threshold(&app_dir, params.threshold),
+    }
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

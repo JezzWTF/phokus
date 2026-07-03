@@ -75,7 +75,7 @@ export function StepAiFeatures() {
                 The AI tagger model labels images so you can search with{" "}
                 <code className="rounded bg-gray-900 px-1 py-0.5 text-[11px] text-gray-200 light-theme:bg-gray-800 light-theme:text-gray-100">/t</code> — tags look like:
               </p>
-              <div className="mt-3 flex flex-wrap items-center gap-1 rounded-lg border border-white/[0.07] p-0.5 light-theme:border-gray-300/80">
+              <div className="mt-3 inline-flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-white/[0.07] p-0.5 light-theme:border-gray-300/80">
                 {(["wd", "joytag"] as const).map((model) => (
                   <TaggerModelChoice
                     key={model}

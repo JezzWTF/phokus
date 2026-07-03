@@ -589,7 +589,7 @@ interface GalleryState {
   loadTaggerModel: () => Promise<void>;
   setTaggerModel: (model: TaggerModel) => Promise<void>;
   loadTaggerThreshold: () => Promise<void>;
-  setTaggerThreshold: (threshold: number) => Promise<void>;
+  setTaggerThreshold: (threshold: number, model?: TaggerModel) => Promise<void>;
   loadTaggerBatchSize: () => Promise<void>;
   setTaggerBatchSize: (batchSize: number) => Promise<void>;
   probeTaggerRuntime: () => Promise<void>;
@@ -2326,11 +2326,14 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     const taggerModel = await invoke<TaggerModel>("set_tagger_model", {
       params: { model },
     });
-    // Switching models changes which files are required on disk, so refresh the
-    // status too — the download/ready UI must reflect the newly-selected model.
+    // Switching models changes both readiness and the active threshold setting,
+    // so refresh them together for the selected model.
     try {
-      const taggerModelStatus = await invoke<TaggerModelStatus>("get_tagger_model_status");
-      set({ taggerModel, taggerModelStatus, taggerModelError: null, taggerRuntimeProbe: null });
+      const [taggerModelStatus, taggerThreshold] = await Promise.all([
+        invoke<TaggerModelStatus>("get_tagger_model_status"),
+        invoke<number>("get_tagger_threshold"),
+      ]);
+      set({ taggerModel, taggerModelStatus, taggerThreshold, taggerModelError: null, taggerRuntimeProbe: null });
     } catch (error) {
       set({ taggerModel, taggerRuntimeProbe: null, taggerModelError: String(error) });
     }
@@ -2345,11 +2348,13 @@ export const useGalleryStore = create<GalleryState>((set, get) => ({
     }
   },
 
-  setTaggerThreshold: async (threshold) => {
+  setTaggerThreshold: async (threshold, model) => {
     const taggerThreshold = await invoke<number>("set_tagger_threshold", {
-      params: { threshold },
+      params: { threshold, model },
     });
-    set({ taggerThreshold });
+    if (!model || get().taggerModel === model) {
+      set({ taggerThreshold });
+    }
   },
 
   loadTaggerBatchSize: async () => {

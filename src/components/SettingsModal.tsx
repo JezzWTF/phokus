@@ -461,6 +461,9 @@ export function SettingsModal() {
                             current={taggerModel}
                             onSelect={(nextModel) => {
                               if (nextModel === taggerModel) return;
+                              setTaggerThresholdDraft(null);
+                              setTaggerThresholdError(null);
+                              if (thresholdErrorTimerRef.current) clearTimeout(thresholdErrorTimerRef.current);
                               setTaggerModelSwitching(true);
                               setTaggerModelSwitchError(null);
                               void setTaggerModel(nextModel)
@@ -562,12 +565,12 @@ export function SettingsModal() {
                         className="w-20 rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white focus:border-white/20 focus:outline-none"
                         value={thresholdDisplay}
                         onChange={(event) => setTaggerThresholdDraft(event.target.value)}
-                        onBlur={() => {
-                          const value = parseFloat(thresholdDisplay);
+                        onBlur={(event) => {
+                          const value = parseFloat(event.currentTarget.value);
                           if (!isNaN(value) && value >= 0.05 && value <= 0.99) {
                             setTaggerThresholdError(null);
                             setTaggerThresholdSaving(true);
-                            void setTaggerThreshold(value)
+                            void setTaggerThreshold(value, taggerModel)
                               .catch((error: unknown) => setTaggerThresholdError(String(error)))
                               .finally(() => {
                                 setTaggerThresholdDraft(null);
@@ -584,7 +587,7 @@ export function SettingsModal() {
                       {taggerThresholdError ? (
                         <p className="text-[11px] text-amber-300">{taggerThresholdError}</p>
                       ) : (
-                        <p className="text-[11px] text-gray-600">{taggerThresholdSaving ? "Saving..." : `Default: ${taggerModel === "joytag" ? "0.4" : "0.35"}`}</p>
+                        <p className="text-[11px] text-gray-600">{taggerThresholdSaving ? "Saving..." : `Default: ${TAGGER_MODELS[taggerModel].defaultThreshold}`}</p>
                       )}
                     </div>
                   </SettingsItem>

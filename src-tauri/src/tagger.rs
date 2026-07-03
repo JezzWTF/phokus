@@ -16,6 +16,7 @@ pub const WD_TAGGER_MODEL_NAME: &str = "wd-swinv2-tagger-v3";
 
 const TAGGER_ACCELERATION_FILE: &str = "settings/tagger_acceleration.txt";
 const TAGGER_THRESHOLD_FILE: &str = "settings/tagger_threshold.txt";
+const JOYTAG_THRESHOLD_FILE: &str = "settings/joytag_threshold.txt";
 const TAGGER_BATCH_SIZE_FILE: &str = "settings/tagger_batch_size.txt";
 const TAGGER_MODEL_FILE: &str = "settings/tagger_model.txt";
 
@@ -27,8 +28,7 @@ pub const JOYTAG_MODEL_NAME: &str = "joytag";
 // NCHW layout (not NHWC). These are the OpenAI CLIP normalization constants.
 const JOYTAG_MEAN: [f32; 3] = [0.481_454_66, 0.457_827_5, 0.408_210_73];
 const JOYTAG_STD: [f32; 3] = [0.268_629_54, 0.261_302_6, 0.275_777_1];
-// JoyTag's recommended detection threshold (used as the default; the user's
-// tagger_threshold setting still overrides it).
+// JoyTag's recommended detection threshold.
 const JOYTAG_DEFAULT_THRESHOLD: f32 = 0.4;
 
 // Shared ONNX Runtime DLLs (live in the caption model's `onnxruntime/` dir and
@@ -64,8 +64,8 @@ pub const TAGGER_INFER_CHUNK: usize = 4;
 /// claim the GPU/CPU between dispatches. Negligible against per-chunk inference.
 pub const TAGGER_INFER_YIELD_MS: u64 = 40;
 
-/// Set to `true` by `set_tagger_acceleration` so the tagging worker loop
-/// knows to drop its cached `WdTagger` and reload with the new EP.
+/// Set to `true` by tagger setting changes so the tagging worker loop knows to
+/// drop its cached model session and reload with the current settings.
 pub static TAGGER_SESSION_DIRTY: AtomicBool = AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------
@@ -109,6 +109,20 @@ impl TaggerModel {
         match self {
             Self::Wd => "wd",
             Self::JoyTag => "joytag",
+        }
+    }
+
+    fn threshold_file(self) -> &'static str {
+        match self {
+            Self::Wd => TAGGER_THRESHOLD_FILE,
+            Self::JoyTag => JOYTAG_THRESHOLD_FILE,
+        }
+    }
+
+    fn default_threshold(self) -> f32 {
+        match self {
+            Self::Wd => DEFAULT_THRESHOLD,
+            Self::JoyTag => JOYTAG_DEFAULT_THRESHOLD,
         }
     }
 
@@ -280,21 +294,33 @@ pub fn set_tagger_acceleration(
     Ok(acceleration)
 }
 
-pub fn tagger_threshold(app_data_dir: &Path) -> f32 {
-    let path = app_data_dir.join(TAGGER_THRESHOLD_FILE);
+fn tagger_threshold_for_model(app_data_dir: &Path, model: TaggerModel) -> f32 {
+    let path = app_data_dir.join(model.threshold_file());
     let Ok(value) = std::fs::read_to_string(path) else {
-        return DEFAULT_THRESHOLD;
+        return model.default_threshold();
     };
     value
         .trim()
         .parse::<f32>()
-        .unwrap_or(DEFAULT_THRESHOLD)
+        .unwrap_or_else(|_| model.default_threshold())
         .clamp(0.01, 1.0)
 }
 
+pub fn tagger_threshold(app_data_dir: &Path) -> f32 {
+    tagger_threshold_for_model(app_data_dir, tagger_model(app_data_dir))
+}
+
 pub fn set_tagger_threshold(app_data_dir: &Path, threshold: f32) -> Result<f32> {
+    set_tagger_threshold_for_model(app_data_dir, tagger_model(app_data_dir), threshold)
+}
+
+pub fn set_tagger_threshold_for_model(
+    app_data_dir: &Path,
+    model: TaggerModel,
+    threshold: f32,
+) -> Result<f32> {
     let clamped = threshold.clamp(0.01, 1.0);
-    let path = app_data_dir.join(TAGGER_THRESHOLD_FILE);
+    let path = app_data_dir.join(model.threshold_file());
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -1057,17 +1083,10 @@ fn load_joytag_labels(path: &Path) -> Result<Vec<String>> {
     Ok(labels)
 }
 
-/// JoyTag detection threshold. Honours the shared `tagger_threshold` setting if
-/// the user has set it, otherwise uses JoyTag's recommended default (0.4).
+/// JoyTag detection threshold. Uses JoyTag's own setting so WD tuning does not
+/// leak into the general/photo-friendly model.
 fn joytag_threshold(app_data_dir: &Path) -> f32 {
-    match std::fs::read_to_string(app_data_dir.join(TAGGER_THRESHOLD_FILE)) {
-        Ok(value) => value
-            .trim()
-            .parse::<f32>()
-            .unwrap_or(JOYTAG_DEFAULT_THRESHOLD)
-            .clamp(0.01, 1.0),
-        Err(_) => JOYTAG_DEFAULT_THRESHOLD,
-    }
+    tagger_threshold_for_model(app_data_dir, TaggerModel::JoyTag)
 }
 
 fn sigmoid(x: f32) -> f32 {

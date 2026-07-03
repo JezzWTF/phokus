@@ -19,6 +19,10 @@ let nextAlbumId = 100;
 let nextTagId = 10_000;
 let mockTaggerModel: TaggerModel = db.scenario === "joytag-unready" ? "joytag" : "wd";
 let mockTaggerReady = db.scenario !== "unready" && db.scenario !== "joytag-unready";
+const mockTaggerThresholds: Record<TaggerModel, number> = {
+  wd: 0.35,
+  joytag: 0.4,
+};
 
 type AnyPayload = Record<string, any> | undefined;
 type Rgb = [number, number, number];
@@ -40,6 +44,10 @@ const mockPalette: Rgb[] = [
 
 function isRgb(value: unknown): value is Rgb {
   return Array.isArray(value) && value.length === 3 && value.every((entry) => typeof entry === "number");
+}
+
+function isTaggerModel(value: unknown): value is TaggerModel {
+  return value === "wd" || value === "joytag";
 }
 
 function colorDistanceSq(left: Rgb, right: Rgb): number {
@@ -528,8 +536,13 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
     case "set_tagger_acceleration":
       return p.acceleration ?? "auto";
     case "get_tagger_threshold":
+      return mockTaggerThresholds[mockTaggerModel];
     case "set_tagger_threshold":
-      return p.threshold ?? 0.35;
+      {
+        const model = isTaggerModel(p.model) ? p.model : mockTaggerModel;
+        mockTaggerThresholds[model] = p.threshold ?? mockTaggerThresholds[model];
+        return mockTaggerThresholds[model];
+      }
     case "get_tagger_batch_size":
     case "set_tagger_batch_size":
       return p.batch_size ?? 8;
