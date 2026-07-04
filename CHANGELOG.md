@@ -31,9 +31,7 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   an album can now stay inside that album, jump back to the source folder, or
   search everything.
 - **Tag manager** — Explore's Tag Cloud now has a Manage mode for renaming,
-  merging, and deleting tags across the whole library. There is also an "Open tag
-  manager" shortcut in Settings -> AI Workspace when you want to get straight to
-  the cleanup.
+  merging, and deleting tags across the whole library.
 - **Camera info in the lightbox** — the info panel now shows EXIF details like
   camera, lens, aperture, shutter speed, ISO, and focal length. Geotagged photos
   also get a browser link for their GPS coordinates, and already-indexed images
@@ -43,7 +41,6 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Choose your tagging model** — Settings -> AI Workspace now lets you pick
   between the anime-focused WD tagger and JoyTag, which is better suited to photo
   libraries and stronger on NSFW concepts (if that's your thing, we don't judge).
-  Models download only when needed, and tags remember which model created them.
 - **Related tags in Explore** — Hover over a tag in the Tag Cloud to see the tags
   that most often appear with it, complete with connection lines and image counts.
   Handy for finding little clusters you did not know were there.
@@ -53,9 +50,7 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Editable folder path** — the folder picker now has an address bar, so you can
   paste a path directly while still using breadcrumbs for quick jumps.
 - **Slideshow mode** — turn the lightbox into a fullscreen, image-only slideshow
-  from whatever collection you are already browsing. Videos are skipped, controls
-  tuck themselves away after a few seconds, and Settings lets you pick the pace
-  and whether playback follows the current order or goes random.
+  from whatever collection you are already browsing.
 - **Add to album from the right-click menu** — right-click any image in the
   Gallery or Timeline and file it straight into an album from the new "Add to
   Album" submenu. One image, one click, zero ceremony.
@@ -131,6 +126,9 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   cleaned up on startup. Your manually-added tags are left alone.
 - **Selected Folders starts empty** — choosing "Selected Folders" for AI tagging
   no longer pre-selects the first folder. You decide exactly what gets queued.
+- **A couple of tiny UI papercuts are gone** — the zoom buttons now show the
+  right tile size when you hover them, and the folder picker no longer adds an
+  odd trailing slash to Windows drive breadcrumbs.
 
 ## [0.1.1] — 2026-06-23
 

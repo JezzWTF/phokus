@@ -33,7 +33,7 @@ There are no test suites configured.
 
 ### Frontend (`src/`)
 
-- **`store.ts`** — single Zustand store (`useGalleryStore`) that owns all app state and all `invoke()` calls to the Tauri backend. Every feature (folders, images, search, similar images, tags, captions, tagger, duplicates) is implemented as store actions here. React components are thin consumers.
+- **`src/store/`** — single Zustand store (`useGalleryStore`) that owns all app state and all `invoke()` calls to the Tauri backend, split into per-feature slices combined in `index.ts` (which exports `useGalleryStore` and the `GalleryStore` type). `types.ts` holds all interfaces/type unions (including `ImageRecord`); `helpers.ts` holds pure functions and cross-slice module state (search parsing, image sort/merge, request-token guards). Slices: `librarySlice` (folders), `gallerySlice` (image paging/filters/bulk actions), `searchSlice` (search + similar-images), `exploreSlice` (visual clusters, tag cloud, tags), `albumSlice`, `duplicateSlice`, `taggerSlice`, `captionSlice`, `settingsSlice`, `appSlice` (updates, onboarding, ffmpeg, worker pauses); `events.ts` wires the Tauri event listeners (`subscribeToProgress`). Components still call `useGalleryStore(s => s.field)` against one flat state object — the slice split is internal. React components are thin consumers.
 - **`App.tsx`** — sets up Tauri event listeners (`subscribeToProgress`) and renders the top-level layout (sidebar + active view).
 - **`src/components/`** — UI components: `Gallery`, `Lightbox`, `Sidebar`, `Toolbar`, `Timeline`, `ExploreView`, `DuplicateFinder`, `BackgroundTasks`, `SettingsModal`, `TitleBar`.
 - **`src/components/menu/`** — shared floating-UI primitives: `useDismissable`, `MenuPanel`/`MenuItem`/`SubMenu`, the portal-based `ContextMenu`, and the app-wide `Dropdown`. Build menus, dropdowns, and popovers on these instead of hand-rolling.
@@ -44,7 +44,7 @@ There are no test suites configured.
 
 ### Search modes
 
-The search bar supports prefix syntax parsed by `parseSearchValue` in `store.ts`:
+The search bar supports prefix syntax parsed by `parseSearchValue` in `src/store/helpers.ts`:
 - No prefix / `f:` — filename search (paginated, DB-backed)
 - `/s <query>` or `s: <query>` — semantic (embedding) search
 - `/t <tag>` or `t: <tag>` — tag search
@@ -88,7 +88,7 @@ Database: SQLite with WAL mode, stored in the Tauri app data directory as `galle
 
 ### Key types
 
-`ImageRecord` (mirrored in `store.ts` and `db.rs`) is the central data type. It carries embedding status, tagging status, caption data, and media metadata. The frontend type must stay in sync with the Rust struct serialization.
+`ImageRecord` (mirrored in `src/store/types.ts` and `db.rs`) is the central data type. It carries embedding status, tagging status, caption data, and media metadata. The frontend type must stay in sync with the Rust struct serialization.
 
 ## Development notes
 
