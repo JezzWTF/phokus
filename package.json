@@ -16,8 +16,11 @@
     "dev:ui": "vite --mode ui --host 127.0.0.1 --port 1422 --strictPort --open",
     "dev:vite": "vite",
     "dev:web": "cd website && pnpm dev",
-    "format:app": "cd src-tauri && cargo fmt",
-    "format:check": "cd src-tauri && cargo fmt --check",
+    "format": "prettier --write .",
+    "format:all": "pnpm format && pnpm format:rust",
+    "format:check": "prettier --check .",
+    "format:rust": "cd src-tauri && cargo fmt",
+    "format:rust:check": "cd src-tauri && cargo fmt --check",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -45,6 +48,8 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "prettier": "^3.9.4",
+    "prettier-plugin-tailwindcss": "^0.8.0",
     "tailwindcss": "^4.2.2",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
