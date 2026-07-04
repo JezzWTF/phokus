@@ -6,14 +6,14 @@
 //
 // Pass dotClassName (e.g. "fill-amber-400") to light up the central focal point —
 // used in the titlebar as the "update available" indicator.
-const BLADE = "M0,-4.18 A10,10 0 0 1 6.43,-7.66";
+const BLADE = 'M0,-4.18 A10,10 0 0 1 6.43,-7.66'
 
 export function PhokusMark({
   className,
   dotClassName,
 }: {
-  className?: string;
-  dotClassName?: string;
+  className?: string
+  dotClassName?: string
 }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
@@ -33,7 +33,9 @@ export function PhokusMark({
         <path d={BLADE} transform="rotate(240)" />
         <path d={BLADE} transform="rotate(300)" />
       </g>
-      {dotClassName ? <circle cx="12" cy="12" r="2.6" stroke="none" className={dotClassName} /> : null}
+      {dotClassName ? (
+        <circle cx="12" cy="12" r="2.6" stroke="none" className={dotClassName} />
+      ) : null}
     </svg>
-  );
+  )
 }

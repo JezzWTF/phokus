@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 @custom-variant light-theme (&:is(html[data-theme="subtle-light"] *));
 
@@ -13,11 +13,11 @@ body,
   margin: 0;
   padding: 0;
   background: var(--color-gray-950);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
-html[data-theme="conventional-dark"] {
+html[data-theme='conventional-dark'] {
   --color-gray-950: #1f1f1f;
   --color-gray-900: #252525;
   --color-gray-800: #303030;
@@ -31,7 +31,7 @@ html[data-theme="conventional-dark"] {
   background: #1f1f1f;
 }
 
-html[data-theme="subtle-light"] {
+html[data-theme='subtle-light'] {
   --color-white: #18202c;
   --color-gray-950: #e9e7e2;
   --color-gray-900: #dedbd4;
@@ -68,7 +68,7 @@ html[data-theme="subtle-light"] {
   background: #e9e7e2;
 }
 
-html[data-theme="subtle-light"] .media-dark-surface {
+html[data-theme='subtle-light'] .media-dark-surface {
   --color-white: #ffffff;
   --color-black: #000000;
   --color-gray-950: #030712;
@@ -108,7 +108,7 @@ html[data-theme="subtle-light"] .media-dark-surface {
    remapping the palette on the panel itself. Tailwind v4 resolves every colour
    utility through a --color-* variable, so remapping the variables re-themes the
    whole subtree — including accents — without a single !important. */
-html[data-theme="subtle-light"] .lightbox-panel {
+html[data-theme='subtle-light'] .lightbox-panel {
   --color-white: #18202c;
   --color-gray-950: #e9e7e2;
   --color-gray-900: #dedbd4;
@@ -132,64 +132,63 @@ html[data-theme="subtle-light"] .lightbox-panel {
   --color-violet-400: #6d28d9;
 }
 
-html[data-theme="subtle-light"] .explore-view {
+html[data-theme='subtle-light'] .explore-view {
   background:
     radial-gradient(ellipse at top, rgb(59 130 246 / 0.08), transparent 48%),
-    radial-gradient(ellipse at 80% 75%, rgb(16 185 129 / 0.07), transparent 42%),
-    #f4f2ea !important;
+    radial-gradient(ellipse at 80% 75%, rgb(16 185 129 / 0.07), transparent 42%), #f4f2ea !important;
   color: #1f2937 !important;
 }
 
-html[data-theme="subtle-light"] .explore-header {
+html[data-theme='subtle-light'] .explore-header {
   background: #f4f2ea !important;
   border-color: #d8d2c7 !important;
 }
 
-html[data-theme="subtle-light"] .explore-title {
+html[data-theme='subtle-light'] .explore-title {
   color: #111827 !important;
 }
 
-html[data-theme="subtle-light"] .explore-subtitle,
-html[data-theme="subtle-light"] .explore-empty {
+html[data-theme='subtle-light'] .explore-subtitle,
+html[data-theme='subtle-light'] .explore-empty {
   color: #7a746b !important;
 }
 
-html[data-theme="subtle-light"] .explore-mode-toggle {
+html[data-theme='subtle-light'] .explore-mode-toggle {
   background: #ece8dd !important;
   border-color: #d0c8ba !important;
 }
 
-html[data-theme="subtle-light"] .explore-mode-button {
+html[data-theme='subtle-light'] .explore-mode-button {
   background: transparent !important;
   color: #4b5563 !important;
 }
 
-html[data-theme="subtle-light"] .explore-mode-button:hover {
+html[data-theme='subtle-light'] .explore-mode-button:hover {
   background: #e0dbcf !important;
   color: #111827 !important;
 }
 
-html[data-theme="subtle-light"] .explore-mode-button.bg-white\/10 {
+html[data-theme='subtle-light'] .explore-mode-button.bg-white\/10 {
   background: #d8d4ca !important;
   color: #111827 !important;
 }
 
-html[data-theme="subtle-light"] .explore-cluster-grid {
+html[data-theme='subtle-light'] .explore-cluster-grid {
   background-image: radial-gradient(circle, rgb(31 41 55 / 0.18) 1px, transparent 1px) !important;
   opacity: 0.16 !important;
 }
 
-html[data-theme="subtle-light"] .explore-cluster-card {
+html[data-theme='subtle-light'] .explore-cluster-card {
   background: #fbfaf6 !important;
   border-color: #d8d2c7 !important;
   box-shadow: 0 14px 36px rgb(28 25 23 / 0.18) !important;
 }
 
-html[data-theme="subtle-light"] .explore-cluster-card:hover {
+html[data-theme='subtle-light'] .explore-cluster-card:hover {
   box-shadow: 0 18px 44px rgb(28 25 23 / 0.22) !important;
 }
 
-html[data-theme="subtle-light"] .explore-cluster-overlay {
+html[data-theme='subtle-light'] .explore-cluster-overlay {
   /* A cream wash over the photo read as a faded, foggy haze. Use a gentle dark
      scrim instead — the same natural "photo caption" vignette the dark theme
      uses — with light text on top (label/count rules below). */
@@ -201,15 +200,15 @@ html[data-theme="subtle-light"] .explore-cluster-overlay {
   ) !important;
 }
 
-html[data-theme="subtle-light"] .explore-cluster-label {
+html[data-theme='subtle-light'] .explore-cluster-label {
   color: rgb(255 255 255 / 0.62) !important;
 }
 
-html[data-theme="subtle-light"] .explore-cluster-count {
+html[data-theme='subtle-light'] .explore-cluster-count {
   color: #ffffff !important;
 }
 
-html[data-theme="subtle-light"] .explore-tag-word::before {
+html[data-theme='subtle-light'] .explore-tag-word::before {
   background: radial-gradient(
     ellipse at center,
     rgba(60, 50, 30, 0.13),
@@ -218,183 +217,187 @@ html[data-theme="subtle-light"] .explore-tag-word::before {
   ) !important;
 }
 
-html[data-theme="subtle-light"] .explore-spinner {
+html[data-theme='subtle-light'] .explore-spinner {
   border-color: rgb(17 24 39 / 0.18) !important;
   border-top-color: rgb(17 24 39 / 0.55) !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-header {
+html[data-theme='subtle-light'] .tag-manager-header {
   background: rgb(244 242 234 / 0.72) !important;
   border-color: #d8d2c7 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-stat {
+html[data-theme='subtle-light'] .tag-manager-stat {
   background: rgb(31 41 55 / 0.06) !important;
   color: #5f5a52 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-match {
+html[data-theme='subtle-light'] .tag-manager-match {
   background: rgb(37 99 235 / 0.12) !important;
   color: #1d4ed8 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-help,
-html[data-theme="subtle-light"] .tag-manager-empty {
+html[data-theme='subtle-light'] .tag-manager-help,
+html[data-theme='subtle-light'] .tag-manager-empty {
   color: #6f6a61 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-filter {
+html[data-theme='subtle-light'] .tag-manager-filter {
   background: #fbfaf6 !important;
   border-color: #cfc7b8 !important;
   color: #111827 !important;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.64) !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-filter::placeholder {
+html[data-theme='subtle-light'] .tag-manager-filter::placeholder {
   color: #8a8378 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-filter:focus {
+html[data-theme='subtle-light'] .tag-manager-filter:focus {
   background: #fffdfa !important;
   border-color: #7aa2e3 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-reset-button,
-html[data-theme="subtle-light"] .tag-manager-reset-cancel {
+html[data-theme='subtle-light'] .tag-manager-reset-button,
+html[data-theme='subtle-light'] .tag-manager-reset-cancel {
   background: #ebe8df !important;
   border-color: #c9c1b4 !important;
   color: #5f5a52 !important;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.58) !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-reset-button:hover,
-html[data-theme="subtle-light"] .tag-manager-reset-cancel:hover {
+html[data-theme='subtle-light'] .tag-manager-reset-button:hover,
+html[data-theme='subtle-light'] .tag-manager-reset-cancel:hover {
   background: #e2ded3 !important;
   border-color: #b9b0a2 !important;
   color: #24201b !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-reset-button-confirm {
+html[data-theme='subtle-light'] .tag-manager-reset-button-confirm {
   background: rgb(254 242 242 / 0.95) !important;
   border-color: rgb(220 38 38 / 0.34) !important;
   color: #991b1b !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-reset-button-confirm:hover {
+html[data-theme='subtle-light'] .tag-manager-reset-button-confirm:hover {
   background: #fee2e2 !important;
   border-color: rgb(220 38 38 / 0.48) !important;
   color: #7f1d1d !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-clear {
+html[data-theme='subtle-light'] .tag-manager-clear {
   color: #6b645a !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-clear:hover {
+html[data-theme='subtle-light'] .tag-manager-clear:hover {
   background: rgb(31 41 55 / 0.08) !important;
   color: #111827 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-tile {
+html[data-theme='subtle-light'] .tag-manager-tile {
   background: rgb(251 250 246 / 0.5) !important;
   border-color: rgb(151 141 126 / 0.22) !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-tile:hover,
-html[data-theme="subtle-light"] .tag-manager-tile:focus-within {
+html[data-theme='subtle-light'] .tag-manager-tile:hover,
+html[data-theme='subtle-light'] .tag-manager-tile:focus-within {
   background: rgb(255 253 250 / 0.74) !important;
   border-color: rgb(151 141 126 / 0.36) !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-name {
+html[data-theme='subtle-light'] .tag-manager-name {
   color: #1f2937 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-name:hover {
+html[data-theme='subtle-light'] .tag-manager-name:hover {
   color: #111827 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-count {
+html[data-theme='subtle-light'] .tag-manager-count {
   background: rgb(31 41 55 / 0.07) !important;
   color: #6b645a !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-tile-ai {
+html[data-theme='subtle-light'] .tag-manager-tile-ai {
   box-shadow: inset 0 1px 0 rgb(14 116 144 / 0.08) !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-count-ai {
+html[data-theme='subtle-light'] .tag-manager-count-ai {
   background: rgb(14 116 144 / 0.1) !important;
   border-color: rgb(14 116 144 / 0.18) !important;
   color: #0d5f6f !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-ai-glyph {
+html[data-theme='subtle-light'] .tag-manager-ai-glyph {
   color: #0d5f6f !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-edit-input {
+html[data-theme='subtle-light'] .tag-manager-edit-input {
   background: #fffdfa !important;
   color: #111827 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-secondary,
-html[data-theme="subtle-light"] .tag-manager-action {
+html[data-theme='subtle-light'] .tag-manager-secondary,
+html[data-theme='subtle-light'] .tag-manager-action {
   background: rgb(255 253 250 / 0.92) !important;
   border-color: rgb(31 41 55 / 0.12) !important;
   color: #5f5a52 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-secondary:hover,
-html[data-theme="subtle-light"] .tag-manager-action:hover {
+html[data-theme='subtle-light'] .tag-manager-secondary:hover,
+html[data-theme='subtle-light'] .tag-manager-action:hover {
   background: rgb(31 41 55 / 0.06) !important;
   color: #111827 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-save {
+html[data-theme='subtle-light'] .tag-manager-save {
   color: #1d4ed8 !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-danger,
-html[data-theme="subtle-light"] .tag-manager-action-danger:hover {
+html[data-theme='subtle-light'] .tag-manager-danger,
+html[data-theme='subtle-light'] .tag-manager-action-danger:hover {
   color: #b91c1c !important;
 }
 
-html[data-theme="subtle-light"] .tag-manager-empty {
+html[data-theme='subtle-light'] .tag-manager-empty {
   background: rgb(251 250 246 / 0.42) !important;
   border-color: #d8d2c7 !important;
 }
 
-html[data-theme="subtle-light"] .feature-scope-trigger {
+/* Menu surfaces — context menus, dropdown panels, and menubar panels all
+   share the .menu-panel / .menu-item hooks from src/components/menu/, so one
+   block themes every floating menu. Danger and disabled items keep their
+   tones via the palette variable remap, so only default rows are recolored. */
+html[data-theme='subtle-light'] .dropdown-trigger {
   background: #f8f6ef !important;
   border-color: #d0c8ba !important;
   color: #4b5563 !important;
 }
 
-html[data-theme="subtle-light"] .feature-scope-trigger:hover,
-html[data-theme="subtle-light"] .feature-scope-dropdown:has(.feature-scope-menu) .feature-scope-trigger {
+html[data-theme='subtle-light'] .dropdown-trigger:hover,
+html[data-theme='subtle-light'] .dropdown-trigger[aria-expanded='true'] {
   background: #ece8dd !important;
   border-color: #bfb6a7 !important;
   color: #111827 !important;
 }
 
-html[data-theme="subtle-light"] .feature-scope-menu {
+html[data-theme='subtle-light'] .menu-panel {
   background: #fbfaf6 !important;
   border-color: #d0c8ba !important;
   color: #1f2937 !important;
   box-shadow: 0 18px 44px rgb(28 25 23 / 0.2) !important;
 }
 
-html[data-theme="subtle-light"] .feature-scope-option {
+html[data-theme='subtle-light'] .menu-item[data-tone='default'] {
   color: #4b5563 !important;
 }
 
-html[data-theme="subtle-light"] .feature-scope-option:hover {
+html[data-theme='subtle-light'] .menu-item[data-tone='default']:hover {
   background: #ece8dd !important;
   color: #111827 !important;
 }
 
-html[data-theme="subtle-light"] .feature-scope-option.bg-white\/6 {
+html[data-theme='subtle-light'] .menu-item[data-active='true'] {
   background: #d8d4ca !important;
   color: #111827 !important;
 }

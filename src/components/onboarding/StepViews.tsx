@@ -1,6 +1,14 @@
-import { FakeTile, tileGradient } from "./fakes";
+import { FakeTile, tileGradient } from './fakes'
 
-function ViewRow({ title, description, preview }: { title: string; description: string; preview: React.ReactNode }) {
+function ViewRow({
+  title,
+  description,
+  preview,
+}: {
+  title: string
+  description: string
+  preview: React.ReactNode
+}) {
   return (
     <div className="flex items-center justify-between gap-6 py-4">
       <div className="min-w-0">
@@ -9,7 +17,7 @@ function ViewRow({ title, description, preview }: { title: string; description: 
       </div>
       <div className="shrink-0">{preview}</div>
     </div>
-  );
+  )
 }
 
 function ExplorePreview() {
@@ -20,7 +28,7 @@ function ExplorePreview() {
     { size: 18, x: 86, y: 22, i: 4 },
     { size: 26, x: 30, y: 36, i: 1 },
     { size: 16, x: 70, y: 44, i: 6 },
-  ];
+  ]
   return (
     <div className="media-dark-surface relative h-[72px] w-32 overflow-hidden rounded-lg border border-white/[0.07] bg-white/[0.02]">
       {blobs.map((blob, idx) => (
@@ -31,7 +39,7 @@ function ExplorePreview() {
         />
       ))}
     </div>
-  );
+  )
 }
 
 function TimelinePreview() {
@@ -39,14 +47,17 @@ function TimelinePreview() {
     <div className="media-dark-surface flex h-[72px] w-32 flex-col justify-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3">
       {[2024, 2023].map((year, row) => (
         <div key={year} className="flex items-center gap-1.5">
-          <span className="w-7 text-[9px] tabular-nums text-gray-600">{year}</span>
+          <span className="w-7 text-[9px] text-gray-600 tabular-nums">{year}</span>
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className={`h-4 w-4 rounded-sm bg-gradient-to-br ${tileGradient(row * 3 + i)}`} />
+            <div
+              key={i}
+              className={`h-4 w-4 rounded-sm bg-gradient-to-br ${tileGradient(row * 3 + i)}`}
+            />
           ))}
         </div>
       ))}
     </div>
-  );
+  )
 }
 
 function DuplicatesPreview() {
@@ -57,10 +68,12 @@ function DuplicatesPreview() {
       </div>
       <div className="relative w-10">
         <FakeTile index={3} className="rounded-md" />
-        <span className="absolute -right-1 -top-1 rounded-full bg-amber-500/90 px-1 text-[8px] font-semibold text-black">2×</span>
+        <span className="absolute -top-1 -right-1 rounded-full bg-amber-500/90 px-1 text-[8px] font-semibold text-black">
+          2×
+        </span>
       </div>
     </div>
-  );
+  )
 }
 
 export function StepViews() {
@@ -69,7 +82,7 @@ export function StepViews() {
       <p className="text-sm leading-relaxed text-gray-300">
         Beyond the main grid, the sidebar switches between three more ways to look at your library:
       </p>
-      <div className="mt-3 divide-y divide-white/[0.05] light-theme:divide-gray-300/70">
+      <div className="light-theme:divide-gray-300/70 mt-3 divide-y divide-white/[0.05]">
         <ViewRow
           title="Explore"
           description="A visual cluster map and tag cloud — browse by theme instead of folder, and jump into any cluster."
@@ -87,8 +100,9 @@ export function StepViews() {
         />
       </div>
       <p className="mt-4 text-xs leading-relaxed text-gray-500">
-        Each view can be scoped to a single folder from its header — no need to bounce through the sidebar.
+        Each view can be scoped to a single folder from its header — no need to bounce through the
+        sidebar.
       </p>
     </div>
-  );
+  )
 }

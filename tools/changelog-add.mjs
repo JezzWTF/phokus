@@ -1,73 +1,72 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const SECTION_BY_TYPE = {
-  added: "Added",
-  changed: "Changed",
-  deprecated: "Deprecated",
-  removed: "Removed",
-  fixed: "Fixed",
-  security: "Security",
-};
+  added: 'Added',
+  changed: 'Changed',
+  deprecated: 'Deprecated',
+  removed: 'Removed',
+  fixed: 'Fixed',
+  security: 'Security',
+}
 
 function usage() {
-  console.error([
-    "Usage:",
-    "  pnpm changelog:add -- --type fixed --message \"Fix thing\"",
-    "",
-    `Types: ${Object.keys(SECTION_BY_TYPE).join(", ")}`,
-  ].join("\n"));
-  process.exit(1);
+  console.error(
+    [
+      'Usage:',
+      '  pnpm changelog:add -- --type fixed --message "Fix thing"',
+      '',
+      `Types: ${Object.keys(SECTION_BY_TYPE).join(', ')}`,
+    ].join('\n')
+  )
+  process.exit(1)
 }
 
 function argValue(name) {
-  const index = process.argv.indexOf(`--${name}`);
-  if (index === -1) return null;
-  return process.argv[index + 1] ?? null;
+  const index = process.argv.indexOf(`--${name}`)
+  if (index === -1) return null
+  return process.argv[index + 1] ?? null
 }
 
-const type = argValue("type")?.toLowerCase();
-const message = argValue("message")?.trim();
+const type = argValue('type')?.toLowerCase()
+const message = argValue('message')?.trim()
 
 if (!type || !message || !SECTION_BY_TYPE[type]) {
-  usage();
+  usage()
 }
 
-const section = SECTION_BY_TYPE[type];
-const changelogPath = resolve("CHANGELOG.md");
-let changelog = readFileSync(changelogPath, "utf8");
+const section = SECTION_BY_TYPE[type]
+const changelogPath = resolve('CHANGELOG.md')
+let changelog = readFileSync(changelogPath, 'utf8')
 
 if (!/^## \[Unreleased\]/m.test(changelog)) {
-  changelog = changelog.replace(
-    /(\r?\n)(## \[[^\r\n]+\])/,
-    `$1## [Unreleased]$1$1$2`,
-  );
+  changelog = changelog.replace(/(\r?\n)(## \[[^\r\n]+\])/, `$1## [Unreleased]$1$1$2`)
 }
 
 // JS regex has no \z anchor, so match to the next version heading or true
 // end-of-input ($ with nothing following — \n-tolerant under the m flag).
-const unreleasedMatch = changelog.match(/^## \[Unreleased\][\s\S]*?(?=^## \[|$(?![\s\S]))/m);
+const unreleasedMatch = changelog.match(/^## \[Unreleased\][\s\S]*?(?=^## \[|$(?![\s\S]))/m)
 if (!unreleasedMatch) {
-  throw new Error("Could not find or create an Unreleased section.");
+  throw new Error('Could not find or create an Unreleased section.')
 }
 
-const unreleased = unreleasedMatch[0];
-const lineEnding = changelog.includes("\r\n") ? "\r\n" : "\n";
-const bullet = `- ${message}`;
+const unreleased = unreleasedMatch[0]
+const lineEnding = changelog.includes('\r\n') ? '\r\n' : '\n'
+const bullet = `- ${message}`
 
-let nextUnreleased;
-const sectionRegex = new RegExp(`(^### ${section}\\s*)([\\s\\S]*?)(?=^### |$(?![\\s\\S]))`, "m");
-const sectionMatch = unreleased.match(sectionRegex);
+let nextUnreleased
+const sectionRegex = new RegExp(`(^### ${section}\\s*)([\\s\\S]*?)(?=^### |$(?![\\s\\S]))`, 'm')
+const sectionMatch = unreleased.match(sectionRegex)
 
 if (sectionMatch) {
-  const body = sectionMatch[2].trimEnd();
-  const replacement = `${sectionMatch[1]}${body ? `${body}${lineEnding}` : ""}${bullet}${lineEnding}${lineEnding}`;
-  nextUnreleased = unreleased.replace(sectionRegex, replacement);
+  const body = sectionMatch[2].trimEnd()
+  const replacement = `${sectionMatch[1]}${body ? `${body}${lineEnding}` : ''}${bullet}${lineEnding}${lineEnding}`
+  nextUnreleased = unreleased.replace(sectionRegex, replacement)
 } else {
-  const insert = `${lineEnding}### ${section}${lineEnding}${lineEnding}${bullet}${lineEnding}`;
-  nextUnreleased = unreleased.trimEnd() + insert + lineEnding;
+  const insert = `${lineEnding}### ${section}${lineEnding}${lineEnding}${bullet}${lineEnding}`
+  nextUnreleased = unreleased.trimEnd() + insert + lineEnding
 }
 
-changelog = changelog.replace(unreleased, nextUnreleased);
-writeFileSync(changelogPath, changelog);
+changelog = changelog.replace(unreleased, nextUnreleased)
+writeFileSync(changelogPath, changelog)

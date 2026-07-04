@@ -1,0 +1,30 @@
+# Build outputs
+dist/
+build/
+
+# Tauri / Rust (handled by cargo fmt)
+src-tauri/
+
+# Lock files & generated
+pnpm-lock.yaml
+*.lock
+
+# Generated
+src/vite-env.d.ts
+
+# Public assets
+public/
+
+# Website subpackage (has its own config if needed)
+website/
+
+# Markdown & docs (hand-written or tool-generated, keep diffs quiet)
+*.md
+docs/
+
+# CI workflows
+.github/
+.gitea/
+
+# Tool-managed config
+.claude/
