@@ -35,7 +35,8 @@ There are no test suites configured.
 
 - **`store.ts`** — single Zustand store (`useGalleryStore`) that owns all app state and all `invoke()` calls to the Tauri backend. Every feature (folders, images, search, similar images, tags, captions, tagger, duplicates) is implemented as store actions here. React components are thin consumers.
 - **`App.tsx`** — sets up Tauri event listeners (`subscribeToProgress`) and renders the top-level layout (sidebar + active view).
-- **`src/components/`** — UI components: `Gallery`, `Lightbox`, `Sidebar`, `Toolbar`, `TagCloud`, `DuplicateFinder`, `BackgroundTasks`, `SettingsModal`, `MenuBar`, `TitleBar`.
+- **`src/components/`** — UI components: `Gallery`, `Lightbox`, `Sidebar`, `Toolbar`, `Timeline`, `ExploreView`, `DuplicateFinder`, `BackgroundTasks`, `SettingsModal`, `TitleBar`.
+- **`src/components/menu/`** — shared floating-UI primitives: `useDismissable`, `MenuPanel`/`MenuItem`/`SubMenu`, the portal-based `ContextMenu`, and the app-wide `Dropdown`. Build menus, dropdowns, and popovers on these instead of hand-rolling.
 - State management: Zustand v5, no selectors library — components call `useGalleryStore(s => s.field)` directly.
 - Styling: Tailwind CSS v4 (Vite plugin, no config file).
 - Virtualized gallery grid: `@tanstack/react-virtual`.
