@@ -6,6 +6,7 @@ import { useGalleryStore, ImageTag, ImageExif, AiRating } from "../store";
 import { VideoPlayer } from "./VideoPlayer";
 import { mediaSrc } from "../lib/mediaSrc";
 import { Tooltip } from "./Tooltip";
+import { ChevronRightIcon, CloseIcon, StarIcon } from "./icons";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -751,9 +752,7 @@ export function Lightbox() {
                       exitSlideshow();
                     }}
                   >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                    <CloseIcon className="h-4 w-4" strokeWidth={1.8} />
                   </button>
                 </Tooltip>
               </motion.div>
@@ -811,9 +810,7 @@ export function Lightbox() {
                         goSlideshow(1);
                       }}
                     >
-                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 5l7 7-7 7" />
-                      </svg>
+                      <ChevronRightIcon className="h-5 w-5" strokeWidth={1.8} />
                     </button>
                   </Tooltip>
                 </div>
@@ -1006,9 +1003,7 @@ export function Lightbox() {
                     </Tooltip>
                   </div>
                   <button className="rounded p-1 text-gray-400 hover:text-white" onClick={closeImage}>
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                    <CloseIcon className="h-4 w-4" />
                   </button>
                 </div>
 
@@ -1042,9 +1037,7 @@ export function Lightbox() {
                         </span>
                       ) : regionSelectMode ? (
                         <span className="flex items-center justify-center gap-1.5">
-                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
+                          <CloseIcon className="h-3 w-3" />
                           Cancel selection
                         </span>
                       ) : (
@@ -1074,13 +1067,7 @@ export function Lightbox() {
                             className="rounded-md p-1"
                             onClick={() => void updateImageDetails(selectedImage.id, { rating })}
                           >
-                            <svg
-                              className={`h-5 w-5 ${rating <= selectedImage.rating ? "text-amber-300" : "text-white/20 hover:text-white/50"}`}
-                              fill="currentColor"
-                              viewBox="0 0 20 20"
-                            >
-                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81H7.03a1 1 0 00.951-.69l1.07-3.292z" />
-                            </svg>
+                            <StarIcon className={`h-5 w-5 ${rating <= selectedImage.rating ? "text-amber-300" : "text-white/20 hover:text-white/50"}`} />
                           </button>
                           </Tooltip>
                         );
@@ -1091,9 +1078,7 @@ export function Lightbox() {
                             className="ml-2 rounded-md border border-white/10 p-1.5 text-gray-400 hover:bg-white/5 hover:text-white"
                             onClick={() => void updateImageDetails(selectedImage.id, { rating: 0 })}
                           >
-                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
+                            <CloseIcon className="h-3.5 w-3.5" />
                           </button>
                         </Tooltip>
                       ) : null}
@@ -1211,9 +1196,7 @@ export function Lightbox() {
                                       );
                                     }}
                                   >
-                                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
+                                    <CloseIcon className="h-3 w-3" />
                                   </button>
                                 </Tooltip>
                               </span>
@@ -1426,9 +1409,7 @@ export function Lightbox() {
               goNext();
             }}
           >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
+            <ChevronRightIcon className="h-5 w-5" />
           </button>
             </>
           )}

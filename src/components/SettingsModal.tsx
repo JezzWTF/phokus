@@ -5,6 +5,7 @@ import { Dropdown } from "./menu";
 import { getChangelogForVersion } from "../changelog";
 import { Tooltip } from "./Tooltip";
 import { TAGGER_MODELS } from "../taggerModels";
+import { CloseIcon } from "./icons";
 
 type SettingsSection = "general" | "media" | "updates" | "storage" | "workspace";
 
@@ -440,9 +441,7 @@ export function SettingsModal() {
               className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
               onClick={() => setSettingsOpen(false)}
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <CloseIcon className="h-4 w-4" />
             </button>
           </Tooltip>
         </div>

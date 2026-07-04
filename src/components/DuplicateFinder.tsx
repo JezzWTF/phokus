@@ -4,6 +4,7 @@ import { DuplicateGroup, useGalleryStore } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
 import { mediaSrc } from "../lib/mediaSrc";
 import { Tooltip } from "./Tooltip";
+import { WarningIcon } from "./icons";
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
@@ -240,10 +241,7 @@ export function DuplicateFinder() {
                       <div className="fixed inset-0 z-40" onClick={() => setConfirmingDelete(false)} />
                       <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-red-500/30 bg-gray-950/98 p-3 text-left shadow-2xl backdrop-blur">
                         <div className="mb-1 flex items-center gap-1.5 text-red-300">
-                          <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                              d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                          </svg>
+                          <WarningIcon className="h-3.5 w-3.5 shrink-0" />
                           <p className="text-xs font-semibold">Delete from disk</p>
                         </div>
                         <p className="mb-2.5 text-[11px] leading-relaxed text-gray-400">

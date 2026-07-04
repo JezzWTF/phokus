@@ -5,6 +5,7 @@ import { FolderScopeDropdown } from "./FolderScopeDropdown";
 import { ColorFilter } from "./ColorFilter";
 import { Dropdown, useDismissable } from "./menu";
 import { Tooltip } from "./Tooltip";
+import { CloseIcon } from "./icons";
 
 const BASE_SORT_OPTIONS: { value: SortOrder; label: string }[] = [
   { value: "date_desc", label: "Newest first" },
@@ -279,9 +280,7 @@ export function Toolbar() {
                         clearSearch();
                       }}
                     >
-                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
+                      <CloseIcon className="h-3.5 w-3.5" />
                     </button>
                   </Tooltip>
                 </div>

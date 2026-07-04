@@ -5,6 +5,7 @@ import { BulkActionBar } from "./BulkActionBar";
 import { ImageContextMenu } from "./ImageContextMenu";
 import { Tooltip } from "./Tooltip";
 import { mediaSrc } from "../lib/mediaSrc";
+import { CheckIcon, PhotoIcon, PlayIcon, StarIcon, WarningIcon } from "./icons";
 
 const GAP = 6;
 
@@ -85,9 +86,7 @@ export function ImageTile({
               : "border-white/70 bg-black/40 text-transparent opacity-0 backdrop-blur-sm group-hover/cb:opacity-100"
           }`}
         >
-          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-          </svg>
+          <CheckIcon className="h-3 w-3" strokeWidth={3} />
         </div>
       </button>
       {/* Image / placeholder */}
@@ -108,14 +107,9 @@ export function ImageTile({
       ) : (
         <div className="absolute inset-0 flex items-center justify-center bg-white/[0.03] text-white/20">
           {image.media_kind === "video" ? (
-            <svg className="h-7 w-7" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z" />
-            </svg>
+            <PlayIcon className="h-7 w-7" />
           ) : (
-            <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
-                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
+            <PhotoIcon className="h-7 w-7" strokeWidth={1} />
           )}
         </div>
       )}
@@ -124,9 +118,7 @@ export function ImageTile({
       {image.media_kind === "video" && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="rounded-full bg-black/40 p-3 text-white backdrop-blur-sm opacity-50 group-hover:opacity-90 transition-opacity duration-200">
-            <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z" />
-            </svg>
+            <PlayIcon className="h-5 w-5" />
           </div>
         </div>
       )}
@@ -136,10 +128,7 @@ export function ImageTile({
         {image.embedding_status === "failed" && (
           <Tooltip label={image.embedding_error ?? "Embedding failed"} followCursor className="pointer-events-auto">
             <div className="flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 backdrop-blur-sm">
-              <svg className="h-2.5 w-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-                  d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-              </svg>
+              <WarningIcon className="h-2.5 w-2.5 shrink-0" strokeWidth={2.5} />
             </div>
           </Tooltip>
         )}
@@ -153,9 +142,7 @@ export function ImageTile({
         {image.rating > 0 && (
           <div className="flex items-center gap-0.5 rounded-md bg-black/60 px-1.5 py-1 text-amber-300 backdrop-blur-sm">
             {Array.from({ length: image.rating }, (_, index) => (
-              <svg key={index} className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81H7.03a1 1 0 00.951-.69l1.07-3.292z" />
-              </svg>
+              <StarIcon key={index} className="h-2.5 w-2.5" />
             ))}
           </div>
         )}
@@ -176,9 +163,7 @@ export function ImageTile({
           {image.rating > 0 ? (
             <div className="flex items-center gap-0.5">
               {Array.from({ length: image.rating }, (_, i) => (
-                <svg key={i} className="h-2.5 w-2.5 text-amber-300" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81H7.03a1 1 0 00.951-.69l1.07-3.292z" />
-                </svg>
+                <StarIcon key={i} className="h-2.5 w-2.5 text-amber-300" />
               ))}
             </div>
           ) : (
@@ -338,10 +323,7 @@ export function Gallery() {
       ) : images.length === 0 && !loadingImages ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
           <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8">
-            <svg className="h-12 w-12 mx-auto text-white/10 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={0.75}
-                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
+            <PhotoIcon className="h-12 w-12 mx-auto text-white/10 mb-4" strokeWidth={0.75} />
             <p className="text-sm text-white/30 font-medium">
               {imageLoadError
                 ? "Could not load results"

@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { CheckIcon, ChevronRightIcon } from "../icons";
 
 export type MenuSize = "sm" | "md";
 
@@ -115,9 +116,7 @@ export function MenuItem({
         <span className={`shrink-0 ${size === "sm" ? "text-[10px]" : "text-xs"} text-gray-500`}>{hint}</span>
       ) : null}
       {checked ? (
-        <svg className="h-3.5 w-3.5 shrink-0 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-        </svg>
+        <CheckIcon className="h-3.5 w-3.5 shrink-0 text-blue-400" />
       ) : null}
     </button>
   );
@@ -206,9 +205,7 @@ export function SubMenu({
         onClick={openNow}
       >
         <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-        <svg className="h-3 w-3 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
+        <ChevronRightIcon className="h-3 w-3 shrink-0 text-gray-500" />
       </button>
       {open ? (
         <div

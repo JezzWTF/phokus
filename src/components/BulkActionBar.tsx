@@ -4,6 +4,7 @@ import { AlbumPicker } from "./AlbumPicker";
 import { BulkTagPopover } from "./bulk/BulkTagPopover";
 import { useDismissable } from "./menu";
 import { Tooltip } from "./Tooltip"
+import { CloseIcon, StarIcon, WarningIcon } from "./icons";
 
 type Panel = "tag" | "rating" | "album" | "delete" | null;
 
@@ -109,9 +110,7 @@ export function BulkActionBar() {
                     setPanel(null);
                   }}
                 >
-                  <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81H7.03a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
+                  <StarIcon className="h-4 w-4" />
                 </button>
                 </Tooltip>
               );
@@ -174,10 +173,7 @@ export function BulkActionBar() {
             className="absolute bottom-full left-1/2 mb-2 w-64 -translate-x-1/2 rounded-xl border border-red-500/30 bg-gray-950/98 p-3 shadow-2xl backdrop-blur"
           >
             <div className="mb-1 flex items-center gap-1.5 text-red-300">
-              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-              </svg>
+              <WarningIcon className="h-3.5 w-3.5 shrink-0" />
               <p className="text-xs font-semibold">Delete from disk</p>
             </div>
             <p className="mb-2.5 text-[11px] leading-relaxed text-gray-400">
@@ -207,9 +203,7 @@ export function BulkActionBar() {
         className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
         onClick={clearGallerySelection}
       >
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-        </svg>
+        <CloseIcon className="h-4 w-4" />
       </button>
       </Tooltip>
     </div>

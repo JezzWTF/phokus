@@ -2,6 +2,7 @@ import { ReactNode, useRef, useState } from "react";
 import { MenuCloseContext, MenuItem, MenuPanel, MenuSize } from "./Menu";
 import { useDismissable } from "./useDismissable";
 import { Tooltip } from "../Tooltip";
+import { ChevronDownIcon } from "../icons";
 
 export interface DropdownOption<T> {
   value: T;
@@ -85,14 +86,7 @@ export function Dropdown<T extends string | number | null>({
     >
       {triggerIcon}
       <span className="min-w-0 truncate">{current?.label}</span>
-      <svg
-        className={`h-3 w-3 shrink-0 text-gray-500 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-      >
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-      </svg>
+      <ChevronDownIcon className={`h-3 w-3 shrink-0 text-gray-500 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
     </button>
   );
 

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useGalleryStore, WorkerKey } from "../store";
 import { Tooltip } from "./Tooltip";
+import { ChevronDownIcon, CloseIcon, PlayIcon, WarningIcon } from "./icons";
 
 const WORKER_FOR_STAGE: Record<string, WorkerKey> = {
   Thumbnails: "thumbnail",
@@ -43,10 +44,7 @@ interface FailedWorkerItem {
 function FailedWorkerItemRow({ item }: { item: FailedWorkerItem }) {
   return (
     <div className="flex min-w-0 items-start gap-1.5">
-      <svg className="mt-px h-2.5 w-2.5 shrink-0 text-amber-500 light-theme:text-amber-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-          d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-      </svg>
+      <WarningIcon className="mt-px h-2.5 w-2.5 shrink-0 text-amber-500 light-theme:text-amber-700" strokeWidth={2.5} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[10px] font-medium text-amber-400/80 light-theme:text-amber-700">{item.filename}</p>
         {item.error && (
@@ -386,9 +384,7 @@ export function BackgroundTasks() {
                     onClick={(e) => { e.stopPropagation(); toggleWorker(primary.id, workerKey); }}
                   >
                     {isPaused ? (
-                      <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
+                      <PlayIcon className="h-2.5 w-2.5" />
                     ) : (
                       <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
@@ -448,12 +444,7 @@ export function BackgroundTasks() {
 
         {/* Expand chevron (only when multiple tasks) */}
         {allTasks.length > 1 && (
-          <svg
-            className={`h-3.5 w-3.5 text-gray-600 transition-transform duration-200 shrink-0 ${expanded ? "rotate-180" : ""}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
+          <ChevronDownIcon className={`h-3.5 w-3.5 text-gray-600 transition-transform duration-200 shrink-0 ${expanded ? "rotate-180" : ""}`} />
         )}
 
         {/* Dismiss — hidden for system tasks like duplicate scan */}
@@ -463,9 +454,7 @@ export function BackgroundTasks() {
             className="p-1 rounded-md text-gray-600 hover:text-gray-300 hover:bg-white/8 transition-colors shrink-0"
             onClick={(e) => { e.stopPropagation(); dismissTask(primary.id, primary.snapshot); }}
           >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <CloseIcon className="h-3.5 w-3.5" />
           </button>
         </Tooltip>
       )}
@@ -518,9 +507,7 @@ export function BackgroundTasks() {
                               onClick={() => toggleWorker(task.id, workerKey)}
                             >
                               {isPaused ? (
-                                <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M8 5v14l11-7z" />
-                                </svg>
+                                <PlayIcon className="h-2.5 w-2.5" />
                               ) : (
                                 <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24">
                                   <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
@@ -575,9 +562,7 @@ export function BackgroundTasks() {
                       className="p-1 rounded-md text-gray-600 hover:text-gray-300 hover:bg-white/8 transition-colors shrink-0"
                       onClick={() => dismissTask(task.id, task.snapshot)}
                     >
-                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
+                      <CloseIcon className="h-3 w-3" />
                     </button>
                     </Tooltip>
                   )}

@@ -1,5 +1,6 @@
 import { useBulkTagEditor } from "./useBulkTagEditor";
 import { Tooltip } from "../Tooltip";
+import { CloseIcon } from "../icons";
 
 // Presentational tag-editing fields shared by the popover and modal surfaces.
 export function BulkTagFields({ autoFocus = false }: { autoFocus?: boolean }) {
@@ -61,9 +62,7 @@ export function BulkTagFields({ autoFocus = false }: { autoFocus?: boolean }) {
                   className="text-gray-600 transition-colors hover:text-white"
                   onClick={() => void removeTag(tag)}
                 >
-                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                  <CloseIcon className="h-3 w-3" />
                 </button>
               </Tooltip>
             </span>

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useGalleryStore } from "../store";
 import { getChangelogForVersion, type ChangelogSection } from "../changelog";
 import { Tooltip } from "./Tooltip";
+import { ChevronRightIcon, CloseIcon } from "./icons";
 
 // Shown in the tooltip so the user can see the link's destination before
 // clicking. The actual navigation is handled by the open_changelog_url command.
@@ -69,14 +70,7 @@ function Section({ section }: { section: ChangelogSection }) {
         className="flex w-full items-center gap-2 text-left"
         aria-expanded={open}
       >
-        <svg
-          className={`h-3 w-3 shrink-0 text-gray-600 transition-transform ${open ? "rotate-90" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-        </svg>
+        <ChevronRightIcon className={`h-3 w-3 shrink-0 text-gray-600 transition-transform ${open ? "rotate-90" : ""}`} strokeWidth={2.5} />
         <span className={`text-[11px] font-semibold uppercase tracking-[0.1em] ${style.label}`}>{section.title}</span>
         <span className="text-[11px] font-medium text-gray-600">{section.items.length}</span>
       </button>
@@ -161,9 +155,7 @@ export function WhatsNewModal() {
                   className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
                   onClick={closeWhatsNew}
                 >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                  <CloseIcon className="h-4 w-4" />
                 </button>
               </Tooltip>
             </div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { DirEntry, DirListing, FolderAddResult, useGalleryStore } from "../store";
 import { Tooltip } from "./Tooltip";
+import { CheckIcon, ChevronRightIcon, CloseIcon } from "./icons";
 
 function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
@@ -111,9 +112,7 @@ function FolderRow({
         disabled={alreadyAdded}
         aria-label={selected ? `Remove ${entry.name} from folders to add` : `Choose ${entry.name}`}
       >
-        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-        </svg>
+        <CheckIcon className="h-3.5 w-3.5" />
       </button>
 
       <Tooltip label={entry.path} anchorToCursor className="min-w-0 flex-1">
@@ -141,9 +140,7 @@ function FolderRow({
           className="rounded-md p-1 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white light-theme:hover:bg-gray-900 light-theme:hover:text-white"
           onClick={onNavigate}
         >
-          <svg className={`h-4 w-4 ${entry.has_children ? "" : "opacity-45"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
+          <ChevronRightIcon className={`h-4 w-4 ${entry.has_children ? "" : "opacity-45"}`} />
         </button>
       </Tooltip>
     </div>
@@ -203,9 +200,7 @@ function StagedFoldersPanel({
                       onClick={() => onRemove(path)}
                       aria-label={`Remove ${path} from folders to add`}
                     >
-                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
+                      <CloseIcon className="h-3.5 w-3.5" />
                     </button>
                   </Tooltip>
                 </div>
@@ -415,9 +410,7 @@ export function FolderPickerModal() {
                 className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white light-theme:hover:bg-gray-900 light-theme:hover:text-white"
                 onClick={() => setFolderPickerOpen(false)}
               >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <CloseIcon className="h-4 w-4" />
               </button>
             </Tooltip>
           </div>
