@@ -123,12 +123,17 @@ export function MenuItem({
 }
 
 export function MenuSeparator() {
-  return <div className="my-1 h-px bg-white/[0.06]" />;
+  return <div className="my-1 h-px bg-white/[0.06]"/>;
 }
 
 export function MenuLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-gray-600">{children}</div>
+    <div className="px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-gray-600"
+     style={{
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
+  }}
+    >{children}</div>
   );
 }
 
