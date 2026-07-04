@@ -365,36 +365,40 @@ html[data-theme="subtle-light"] .tag-manager-empty {
   border-color: #d8d2c7 !important;
 }
 
-html[data-theme="subtle-light"] .feature-scope-trigger {
+/* Menu surfaces — context menus, dropdown panels, and menubar panels all
+   share the .menu-panel / .menu-item hooks from src/components/menu/, so one
+   block themes every floating menu. Danger and disabled items keep their
+   tones via the palette variable remap, so only default rows are recolored. */
+html[data-theme="subtle-light"] .dropdown-trigger {
   background: #f8f6ef !important;
   border-color: #d0c8ba !important;
   color: #4b5563 !important;
 }
 
-html[data-theme="subtle-light"] .feature-scope-trigger:hover,
-html[data-theme="subtle-light"] .feature-scope-dropdown:has(.feature-scope-menu) .feature-scope-trigger {
+html[data-theme="subtle-light"] .dropdown-trigger:hover,
+html[data-theme="subtle-light"] .dropdown-trigger[aria-expanded="true"] {
   background: #ece8dd !important;
   border-color: #bfb6a7 !important;
   color: #111827 !important;
 }
 
-html[data-theme="subtle-light"] .feature-scope-menu {
+html[data-theme="subtle-light"] .menu-panel {
   background: #fbfaf6 !important;
   border-color: #d0c8ba !important;
   color: #1f2937 !important;
   box-shadow: 0 18px 44px rgb(28 25 23 / 0.2) !important;
 }
 
-html[data-theme="subtle-light"] .feature-scope-option {
+html[data-theme="subtle-light"] .menu-item[data-tone="default"] {
   color: #4b5563 !important;
 }
 
-html[data-theme="subtle-light"] .feature-scope-option:hover {
+html[data-theme="subtle-light"] .menu-item[data-tone="default"]:hover {
   background: #ece8dd !important;
   color: #111827 !important;
 }
 
-html[data-theme="subtle-light"] .feature-scope-option.bg-white\/6 {
+html[data-theme="subtle-light"] .menu-item[data-active="true"] {
   background: #d8d4ca !important;
   color: #111827 !important;
 }

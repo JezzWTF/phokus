@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Reorder, useDragControls } from "framer-motion";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useGalleryStore, Folder, Album, IndexProgress } from "../store";
-import { ThemedDropdown } from "./ThemedDropdown";
-import { ContextMenu, MenuItem, MenuSeparator } from "./menu";
+import { ContextMenu, Dropdown, MenuItem, MenuSeparator } from "./menu";
 import { mediaSrc } from "../lib/mediaSrc";
 import { Tooltip } from "./Tooltip";
 
@@ -788,11 +787,12 @@ export function Sidebar() {
       {folders.length > 0 && (
         <div className="flex items-center justify-between gap-2 px-5 pt-3 pb-1">
           <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-gray-600">Libraries</span>
-          <ThemedDropdown
+          <Dropdown
             value={librarySort}
-            onChange={(value) => setLibrarySort(value as LibrarySort)}
+            onChange={setLibrarySort}
             ariaLabel="Library order"
-            compact
+            trigger="compact"
+            panelClassName="min-w-0"
             options={[
               { value: "az", label: "A-Z" },
               { value: "za", label: "Z-A" },

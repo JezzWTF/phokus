@@ -14,7 +14,7 @@ export type MenuSize = "sm" | "md";
 export const MenuCloseContext = createContext<() => void>(() => {});
 const MenuSizeContext = createContext<MenuSize>("md");
 
-function itemClass(size: MenuSize, danger: boolean, disabled: boolean): string {
+function itemClass(size: MenuSize, danger: boolean, disabled: boolean, active = false): string {
   const base =
     size === "sm"
       ? "w-full rounded-md px-3 py-1.5 text-[12px]"
@@ -23,8 +23,16 @@ function itemClass(size: MenuSize, danger: boolean, disabled: boolean): string {
     ? "text-gray-600 cursor-not-allowed"
     : danger
       ? "text-red-400 hover:bg-red-500/15 hover:text-red-300"
-      : "text-gray-200 hover:bg-white/[0.06] hover:text-white";
-  return `${base} ${tone} transition-colors`;
+      : active
+        ? "bg-white/[0.08] text-white"
+        : "text-gray-200 hover:bg-white/[0.06] hover:text-white";
+  // menu-item + data attributes are the stable hooks the subtle-light theme
+  // targets in index.css — keep them if the utility classes change.
+  return `menu-item ${base} ${tone} transition-colors`;
+}
+
+function itemTone(danger: boolean, disabled: boolean): "danger" | "disabled" | "default" {
+  return danger ? "danger" : disabled ? "disabled" : "default";
 }
 
 /**
@@ -42,10 +50,18 @@ export function MenuPanel({
 }) {
   const inherited = useContext(MenuSizeContext);
   const resolved = size ?? inherited;
+  // Default min-width steps aside when the caller sets its own width class —
+  // Tailwind resolves competing min-w utilities by stylesheet order, not
+  // className order, so merging both would be unpredictable.
+  const widthClass = /(^|\s)(min-w-|w-)/.test(className)
+    ? ""
+    : resolved === "sm"
+      ? "min-w-40"
+      : "min-w-52";
   return (
     <MenuSizeContext.Provider value={resolved}>
       <div
-        className={`${resolved === "sm" ? "min-w-40" : "min-w-52"} rounded-xl border border-white/10 bg-gray-950/98 p-1 shadow-2xl shadow-black/40 backdrop-blur light-theme:border-gray-700/50 ${className}`}
+        className={`menu-panel ${widthClass} rounded-xl border border-white/10 bg-gray-950/98 p-1 shadow-2xl shadow-black/40 backdrop-blur light-theme:border-gray-700/50 ${className}`}
       >
         {children}
       </div>
@@ -58,27 +74,36 @@ export function MenuItem({
   onSelect,
   danger = false,
   disabled = false,
+  active = false,
   checked,
   hint,
   keepOpen = false,
+  role,
 }: {
   label: ReactNode;
   onSelect?: () => void;
   danger?: boolean;
   disabled?: boolean;
+  /** Highlights the row as the current choice (dropdown selections, active view). */
+  active?: boolean;
   /** Renders a trailing check mark; use for exclusive-choice menus (themes, sort orders). */
   checked?: boolean;
   hint?: ReactNode;
   /** Skip the automatic menu close after selecting. */
   keepOpen?: boolean;
+  role?: React.AriaRole;
 }) {
   const size = useContext(MenuSizeContext);
   const close = useContext(MenuCloseContext);
   return (
     <button
       type="button"
+      role={role}
+      aria-selected={role === "option" ? checked ?? active : undefined}
       disabled={disabled}
-      className={`${itemClass(size, danger, disabled)} flex items-center justify-between gap-3`}
+      data-tone={itemTone(danger, disabled)}
+      data-active={active || undefined}
+      className={`${itemClass(size, danger, disabled, active)} flex items-center justify-between gap-3`}
       onClick={() => {
         if (disabled) return;
         onSelect?.();
@@ -174,6 +199,7 @@ export function SubMenu({
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
+        data-tone={itemTone(false, disabled)}
         className={`${itemClass(size, false, disabled)} flex items-center justify-between gap-3`}
         // Open-only (no toggle): hover already opened it for mouse users, so a
         // toggle would close the panel on the very click meant to open it.

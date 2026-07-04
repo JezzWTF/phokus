@@ -3,7 +3,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ExploreMode, ExploreTagEntry, RelatedTagEntry, VisualClusterEntry, useGalleryStore } from "../store";
 import { FolderScopeDropdown } from "./FolderScopeDropdown";
-import { ThemedDropdown } from "./ThemedDropdown";
+import { Dropdown } from "./menu";
 import { Tooltip } from "./Tooltip";
 import { mediaSrc } from "../lib/mediaSrc";
 
@@ -1036,9 +1036,9 @@ function TagManageList({
                 </span>
               ) : null}
             </div>
-            <ThemedDropdown
+            <Dropdown
               value={sort}
-              onChange={(value) => setSort(value as TagManageSort)}
+              onChange={setSort}
               options={TAG_MANAGE_SORTS}
               ariaLabel="Sort managed tags"
               align="right"

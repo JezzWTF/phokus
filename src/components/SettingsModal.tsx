@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppTheme, CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, SlideshowOrder, SlideshowTransition, TaggerAcceleration, TaggerModel, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
+import { CleanupOrphanedThumbnailsResult, DatabaseInfo, OrphanedThumbnailsInfo, TaggerAcceleration, TaggerModel, TaggingQueueScope, VacuumResult, useGalleryStore } from "../store";
 import { FfmpegStatusRow } from "./onboarding/StepWelcome";
-import { ThemedDropdown } from "./ThemedDropdown";
+import { Dropdown } from "./menu";
 import { getChangelogForVersion } from "../changelog";
 import { Tooltip } from "./Tooltip";
 import { TAGGER_MODELS } from "../taggerModels";
@@ -776,9 +776,9 @@ export function SettingsModal() {
                   <>
                 <SettingsGroup title="Appearance">
                   <SettingsItem label="Theme" description="Choose the app palette. Subtle Light uses a warm, low-glare background.">
-                    <ThemedDropdown
+                    <Dropdown
                       value={theme}
-                      onChange={(value) => setTheme(value as AppTheme)}
+                      onChange={setTheme}
                       ariaLabel="App theme"
                       options={[
                         { value: "phokus", label: "Phokus" },
@@ -874,9 +874,9 @@ export function SettingsModal() {
                     label="Playback order"
                     description="Sequential follows the current lightbox order. Random picks another image from the same collection."
                   >
-                    <ThemedDropdown
+                    <Dropdown
                       value={slideshowOrder}
-                      onChange={(value) => setSlideshowOrder(value as SlideshowOrder)}
+                      onChange={setSlideshowOrder}
                       ariaLabel="Slideshow order"
                       options={[
                         { value: "sequential", label: "Sequential" },
@@ -888,9 +888,9 @@ export function SettingsModal() {
                     label="Transition"
                     description="Soft fade keeps images still. Gentle motion adds a slow, subtle drift while the next image settles in."
                   >
-                    <ThemedDropdown
+                    <Dropdown
                       value={slideshowTransition}
-                      onChange={(value) => setSlideshowTransition(value as SlideshowTransition)}
+                      onChange={setSlideshowTransition}
                       ariaLabel="Slideshow transition"
                       options={[
                         { value: "soft-fade", label: "Soft fade" },

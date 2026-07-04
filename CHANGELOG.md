@@ -62,10 +62,12 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
-- **Right-click menus got their act together** — images, folders, albums, and
-  the theme switcher now share one menu style with one set of manners: they
-  stay on screen instead of wandering off the edge, all close on Escape, and
-  they can do proper submenus now.
+- **Menus got their act together** — right-click menus (images, folders,
+  albums, the theme switcher) and every dropdown (sort, folder scope, settings,
+  sidebar) now share one style with one set of manners: they stay on screen
+  instead of wandering off the edge, all close on Escape, and right-click menus
+  can do proper submenus now. Subtle Light dresses them all the same way too,
+  instead of saving the nice outfit for one dropdown.
 - **Neater lightbox details** — image and video metadata now sits in two columns,
   so the info panel shows more at a glance with less scrolling.
 - **Faster Explore revisits** — returning to a folder's visual clusters should
