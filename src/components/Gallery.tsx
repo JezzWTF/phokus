@@ -3,224 +3,10 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ImageRecord, parseSearchValue, tileSizeForZoom, useGalleryStore } from "../store";
 import { BulkActionBar } from "./BulkActionBar";
 import { ImageContextMenu } from "./ImageContextMenu";
-import { Tooltip } from "./Tooltip";
-import { mediaSrc } from "../lib/mediaSrc";
-import { CheckIcon, PhotoIcon, PlayIcon, StarIcon, WarningIcon } from "./icons";
+import { GalleryEmptyState, GalleryLoadingState } from "./gallery/GalleryEmptyState";
+import { ImageTile } from "./gallery/ImageTile";
 
 const GAP = 6;
-
-function formatDuration(durationMs: number | null): string | null {
-  if (!durationMs || durationMs <= 0) return null;
-  const totalSeconds = Math.floor(durationMs / 1000);
-  const seconds = totalSeconds % 60;
-  const minutes = Math.floor(totalSeconds / 60) % 60;
-  const hours = Math.floor(totalSeconds / 3600);
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-  }
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-export function ImageTile({
-  image,
-  onClick,
-  onContextMenu,
-}: {
-  image: ImageRecord;
-  onClick: () => void;
-  onContextMenu: (event: React.MouseEvent<HTMLDivElement>) => void;
-}) {
-  const [loaded, setLoaded] = useState(false);
-  const [errored, setErrored] = useState(false);
-  const findSimilar = useGalleryStore((state) => state.findSimilar);
-  const selected = useGalleryStore((state) => state.gallerySelectedIds.has(image.id));
-  const selectionActive = useGalleryStore((state) => state.gallerySelectedIds.size > 0);
-  const toggleGallerySelected = useGalleryStore((state) => state.toggleGallerySelected);
-  const canFindSimilar = image.embedding_status === "ready";
-
-  const src = mediaSrc(image.thumbnail_path);
-
-  return (
-    <div
-      className={`media-dark-surface group relative overflow-hidden rounded-xl bg-white/[0.04] text-left focus:outline-none transition-shadow ${
-        selected ? "ring-2 ring-inset ring-blue-400/80" : ""
-      }`}
-      style={{ width: "100%", aspectRatio: "1 / 1" }}
-      onContextMenu={onContextMenu}
-    >
-      {/* Full-tile click target — opens, or toggles selection while selecting.
-          A real button (over the non-interactive tile div) keeps it keyboard-
-          accessible without nesting buttons. */}
-      <button
-        type="button"
-        className="absolute inset-0 z-10 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80"
-        aria-label={`Open ${image.filename}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          if (selectionActive) toggleGallerySelected(image.id);
-          else onClick();
-        }}
-        onDoubleClick={(event) => {
-          event.stopPropagation();
-          onClick();
-        }}
-      />
-      {/* Selection corner — a top-left zone that reveals the checkbox only when
-          hovered (not the whole tile) and toggles selection on click. The
-          checkbox stays visible once the item is selected. */}
-      <button
-        type="button"
-        role="checkbox"
-        aria-checked={selected}
-        aria-label={selected ? "Deselect" : "Select"}
-        className="group/cb absolute top-0 left-0 z-20 h-11 w-11 cursor-pointer"
-        onClick={(event) => {
-          event.stopPropagation();
-          toggleGallerySelected(image.id);
-        }}
-      >
-        <div
-          className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full border transition-all duration-150 ${
-            selected
-              ? "border-blue-400 bg-blue-500 text-white opacity-100"
-              : "border-white/70 bg-black/40 text-transparent opacity-0 backdrop-blur-sm group-hover/cb:opacity-100"
-          }`}
-        >
-          <CheckIcon className="h-3 w-3" strokeWidth={3} />
-        </div>
-      </button>
-      {/* Image / placeholder */}
-      {src && !errored ? (
-        <>
-          {!loaded && <div className="absolute inset-0 animate-pulse bg-white/[0.04]" />}
-          <img
-            src={src}
-            alt={image.filename}
-            className={`h-full w-full object-cover transition-all duration-300 ${
-              loaded ? "opacity-100 scale-100" : "opacity-0 scale-[1.02]"
-            } group-hover:scale-[1.03]`}
-            loading="lazy"
-            onLoad={() => setLoaded(true)}
-            onError={() => setErrored(true)}
-          />
-        </>
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/[0.03] text-white/20">
-          {image.media_kind === "video" ? (
-            <PlayIcon className="h-7 w-7" />
-          ) : (
-            <PhotoIcon className="h-7 w-7" strokeWidth={1} />
-          )}
-        </div>
-      )}
-
-      {/* Video play icon — subtle at rest, visible on hover */}
-      {image.media_kind === "video" && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="rounded-full bg-black/40 p-3 text-white backdrop-blur-sm opacity-50 group-hover:opacity-90 transition-opacity duration-200">
-            <PlayIcon className="h-5 w-5" />
-          </div>
-        </div>
-      )}
-
-      {/* Persistent badges — only shown when meaningful */}
-      <div className="absolute top-2 right-2 flex flex-col items-end gap-1 pointer-events-none">
-        {image.embedding_status === "failed" && (
-          <Tooltip label={image.embedding_error ?? "Embedding failed"} followCursor className="pointer-events-auto">
-            <div className="flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 backdrop-blur-sm">
-              <WarningIcon className="h-2.5 w-2.5 shrink-0" strokeWidth={2.5} />
-            </div>
-          </Tooltip>
-        )}
-        {image.favorite && (
-          <div className="rounded-full bg-black/50 p-1 text-rose-400 backdrop-blur-sm">
-            <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" />
-            </svg>
-          </div>
-        )}
-        {image.rating > 0 && (
-          <div className="flex items-center gap-0.5 rounded-md bg-black/60 px-1.5 py-1 text-amber-300 backdrop-blur-sm">
-            {Array.from({ length: image.rating }, (_, index) => (
-              <StarIcon key={index} className="h-2.5 w-2.5" />
-            ))}
-          </div>
-        )}
-        {image.media_kind === "video" && image.duration_ms && (
-          <div className="rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white/80 backdrop-blur-sm">
-            {formatDuration(image.duration_ms)}
-          </div>
-        )}
-      </div>
-
-      {/* Hover overlay — slides up from bottom */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none" />
-
-      {/* Hover info — appears with overlay */}
-      <div className="absolute bottom-0 left-0 right-0 z-20 p-2.5 translate-y-1 group-hover:translate-y-0 opacity-0 group-hover:opacity-100 transition-all duration-200">
-        <TruncatedFilename filename={image.filename} />
-        <div className="mt-1.5 flex items-center justify-between gap-2">
-          {image.rating > 0 ? (
-            <div className="flex items-center gap-0.5">
-              {Array.from({ length: image.rating }, (_, i) => (
-                <StarIcon key={i} className="h-2.5 w-2.5 text-amber-300" />
-              ))}
-            </div>
-          ) : (
-            <span />
-          )}
-          <button
-            className={`relative z-20 rounded-md px-2 py-0.5 text-[10px] transition-colors pointer-events-auto backdrop-blur-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80 ${
-              canFindSimilar
-                ? "bg-white/10 text-white/80 hover:bg-white/20 hover:text-white"
-                : "bg-white/5 text-white/30 cursor-not-allowed"
-            }`}
-            onClick={(event) => {
-              event.stopPropagation();
-              if (!canFindSimilar) return;
-              findSimilar(image.id, image.folder_id);
-            }}
-            disabled={!canFindSimilar}
-          >
-            Similar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TruncatedFilename({ filename }: { filename: string }) {
-  const textRef = useRef<HTMLParagraphElement>(null);
-  const [isTruncated, setIsTruncated] = useState(false);
-
-  useLayoutEffect(() => {
-    const text = textRef.current;
-    if (!text) return;
-
-    const update = () => {
-      setIsTruncated(text.scrollWidth > text.clientWidth);
-    };
-
-    update();
-
-    const observer = new ResizeObserver(update);
-    observer.observe(text);
-    return () => observer.disconnect();
-  }, [filename]);
-
-  const label = (
-    <p ref={textRef} className="truncate text-[12px] font-medium leading-tight text-white">
-      {filename}
-    </p>
-  );
-
-  return (
-    <Tooltip label={filename} delay={500} block followCursor disabled={!isTruncated}>
-      {label}
-    </Tooltip>
-  );
-}
 
 export function Gallery() {
   const images = useGalleryStore((state) => state.images);
@@ -294,118 +80,74 @@ export function Gallery() {
   }, [handleScroll]);
 
   return (
-    <div className="relative flex-1 min-h-0">
-    <div ref={parentRef} className="absolute inset-0 overflow-y-auto overflow-x-hidden bg-gray-950">
-      {images.length === 0 && loadingImages ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
-          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8 min-w-72">
-            <div className="h-5 w-5 mx-auto rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
-            <p className="mt-4 text-sm text-white/40 font-medium">
-              {isSimilarResults
-                ? "Finding similar images"
-                : parsedSearch.mode === "semantic" && parsedSearch.query.length > 0
-                ? `Searching for matches to "${parsedSearch.query}"`
-                : parsedSearch.mode === "tag" && parsedSearch.query.length > 0
-                ? `Searching tags for "${parsedSearch.query}"`
-                : "Loading media"}
-            </p>
-            <p className="text-xs text-white/20 mt-1">
-              {isSimilarResults
-                ? "Comparing visual embeddings"
-                : parsedSearch.mode === "semantic" && parsedSearch.query.length > 0
-                ? "Semantic search can take a little longer than filename search"
-                : parsedSearch.mode === "tag" && parsedSearch.query.length > 0
-                ? "Matching against AI and user tags"
-                : "Fetching results"}
-            </p>
+    <div className="relative min-h-0 flex-1">
+      <div ref={parentRef} className="absolute inset-0 overflow-y-auto overflow-x-hidden bg-gray-950">
+        {images.length === 0 && loadingImages ? (
+          <GalleryLoadingState isSimilarResults={isSimilarResults} parsedSearch={parsedSearch} />
+        ) : images.length === 0 && !loadingImages ? (
+          <GalleryEmptyState
+            imageLoadError={imageLoadError}
+            isSimilarResults={isSimilarResults}
+            parsedSearch={parsedSearch}
+          />
+        ) : (
+          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const startIndex = virtualRow.index * cols;
+              const rowImages = images.slice(startIndex, startIndex + cols);
+              return (
+                <div
+                  key={virtualRow.key}
+                  style={{
+                    position: "absolute",
+                    top: virtualRow.start,
+                    width: "100%",
+                    height: virtualRow.size,
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${cols}, ${tileSize}px)`,
+                    gap: GAP,
+                    paddingLeft: GAP,
+                    paddingRight: GAP,
+                    paddingBottom: GAP,
+                    boxSizing: "border-box",
+                  }}
+                >
+                  {rowImages.map((image) => (
+                    <ImageTile
+                      key={image.id}
+                      image={image}
+                      onClick={() => openImage(image)}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        setContextMenu({ x: event.clientX, y: event.clientY, image });
+                      }}
+                    />
+                  ))}
+                </div>
+              );
+            })}
           </div>
-        </div>
-      ) : images.length === 0 && !loadingImages ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
-          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8">
-            <PhotoIcon className="h-12 w-12 mx-auto text-white/10 mb-4" strokeWidth={0.75} />
-            <p className="text-sm text-white/30 font-medium">
-              {imageLoadError
-                ? "Could not load results"
-                : isSimilarResults
-                ? "No similar images found"
-                : parsedSearch.mode === "semantic" && parsedSearch.query.length > 0
-                ? "No semantic matches found"
-                : parsedSearch.mode === "tag" && parsedSearch.query.length > 0
-                ? "No tag matches found"
-                : "No media found"}
-            </p>
-            <p className="text-xs text-white/15 mt-1">
-              {imageLoadError
-                ? imageLoadError
-                : isSimilarResults
-                ? "This item may be visually isolated, or more embeddings may need to finish processing"
-                : parsedSearch.mode === "semantic" && parsedSearch.query.length > 0
-                ? "Try a broader phrase, or wait for more embeddings to finish processing"
-                : parsedSearch.mode === "tag" && parsedSearch.query.length > 0
-                ? "Try a shorter tag, or wait for more tagging jobs to finish"
-                : "Try adjusting your filters or add a new folder"}
-            </p>
+        )}
+
+        {images.length > 0 && loadingImages ? (
+          <div className="flex justify-center py-8">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
           </div>
-        </div>
-      ) : (
-        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-          {virtualizer.getVirtualItems().map((virtualRow) => {
-            const startIndex = virtualRow.index * cols;
-            const rowImages = images.slice(startIndex, startIndex + cols);
-            return (
-              <div
-                key={virtualRow.key}
-                style={{
-                  position: "absolute",
-                  top: virtualRow.start,
-                  width: "100%",
-                  height: virtualRow.size,
-                  display: "grid",
-                  gridTemplateColumns: `repeat(${cols}, ${tileSize}px)`,
-                  gap: GAP,
-                  paddingLeft: GAP,
-                  paddingRight: GAP,
-                  paddingBottom: GAP,
-                  boxSizing: "border-box",
-                }}
-              >
-                {rowImages.map((image) => (
-                  <ImageTile
-                    key={image.id}
-                    image={image}
-                    onClick={() => openImage(image)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setContextMenu({ x: event.clientX, y: event.clientY, image });
-                    }}
-                  />
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      )}
+        ) : null}
 
-      {images.length > 0 && loadingImages ? (
-        <div className="flex justify-center py-8">
-          <div className="h-4 w-4 rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
-        </div>
-      ) : null}
+        {contextMenu ? (
+          <ImageContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            image={contextMenu.image}
+            onClose={() => setContextMenu(null)}
+          />
+        ) : null}
+      </div>
 
-      {contextMenu ? (
-        <ImageContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          image={contextMenu.image}
-          onClose={() => setContextMenu(null)}
-        />
-      ) : null}
-    </div>
-
-    {/* Pinned to the bottom of the gallery viewport — outside the scroll
-        container so it stays put while the grid scrolls. */}
-    <BulkActionBar />
+      {/* Pinned to the bottom of the gallery viewport — outside the scroll
+          container so it stays put while the grid scrolls. */}
+      <BulkActionBar />
     </div>
   );
 }

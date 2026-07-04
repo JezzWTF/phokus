@@ -1,90 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ImageRecord, tileSizeForZoom, useGalleryStore } from "../store";
-import { ImageTile } from "./Gallery";
+import { ImageTile } from "./gallery/ImageTile";
 import { ImageContextMenu } from "./ImageContextMenu";
-import { Tooltip } from "./Tooltip";
+import { ScrubberYearBlock } from "./timeline/ScrubberYearBlock";
+import { TimelineEmptyState, TimelineLoadingState } from "./timeline/TimelineEmptyState";
+import { buildScrubberYears, buildTimelineRows, groupImages } from "./timeline/timelineModel";
 
 const GAP = 6;
 const HEADER_HEIGHT = 52;
 const SCRUBBER_WIDTH = 48;
-const MONTH_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"] as const;
-
-interface TimelineGroup {
-  key: string;
-  label: string;
-  images: ImageRecord[];
-}
-
-// One virtualized row: either a month header or a row of up to `cols` tiles.
-type TimelineRow =
-  | { type: "header"; group: TimelineGroup }
-  | { type: "tiles"; images: ImageRecord[] };
-
-interface ScrubberMonth {
-  monthNum: number;
-  label: string;
-  groupIndex: number;
-}
-
-interface ScrubberYear {
-  year: string;
-  firstGroupIndex: number;
-  months: ScrubberMonth[];
-}
-
-function buildLabel(key: string): string {
-  if (key === "unknown") return "Unknown Date";
-  const [yearStr, monthStr] = key.split("-");
-  const year = Number(yearStr);
-  const month = Number(monthStr);
-  if (!isFinite(year) || !isFinite(month) || month < 1 || month > 12) return "Unknown Date";
-  const date = new Date(year, month - 1);
-  if (isNaN(date.getTime())) return "Unknown Date";
-  return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-}
-
-function groupImages(images: ImageRecord[]): TimelineGroup[] {
-  const map = new Map<string, ImageRecord[]>();
-  for (const img of images) {
-    const ds = img.taken_at ?? img.modified_at;
-    const key = ds ? ds.substring(0, 7) : "unknown";
-    let bucket = map.get(key);
-    if (bucket === undefined) {
-      bucket = [];
-      map.set(key, bucket);
-    }
-    bucket.push(img);
-  }
-  return Array.from(map.entries())
-    .sort(([a], [b]) => {
-      if (a === "unknown") return 1;
-      if (b === "unknown") return -1;
-      return a < b ? -1 : a > b ? 1 : 0;
-    })
-    .map(([key, imgs]) => ({ key, label: buildLabel(key), images: imgs }));
-}
-
-function buildScrubberYears(groups: TimelineGroup[]): ScrubberYear[] {
-  const byYear = new Map<string, ScrubberYear>();
-  for (let i = 0; i < groups.length; i++) {
-    const group = groups[i];
-    if (group.key === "unknown") continue;
-    const year = group.key.substring(0, 4);
-    const monthNum = Number(group.key.substring(5, 7));
-    if (!byYear.has(year)) {
-      byYear.set(year, { year, firstGroupIndex: i, months: [] });
-    }
-    byYear.get(year)!.months.push({
-      monthNum,
-      label: MONTH_SHORT[monthNum - 1] ?? "",
-      groupIndex: i,
-    });
-  }
-  // Keep insertion order so the scrubber runs the same direction as the scrolled
-  // content (oldest at top with taken_asc), keeping the active highlight aligned.
-  return Array.from(byYear.values());
-}
 
 export function Timeline() {
   const images = useGalleryStore((s) => s.images);
@@ -130,26 +55,10 @@ export function Timeline() {
     [containerWidth, tileSize],
   );
 
-  // Flatten the month groups into a single list of fixed-height rows — one
-  // header row per group, then one tile-row per `cols` images. This lets the
-  // virtualizer render only the on-screen rows, exactly like the Gallery.
-  // Previously each *group* was one virtual item that rendered ALL of its
-  // images, so scrolling into a busy month mounted thousands of tiles at once.
-  const { rows, rowToGroupIndex, groupFirstRow } = useMemo(() => {
-    const rows: TimelineRow[] = [];
-    const rowToGroupIndex: number[] = [];
-    const groupFirstRow: number[] = [];
-    groups.forEach((group, groupIndex) => {
-      groupFirstRow[groupIndex] = rows.length;
-      rows.push({ type: "header", group });
-      rowToGroupIndex.push(groupIndex);
-      for (let i = 0; i < group.images.length; i += cols) {
-        rows.push({ type: "tiles", images: group.images.slice(i, i + cols) });
-        rowToGroupIndex.push(groupIndex);
-      }
-    });
-    return { rows, rowToGroupIndex, groupFirstRow };
-  }, [groups, cols]);
+  const { rows, rowToGroupIndex, groupFirstRow } = useMemo(
+    () => buildTimelineRows(groups, cols),
+    [groups, cols],
+  );
 
   const estimateSize = useCallback(
     (index: number): number =>
@@ -223,37 +132,9 @@ export function Timeline() {
         className="relative flex-1 overflow-y-auto overflow-x-hidden min-h-0"
       >
         {images.length === 0 && loadingImages ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
-            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8 min-w-72">
-              <div className="h-5 w-5 mx-auto rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
-              <p className="mt-4 text-sm text-white/40 font-medium">Loading timeline</p>
-              <p className="text-xs text-white/20 mt-1">Fetching results</p>
-            </div>
-          </div>
+          <TimelineLoadingState />
         ) : images.length === 0 ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-8 absolute inset-0">
-            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8">
-              <svg
-                className="h-12 w-12 mx-auto text-white/10 mb-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={0.75}
-                  d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                />
-              </svg>
-              <p className="text-sm text-white/30 font-medium">
-                {imageLoadError ? "Could not load timeline" : "No media found"}
-              </p>
-              <p className="text-xs text-white/15 mt-1">
-                {imageLoadError ?? "Add a folder to see your timeline"}
-              </p>
-            </div>
-          </div>
+          <TimelineEmptyState imageLoadError={imageLoadError} />
         ) : (
           <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
             {virtualizer.getVirtualItems().map((virtualItem) => {
@@ -345,54 +226,6 @@ export function Timeline() {
           onClose={() => setContextMenu(null)}
         />
       ) : null}
-    </div>
-  );
-}
-
-interface ScrubberYearBlockProps {
-  yearEntry: ScrubberYear;
-  activeGroupIndex: number;
-  onScrollTo: (index: number) => void;
-}
-
-function ScrubberYearBlock({ yearEntry, activeGroupIndex, onScrollTo }: ScrubberYearBlockProps) {
-  const isYearActive = yearEntry.months.some((m) => m.groupIndex === activeGroupIndex);
-
-  return (
-    <div className="w-full flex flex-col items-center">
-      <Tooltip label={yearEntry.year} anchorToCursor>
-        <button
-          className={`w-full text-center py-0.5 text-[10px] font-semibold tracking-wide transition-colors ${
-            isYearActive ? "text-white/80" : "text-white/30 hover:text-white/55"
-          }`}
-          onClick={() => onScrollTo(yearEntry.firstGroupIndex)}
-        >
-          {yearEntry.year}
-        </button>
-      </Tooltip>
-      <div
-        className="grid gap-[3px] pb-1.5"
-        style={{ gridTemplateColumns: "repeat(3, 10px)" }}
-      >
-        {Array.from({ length: 12 }, (_, i) => {
-          const monthNum = i + 1;
-          const monthEntry = yearEntry.months.find((m) => m.monthNum === monthNum);
-          const isActive = monthEntry !== undefined && monthEntry.groupIndex === activeGroupIndex;
-          if (!monthEntry) {
-            return <span key={monthNum} className="h-[10px] w-[10px]" />;
-          }
-          return (
-            <Tooltip key={monthNum} label={`${monthEntry.label} ${yearEntry.year}`} anchorToCursor>
-              <button
-                onClick={() => onScrollTo(monthEntry.groupIndex)}
-                className={`h-[10px] w-[10px] rounded-full transition-colors ${
-                  isActive ? "bg-white/70" : "bg-white/15 hover:bg-white/40"
-                }`}
-              />
-            </Tooltip>
-          );
-        })}
-      </div>
     </div>
   );
 }
