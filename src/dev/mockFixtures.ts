@@ -11,7 +11,7 @@ import type {
   SortOrder,
   VisualClusterEntry,
 } from '../store'
-import type { MockScenario } from './mockScenarios'
+import { isEmptyLibraryScenario, type MockScenario } from './mockScenarios'
 import { fixtureMediaPath } from './mockMedia'
 
 export interface MockDb {
@@ -210,7 +210,7 @@ function makeImage(index: number, folderId: number, scenario: MockScenario): Ima
 }
 
 function makeFolders(scenario: MockScenario): Folder[] {
-  if (scenario === 'empty') return []
+  if (isEmptyLibraryScenario(scenario)) return []
   const names = scenario === 'extreme' ? extremeFolderNames : folderNames
   return names.map((name, index) => ({
     id: index + 1,
@@ -224,7 +224,7 @@ function makeFolders(scenario: MockScenario): Folder[] {
 }
 
 function makeImages(scenario: MockScenario, folders: Folder[]): ImageRecord[] {
-  if (scenario === 'empty') return []
+  if (isEmptyLibraryScenario(scenario)) return []
   const count =
     scenario === 'extreme' ? 1_440 : scenario === 'huge' ? 720 : scenario === 'errors' ? 54 : 72
   const images = Array.from({ length: count }, (_, index) =>
@@ -268,7 +268,7 @@ function makeAlbums(
   images: ImageRecord[],
   scenario: MockScenario
 ): { albums: Album[]; albumImageIds: Record<number, number[]> } {
-  if (scenario === 'empty') return { albums: [], albumImageIds: {} }
+  if (isEmptyLibraryScenario(scenario)) return { albums: [], albumImageIds: {} }
   const selects = images
     .filter((image) => image.rating >= 4)
     .slice(0, 36)
@@ -401,7 +401,7 @@ function makeExploreTags(images: ImageRecord[], scenario: MockScenario): Explore
 }
 
 function makeDuplicateGroups(images: ImageRecord[], scenario: MockScenario): DuplicateGroup[] {
-  if (scenario === 'empty') return []
+  if (isEmptyLibraryScenario(scenario)) return []
   const candidates = images.filter((image) => image.media_kind === 'image')
   const groups = [0, 1, 2, 3]
     .map((groupIndex) => ({

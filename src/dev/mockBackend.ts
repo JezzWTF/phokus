@@ -11,14 +11,18 @@ import type {
   TaggerRuntimeProbe,
 } from '../store'
 import { compareImages, createMockDb, mockExif } from './mockFixtures'
-import { getMockScenario } from './mockScenarios'
+import { getMockScenario, isEmptyLibraryScenario } from './mockScenarios'
 
 const db = createMockDb(getMockScenario())
 let nextFolderId = 100
 let nextAlbumId = 100
 let nextTagId = 10_000
+// A true first run ('new-user') has no tagger model downloaded yet, so the
+// onboarding AI step offers the real model-choice + download flow.
+const taggerStartsUnready = (scenario: typeof db.scenario) =>
+  scenario === 'unready' || scenario === 'joytag-unready' || scenario === 'new-user'
 let mockTaggerModel: TaggerModel = db.scenario === 'joytag-unready' ? 'joytag' : 'wd'
-let mockTaggerReady = db.scenario !== 'unready' && db.scenario !== 'joytag-unready'
+let mockTaggerReady = !taggerStartsUnready(db.scenario)
 const mockTaggerThresholds: Record<TaggerModel, number> = {
   wd: 0.35,
   joytag: 0.4,
@@ -405,9 +409,9 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
     case 'find_similar_by_region':
       return similarImages(payload)
     case 'get_visual_clusters':
-      return db.scenario === 'empty' ? [] : db.visualClusters
+      return isEmptyLibraryScenario(db.scenario) ? [] : db.visualClusters
     case 'get_explore_tags':
-      return db.scenario === 'empty'
+      return isEmptyLibraryScenario(db.scenario)
         ? []
         : db.scenario === 'extreme'
           ? db.exploreTags
@@ -607,7 +611,7 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
       return mockTaggerModel
     case 'set_tagger_model':
       mockTaggerModel = p.model ?? 'wd'
-      mockTaggerReady = db.scenario !== 'unready' && db.scenario !== 'joytag-unready'
+      mockTaggerReady = !taggerStartsUnready(db.scenario)
       return mockTaggerModel
     case 'prepare_tagger_model':
       mockTaggerReady = true
@@ -644,8 +648,11 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
       return null
     case 'get_notifications_paused':
     case 'get_worker_pauses_persist':
+      return !isEmptyLibraryScenario(db.scenario)
+    // Only 'new-user' greets with the onboarding tour; 'empty' is a bare
+    // library that has already been through it.
     case 'get_onboarding_completed':
-      return db.scenario !== 'empty'
+      return db.scenario !== 'new-user'
     case 'set_onboarding_completed':
     case 'set_last_seen_version':
       return null
@@ -659,8 +666,10 @@ export async function handleMockCommand(cmd: string, payload?: unknown): Promise
       }))
     case 'get_build_variant':
       return 'cpu'
+    // 'just-updated' reports an older last-seen version, so the real
+    // initWhatsNew logic fires the post-update "What's new" toast on launch.
     case 'get_last_seen_version':
-      return '0.1.1-ui'
+      return db.scenario === 'just-updated' ? '0.1.0' : '0.1.1-ui'
     case 'get_ffmpeg_status':
       return { installed: true, downloading: false, failed: false }
     case 'retry_ffmpeg_download':

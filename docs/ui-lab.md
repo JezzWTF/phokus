@@ -40,7 +40,9 @@ UI Lab reads `?scenario=` from the URL. If no scenario is provided, it uses
 | URL | Purpose |
 | --- | --- |
 | `/?scenario=rich` | Default realistic library with folders, albums, ratings, favorites, tags, images, and videos |
-| `/?scenario=empty` | First-run state with no folders or media |
+| `/?scenario=empty` | Empty library with no folders or media (onboarding already completed) |
+| `/?scenario=new-user` | True first run: onboarding tour open, empty library, no tagger model downloaded |
+| `/?scenario=just-updated` | Rich library that has just been updated — the "What's new" toast fires on launch |
 | `/?scenario=busy` | Background workers with pending thumbnail, metadata, embedding, caption, and tagging jobs |
 | `/?scenario=duplicates` | Duplicate Finder opened with duplicate groups already available |
 | `/?scenario=album` | Gallery opened directly into an album |
@@ -68,6 +70,9 @@ for small releases, a two-pane section rail for large ones). UI Lab reads
 | `/?changelog=0.1.1` | Any specific released version |
 
 Open the modal via the demo panel: `Ctrl+Shift+D` → Open "What's new" modal.
+
+Combine with the scenario above to walk the whole post-update greeting for the
+next release: `/?scenario=just-updated&changelog=unreleased`.
 
 ## How It Works
 
