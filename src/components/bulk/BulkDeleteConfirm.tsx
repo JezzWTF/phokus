@@ -1,13 +1,18 @@
-import { WarningIcon } from "../icons";
+import { WarningIcon } from '../icons'
 
 interface BulkDeleteConfirmProps {
-  deleting: boolean;
-  selectedCount: number;
-  onCancel: () => void;
-  onDelete: () => Promise<void>;
+  deleting: boolean
+  selectedCount: number
+  onCancel: () => void
+  onDelete: () => Promise<void>
 }
 
-export function BulkDeleteConfirm({ deleting, selectedCount, onCancel, onDelete }: BulkDeleteConfirmProps) {
+export function BulkDeleteConfirm({
+  deleting,
+  selectedCount,
+  onCancel,
+  onDelete,
+}: BulkDeleteConfirmProps) {
   return (
     <div
       data-bulk-popover
@@ -18,8 +23,8 @@ export function BulkDeleteConfirm({ deleting, selectedCount, onCancel, onDelete 
         <p className="text-xs font-semibold">Delete from disk</p>
       </div>
       <p className="mb-2.5 text-[11px] leading-relaxed text-gray-400">
-        Permanently delete {selectedCount} file{selectedCount === 1 ? "" : "s"} from your computer. This removes
-        the actual file{selectedCount === 1 ? "" : "s"} from disk and cannot be undone.
+        Permanently delete {selectedCount} file{selectedCount === 1 ? '' : 's'} from your computer.
+        This removes the actual file{selectedCount === 1 ? '' : 's'} from disk and cannot be undone.
       </p>
       <div className="flex justify-end gap-1.5">
         <button
@@ -33,9 +38,9 @@ export function BulkDeleteConfirm({ deleting, selectedCount, onCancel, onDelete 
           onClick={() => void onDelete()}
           disabled={deleting}
         >
-          {deleting ? "Deleting…" : `Delete ${selectedCount} from disk`}
+          {deleting ? 'Deleting…' : `Delete ${selectedCount} from disk`}
         </button>
       </div>
     </div>
-  );
+  )
 }

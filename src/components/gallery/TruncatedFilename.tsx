@@ -1,34 +1,34 @@
-import { useLayoutEffect, useRef, useState } from "react";
-import { Tooltip } from "../Tooltip";
+import { useLayoutEffect, useRef, useState } from 'react'
+import { Tooltip } from '../Tooltip'
 
 export function TruncatedFilename({ filename }: { filename: string }) {
-  const textRef = useRef<HTMLParagraphElement>(null);
-  const [isTruncated, setIsTruncated] = useState(false);
+  const textRef = useRef<HTMLParagraphElement>(null)
+  const [isTruncated, setIsTruncated] = useState(false)
 
   useLayoutEffect(() => {
-    const text = textRef.current;
-    if (!text) return;
+    const text = textRef.current
+    if (!text) return
 
     const update = () => {
-      setIsTruncated(text.scrollWidth > text.clientWidth);
-    };
+      setIsTruncated(text.scrollWidth > text.clientWidth)
+    }
 
-    update();
+    update()
 
-    const observer = new ResizeObserver(update);
-    observer.observe(text);
-    return () => observer.disconnect();
-  }, [filename]);
+    const observer = new ResizeObserver(update)
+    observer.observe(text)
+    return () => observer.disconnect()
+  }, [filename])
 
   const label = (
-    <p ref={textRef} className="truncate text-[12px] font-medium leading-tight text-white">
+    <p ref={textRef} className="truncate text-[12px] leading-tight font-medium text-white">
       {filename}
     </p>
-  );
+  )
 
   return (
     <Tooltip label={filename} delay={500} block followCursor disabled={!isTruncated}>
       {label}
     </Tooltip>
-  );
+  )
 }

@@ -1,7 +1,7 @@
-import { ReactNode, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { MenuCloseContext, MenuPanel, MenuSize } from "./Menu";
-import { useDismissable } from "./useDismissable";
+import { ReactNode, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { MenuCloseContext, MenuPanel, MenuSize } from './Menu'
+import { useDismissable } from './useDismissable'
 
 /**
  * Positioned floating menu. Renders through a portal so it is never caught
@@ -16,35 +16,35 @@ export function ContextMenu({
   x,
   y,
   onClose,
-  size = "md",
-  align = "start",
+  size = 'md',
+  align = 'start',
   className,
   children,
 }: {
-  x: number;
-  y: number;
-  onClose: () => void;
-  size?: MenuSize;
-  align?: "start" | "end";
-  className?: string;
-  children: ReactNode;
+  x: number
+  y: number
+  onClose: () => void
+  size?: MenuSize
+  align?: 'start' | 'end'
+  className?: string
+  children: ReactNode
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
 
-  useDismissable(ref, onClose);
+  useDismissable(ref, onClose)
 
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const margin = 8;
-    const rect = el.getBoundingClientRect();
-    const desiredLeft = align === "end" ? x - rect.width : x;
+    const el = ref.current
+    if (!el) return
+    const margin = 8
+    const rect = el.getBoundingClientRect()
+    const desiredLeft = align === 'end' ? x - rect.width : x
     setPos({
       left: Math.max(margin, Math.min(desiredLeft, window.innerWidth - rect.width - margin)),
       top: Math.max(margin, Math.min(y, window.innerHeight - rect.height - margin)),
-    });
-  }, [x, y, align]);
+    })
+  }, [x, y, align])
 
   return createPortal(
     <div
@@ -52,7 +52,7 @@ export function ContextMenu({
       className="fixed z-50"
       // Render hidden at the raw coordinates for the measuring pass; the
       // layout effect swaps in the clamped position before paint.
-      style={pos ?? { left: x, top: y, visibility: "hidden" }}
+      style={pos ?? { left: x, top: y, visibility: 'hidden' }}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >
@@ -62,6 +62,6 @@ export function ContextMenu({
         </MenuPanel>
       </MenuCloseContext.Provider>
     </div>,
-    document.body,
-  );
+    document.body
+  )
 }

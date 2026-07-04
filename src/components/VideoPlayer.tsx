@@ -1,13 +1,13 @@
-import { VideoControls } from "./videoPlayer/VideoControls";
-import { useVideoPlayer } from "./videoPlayer/useVideoPlayer";
+import { VideoControls } from './videoPlayer/VideoControls'
+import { useVideoPlayer } from './videoPlayer/useVideoPlayer'
 
 export function VideoPlayer({ src }: { src: string }) {
-  const player = useVideoPlayer(src);
+  const player = useVideoPlayer(src)
 
   return (
     <div
       ref={player.containerRef}
-      className={`media-dark-surface relative flex h-full w-full items-center justify-center bg-black ${player.controlsVisible ? "" : "cursor-none"}`}
+      className={`media-dark-surface relative flex h-full w-full items-center justify-center bg-black ${player.controlsVisible ? '' : 'cursor-none'}`}
       onPointerMove={player.showControls}
       onClick={(event) => event.stopPropagation()}
     >
@@ -18,17 +18,17 @@ export function VideoPlayer({ src }: { src: string }) {
         onClick={player.togglePlay}
         onDoubleClick={player.toggleFullscreen}
         onPlay={() => {
-          player.setPlaying(true);
-          player.showControls();
+          player.setPlaying(true)
+          player.showControls()
         }}
         onPause={() => {
-          player.setPlaying(false);
-          player.setControlsVisible(true);
+          player.setPlaying(false)
+          player.setControlsVisible(true)
         }}
         onTimeUpdate={(event) => player.setCurrentTime(event.currentTarget.currentTime)}
         onLoadedMetadata={(event) => {
-          player.setDuration(event.currentTarget.duration);
-          player.readBuffered();
+          player.setDuration(event.currentTarget.duration)
+          player.readBuffered()
         }}
         onDurationChange={(event) => player.setDuration(event.currentTarget.duration)}
         onProgress={player.readBuffered}
@@ -60,5 +60,5 @@ export function VideoPlayer({ src }: { src: string }) {
         trackRef={player.trackRef}
       />
     </div>
-  );
+  )
 }

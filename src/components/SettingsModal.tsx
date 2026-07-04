@@ -1,58 +1,58 @@
-import { useEffect, useState } from "react";
-import { useGalleryStore } from "../store";
-import { Tooltip } from "./Tooltip";
-import { CloseIcon } from "./icons";
-import { AiWorkspaceSettingsSection } from "./settings/AiWorkspaceSettingsSection";
-import { GeneralSettingsSection } from "./settings/GeneralSettingsSection";
-import { MediaSettingsSection } from "./settings/MediaSettingsSection";
-import { StorageSettingsSection } from "./settings/StorageSettingsSection";
-import { UpdatesSettingsSection } from "./settings/UpdatesSettingsSection";
-import { SETTINGS_SECTIONS, SettingsSection } from "./settings/shared";
+import { useEffect, useState } from 'react'
+import { useGalleryStore } from '../store'
+import { Tooltip } from './Tooltip'
+import { CloseIcon } from './icons'
+import { AiWorkspaceSettingsSection } from './settings/AiWorkspaceSettingsSection'
+import { GeneralSettingsSection } from './settings/GeneralSettingsSection'
+import { MediaSettingsSection } from './settings/MediaSettingsSection'
+import { StorageSettingsSection } from './settings/StorageSettingsSection'
+import { UpdatesSettingsSection } from './settings/UpdatesSettingsSection'
+import { SETTINGS_SECTIONS, SettingsSection } from './settings/shared'
 
 function ActiveSettingsSection({ section }: { section: SettingsSection }) {
   switch (section) {
-    case "workspace":
-      return <AiWorkspaceSettingsSection />;
-    case "media":
-      return <MediaSettingsSection />;
-    case "updates":
-      return <UpdatesSettingsSection />;
-    case "storage":
-      return <StorageSettingsSection />;
-    case "general":
+    case 'workspace':
+      return <AiWorkspaceSettingsSection />
+    case 'media':
+      return <MediaSettingsSection />
+    case 'updates':
+      return <UpdatesSettingsSection />
+    case 'storage':
+      return <StorageSettingsSection />
+    case 'general':
     default:
-      return <GeneralSettingsSection />;
+      return <GeneralSettingsSection />
   }
 }
 
 export function SettingsModal() {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("general");
+  const [activeSection, setActiveSection] = useState<SettingsSection>('general')
 
-  const settingsOpen = useGalleryStore((state) => state.settingsOpen);
-  const setSettingsOpen = useGalleryStore((state) => state.setSettingsOpen);
-  const loadTaggingQueueScope = useGalleryStore((state) => state.loadTaggingQueueScope);
-  const loadTaggingQueueFolderIds = useGalleryStore((state) => state.loadTaggingQueueFolderIds);
-  const loadTaggerModelStatus = useGalleryStore((state) => state.loadTaggerModelStatus);
-  const loadTaggerAcceleration = useGalleryStore((state) => state.loadTaggerAcceleration);
-  const loadTaggerModel = useGalleryStore((state) => state.loadTaggerModel);
-  const loadTaggerThreshold = useGalleryStore((state) => state.loadTaggerThreshold);
-  const loadTaggerBatchSize = useGalleryStore((state) => state.loadTaggerBatchSize);
+  const settingsOpen = useGalleryStore((state) => state.settingsOpen)
+  const setSettingsOpen = useGalleryStore((state) => state.setSettingsOpen)
+  const loadTaggingQueueScope = useGalleryStore((state) => state.loadTaggingQueueScope)
+  const loadTaggingQueueFolderIds = useGalleryStore((state) => state.loadTaggingQueueFolderIds)
+  const loadTaggerModelStatus = useGalleryStore((state) => state.loadTaggerModelStatus)
+  const loadTaggerAcceleration = useGalleryStore((state) => state.loadTaggerAcceleration)
+  const loadTaggerModel = useGalleryStore((state) => state.loadTaggerModel)
+  const loadTaggerThreshold = useGalleryStore((state) => state.loadTaggerThreshold)
+  const loadTaggerBatchSize = useGalleryStore((state) => state.loadTaggerBatchSize)
 
   useEffect(() => {
-    if (!settingsOpen) return;
-    void loadTaggerModelStatus();
-    void loadTaggerModel();
-    void loadTaggerAcceleration();
-    void loadTaggerThreshold();
-    void loadTaggerBatchSize();
-    void loadTaggingQueueScope();
-    void loadTaggingQueueFolderIds();
+    if (!settingsOpen) return
+    void loadTaggerModelStatus()
+    void loadTaggerModel()
+    void loadTaggerAcceleration()
+    void loadTaggerThreshold()
+    void loadTaggerBatchSize()
+    void loadTaggingQueueScope()
+    void loadTaggingQueueFolderIds()
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSettingsOpen(false);
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+      if (event.key === 'Escape') setSettingsOpen(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [
     settingsOpen,
     loadTaggerModelStatus,
@@ -63,14 +63,18 @@ export function SettingsModal() {
     loadTaggingQueueScope,
     loadTaggingQueueFolderIds,
     setSettingsOpen,
-  ]);
+  ])
 
-  if (!settingsOpen) return null;
+  if (!settingsOpen) return null
 
-  const activeSectionMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
+  const activeSectionMeta =
+    SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0]
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/65 px-6 backdrop-blur-sm" onClick={() => setSettingsOpen(false)}>
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/65 px-6 backdrop-blur-sm"
+      onClick={() => setSettingsOpen(false)}
+    >
       <div
         className="relative flex h-[min(85vh,900px)] w-[min(85vw,1400px)] overflow-hidden rounded-lg border border-white/10 bg-gray-950 shadow-2xl shadow-black/60"
         onClick={(event) => event.stopPropagation()}
@@ -84,7 +88,9 @@ export function SettingsModal() {
               <button
                 key={section.id}
                 className={`w-full rounded-md px-3 py-2.5 text-left transition-colors ${
-                  activeSection === section.id ? "bg-white/10 text-white" : "text-gray-500 hover:bg-white/[0.055] hover:text-gray-200"
+                  activeSection === section.id
+                    ? 'bg-white/10 text-white'
+                    : 'text-gray-500 hover:bg-white/[0.055] hover:text-gray-200'
                 }`}
                 onClick={() => setActiveSection(section.id)}
               >
@@ -95,7 +101,7 @@ export function SettingsModal() {
           </div>
         </aside>
 
-        <div className="absolute right-4 top-4 z-10">
+        <div className="absolute top-4 right-4 z-10">
           <Tooltip label="Close settings" anchorToCursor>
             <button
               className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
@@ -115,5 +121,5 @@ export function SettingsModal() {
         </main>
       </div>
     </div>
-  );
+  )
 }

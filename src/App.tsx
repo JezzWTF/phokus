@@ -1,100 +1,100 @@
-import { useEffect } from "react";
-import { useGalleryStore } from "./store";
-import { Sidebar } from "./components/Sidebar";
-import { BackgroundTasks } from "./components/BackgroundTasks";
-import { Toolbar } from "./components/Toolbar";
-import { Gallery } from "./components/Gallery";
-import { Lightbox } from "./components/Lightbox";
-import { ExploreView } from "./components/ExploreView";
-import { DuplicateFinder } from "./components/DuplicateFinder";
-import { Timeline } from "./components/Timeline";
-import { TitleBar } from "./components/TitleBar";
-import { SettingsModal } from "./components/SettingsModal";
-import { FolderPickerModal } from "./components/FolderPickerModal";
-import { UpdateToast } from "./components/UpdateToast";
-import { WhatsNewToast } from "./components/WhatsNewToast";
-import { WhatsNewModal } from "./components/WhatsNewModal";
-import { OnboardingOverlay } from "./components/onboarding/OnboardingOverlay";
-import { DemoPanel } from "./components/DemoPanel";
-import { initializeNotifications } from "./notifications";
+import { useEffect } from 'react'
+import { useGalleryStore } from './store'
+import { Sidebar } from './components/Sidebar'
+import { BackgroundTasks } from './components/BackgroundTasks'
+import { Toolbar } from './components/Toolbar'
+import { Gallery } from './components/Gallery'
+import { Lightbox } from './components/Lightbox'
+import { ExploreView } from './components/ExploreView'
+import { DuplicateFinder } from './components/DuplicateFinder'
+import { Timeline } from './components/Timeline'
+import { TitleBar } from './components/TitleBar'
+import { SettingsModal } from './components/SettingsModal'
+import { FolderPickerModal } from './components/FolderPickerModal'
+import { UpdateToast } from './components/UpdateToast'
+import { WhatsNewToast } from './components/WhatsNewToast'
+import { WhatsNewModal } from './components/WhatsNewModal'
+import { OnboardingOverlay } from './components/onboarding/OnboardingOverlay'
+import { DemoPanel } from './components/DemoPanel'
+import { initializeNotifications } from './notifications'
 
 export default function App() {
-  const loadFolders = useGalleryStore((state) => state.loadFolders);
-  const loadBackgroundJobProgress = useGalleryStore((state) => state.loadBackgroundJobProgress);
-  const loadImages = useGalleryStore((state) => state.loadImages);
-  const loadCaptionModelStatus = useGalleryStore((state) => state.loadCaptionModelStatus);
-  const loadTaggerModelStatus = useGalleryStore((state) => state.loadTaggerModelStatus);
-  const loadTaggerModel = useGalleryStore((state) => state.loadTaggerModel);
-  const loadDuplicateScanCache = useGalleryStore((state) => state.loadDuplicateScanCache);
-  const loadAlbums = useGalleryStore((state) => state.loadAlbums);
-  const loadMutedFolderIds = useGalleryStore((state) => state.loadMutedFolderIds);
-  const loadNotificationsPaused = useGalleryStore((state) => state.loadNotificationsPaused);
-  const loadWorkerPausesPersist = useGalleryStore((state) => state.loadWorkerPausesPersist);
-  const subscribeToProgress = useGalleryStore((state) => state.subscribeToProgress);
-  const loadAppVersion = useGalleryStore((state) => state.loadAppVersion);
-  const checkForUpdates = useGalleryStore((state) => state.checkForUpdates);
-  const loadFfmpegStatus = useGalleryStore((state) => state.loadFfmpegStatus);
-  const loadOnboardingCompleted = useGalleryStore((state) => state.loadOnboardingCompleted);
-  const initWhatsNew = useGalleryStore((state) => state.initWhatsNew);
-  const activeView = useGalleryStore((state) => state.activeView);
+  const loadFolders = useGalleryStore((state) => state.loadFolders)
+  const loadBackgroundJobProgress = useGalleryStore((state) => state.loadBackgroundJobProgress)
+  const loadImages = useGalleryStore((state) => state.loadImages)
+  const loadCaptionModelStatus = useGalleryStore((state) => state.loadCaptionModelStatus)
+  const loadTaggerModelStatus = useGalleryStore((state) => state.loadTaggerModelStatus)
+  const loadTaggerModel = useGalleryStore((state) => state.loadTaggerModel)
+  const loadDuplicateScanCache = useGalleryStore((state) => state.loadDuplicateScanCache)
+  const loadAlbums = useGalleryStore((state) => state.loadAlbums)
+  const loadMutedFolderIds = useGalleryStore((state) => state.loadMutedFolderIds)
+  const loadNotificationsPaused = useGalleryStore((state) => state.loadNotificationsPaused)
+  const loadWorkerPausesPersist = useGalleryStore((state) => state.loadWorkerPausesPersist)
+  const subscribeToProgress = useGalleryStore((state) => state.subscribeToProgress)
+  const loadAppVersion = useGalleryStore((state) => state.loadAppVersion)
+  const checkForUpdates = useGalleryStore((state) => state.checkForUpdates)
+  const loadFfmpegStatus = useGalleryStore((state) => state.loadFfmpegStatus)
+  const loadOnboardingCompleted = useGalleryStore((state) => state.loadOnboardingCompleted)
+  const initWhatsNew = useGalleryStore((state) => state.initWhatsNew)
+  const activeView = useGalleryStore((state) => state.activeView)
 
   useEffect(() => {
-    void initializeNotifications();
-    void loadMutedFolderIds();
-    void loadNotificationsPaused();
-    void loadWorkerPausesPersist();
-    void loadFfmpegStatus();
-    void loadOnboardingCompleted();
+    void initializeNotifications()
+    void loadMutedFolderIds()
+    void loadNotificationsPaused()
+    void loadWorkerPausesPersist()
+    void loadFfmpegStatus()
+    void loadOnboardingCompleted()
     // Load the app version first so the What's New toast/modal (which read
     // appVersion from the store) have it before the greeting can appear.
-    void loadAppVersion().then(() => initWhatsNew());
+    void loadAppVersion().then(() => initWhatsNew())
     // Quiet launch check — dev builds have no signed artifacts to update to.
     if (import.meta.env.PROD) {
-      void checkForUpdates({ quiet: true });
+      void checkForUpdates({ quiet: true })
     }
     loadFolders().then(async () => {
-      void loadBackgroundJobProgress();
-      void loadCaptionModelStatus();
-      void loadTaggerModel();
-      void loadTaggerModelStatus();
-      void loadDuplicateScanCache();
-      await loadAlbums();
-      await loadImages(true);
-      if (import.meta.env.MODE === "ui") {
-        const { applyMockScenario } = await import("./dev/applyMockScenario");
-        applyMockScenario();
+      void loadBackgroundJobProgress()
+      void loadCaptionModelStatus()
+      void loadTaggerModel()
+      void loadTaggerModelStatus()
+      void loadDuplicateScanCache()
+      await loadAlbums()
+      await loadImages(true)
+      if (import.meta.env.MODE === 'ui') {
+        const { applyMockScenario } = await import('./dev/applyMockScenario')
+        applyMockScenario()
       }
-    });
-    let unlisten: (() => void) | undefined;
+    })
+    let unlisten: (() => void) | undefined
     subscribeToProgress().then((fn) => {
-      unlisten = fn;
-    });
+      unlisten = fn
+    })
     return () => {
-      unlisten?.();
-    };
-  }, []);
+      unlisten?.()
+    }
+  }, [])
 
   return (
-    <div className="flex h-screen flex-col bg-gray-950 text-white overflow-hidden select-none">
+    <div className="flex h-screen flex-col overflow-hidden bg-gray-950 text-white select-none">
       {/* Custom title bar — sits at the very top */}
       <TitleBar />
 
       {/* Main app content below the title bar */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex min-h-0 flex-1">
         <Sidebar />
-        <main className="flex-1 flex flex-col min-w-0">
-          {activeView === "timeline" ? (
+        <main className="flex min-w-0 flex-1 flex-col">
+          {activeView === 'timeline' ? (
             <>
               <Toolbar />
               <BackgroundTasks />
               <Timeline />
             </>
-          ) : activeView === "explore" ? (
+          ) : activeView === 'explore' ? (
             <>
               <BackgroundTasks />
               <ExploreView />
             </>
-          ) : activeView === "duplicates" ? (
+          ) : activeView === 'duplicates' ? (
             <>
               <BackgroundTasks />
               <DuplicateFinder />
@@ -118,5 +118,5 @@ export default function App() {
       <OnboardingOverlay />
       {import.meta.env.DEV && <DemoPanel />}
     </div>
-  );
+  )
 }

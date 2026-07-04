@@ -1,17 +1,19 @@
-import { AnimatePresence, motion } from "framer-motion";
-import { useGalleryStore } from "../store";
+import { AnimatePresence, motion } from 'framer-motion'
+import { useGalleryStore } from '../store'
 
 export function UpdateToast() {
-  const updateStatus = useGalleryStore((s) => s.updateStatus);
-  const updateVersion = useGalleryStore((s) => s.updateVersion);
-  const updateProgress = useGalleryStore((s) => s.updateProgress);
-  const updateDismissed = useGalleryStore((s) => s.updateDismissed);
-  const installUpdate = useGalleryStore((s) => s.installUpdate);
-  const dismissUpdate = useGalleryStore((s) => s.dismissUpdate);
+  const updateStatus = useGalleryStore((s) => s.updateStatus)
+  const updateVersion = useGalleryStore((s) => s.updateVersion)
+  const updateProgress = useGalleryStore((s) => s.updateProgress)
+  const updateDismissed = useGalleryStore((s) => s.updateDismissed)
+  const installUpdate = useGalleryStore((s) => s.installUpdate)
+  const dismissUpdate = useGalleryStore((s) => s.dismissUpdate)
 
   const visible =
     !updateDismissed &&
-    (updateStatus === "available" || updateStatus === "downloading" || updateStatus === "installing");
+    (updateStatus === 'available' ||
+      updateStatus === 'downloading' ||
+      updateStatus === 'installing')
 
   return (
     <AnimatePresence>
@@ -21,9 +23,9 @@ export function UpdateToast() {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 12 }}
           transition={{ duration: 0.18 }}
-          className="fixed bottom-4 right-4 z-50 w-80 rounded-lg border border-white/10 bg-gray-900 p-4 shadow-xl"
+          className="fixed right-4 bottom-4 z-50 w-80 rounded-lg border border-white/10 bg-gray-900 p-4 shadow-xl"
         >
-          {updateStatus === "available" ? (
+          {updateStatus === 'available' ? (
             <>
               <p className="text-sm font-medium text-white">Update available</p>
               <p className="mt-1 text-xs text-gray-500">
@@ -47,14 +49,18 @@ export function UpdateToast() {
           ) : (
             <>
               <p className="text-sm font-medium text-white">
-                {updateStatus === "installing" ? "Installing update..." : "Downloading update..."}
+                {updateStatus === 'installing' ? 'Installing update...' : 'Downloading update...'}
               </p>
               <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/10">
                 <div
                   className={`h-full rounded-full bg-emerald-400/80 transition-[width] duration-200 ${
-                    updateProgress === null ? "w-full animate-pulse" : ""
+                    updateProgress === null ? 'w-full animate-pulse' : ''
                   }`}
-                  style={updateProgress !== null ? { width: `${Math.round(updateProgress * 100)}%` } : undefined}
+                  style={
+                    updateProgress !== null
+                      ? { width: `${Math.round(updateProgress * 100)}%` }
+                      : undefined
+                  }
                 />
               </div>
               <p className="mt-2 text-xs text-gray-600">The app will restart when it finishes.</p>
@@ -63,5 +69,5 @@ export function UpdateToast() {
         </motion.div>
       ) : null}
     </AnimatePresence>
-  );
+  )
 }

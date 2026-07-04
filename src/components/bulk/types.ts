@@ -1,1 +1,1 @@
-export type BulkPanel = "tag" | "rating" | "album" | "delete" | null;
+export type BulkPanel = 'tag' | 'rating' | 'album' | 'delete' | null

@@ -1,73 +1,73 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { ExploreTagEntry, useGalleryStore } from "../../store";
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { ExploreTagEntry, useGalleryStore } from '../../store'
 
 // Shared logic for the bulk tag editor, consumed by both the inline popover and
 // the modal surface so they stay behaviorally identical.
 export function useBulkTagEditor() {
-  const selectedCount = useGalleryStore((state) => state.gallerySelectedIds.size);
-  const selectedFolderId = useGalleryStore((state) => state.selectedFolderId);
-  const bulkAddTags = useGalleryStore((state) => state.bulkAddTags);
-  const bulkRemoveTag = useGalleryStore((state) => state.bulkRemoveTag);
+  const selectedCount = useGalleryStore((state) => state.gallerySelectedIds.size)
+  const selectedFolderId = useGalleryStore((state) => state.selectedFolderId)
+  const bulkAddTags = useGalleryStore((state) => state.bulkAddTags)
+  const bulkRemoveTag = useGalleryStore((state) => state.bulkRemoveTag)
 
-  const [input, setInput] = useState("");
-  const [suggestions, setSuggestions] = useState<ExploreTagEntry[]>([]);
-  const [appliedTags, setAppliedTags] = useState<string[]>([]);
-  const [pending, setPending] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const requestRef = useRef(0);
+  const [input, setInput] = useState('')
+  const [suggestions, setSuggestions] = useState<ExploreTagEntry[]>([])
+  const [appliedTags, setAppliedTags] = useState<string[]>([])
+  const [pending, setPending] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const requestRef = useRef(0)
 
   useEffect(() => {
-    const query = input.trim();
+    const query = input.trim()
     if (!query) {
-      requestRef.current += 1;
-      setSuggestions([]);
-      return;
+      requestRef.current += 1
+      setSuggestions([])
+      return
     }
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    const requestId = ++requestRef.current;
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    const requestId = ++requestRef.current
     debounceRef.current = setTimeout(async () => {
       try {
-        const results = await invoke<ExploreTagEntry[]>("search_tags_autocomplete", {
+        const results = await invoke<ExploreTagEntry[]>('search_tags_autocomplete', {
           params: { query, folder_id: selectedFolderId ?? null, limit: 8 },
-        });
-        if (requestId !== requestRef.current) return;
-        setSuggestions(results);
+        })
+        if (requestId !== requestRef.current) return
+        setSuggestions(results)
       } catch {
-        if (requestId !== requestRef.current) return;
-        setSuggestions([]);
+        if (requestId !== requestRef.current) return
+        setSuggestions([])
       }
-    }, 120);
+    }, 120)
     return () => {
-      requestRef.current += 1;
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [input, selectedFolderId]);
+      requestRef.current += 1
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [input, selectedFolderId])
 
   const addTag = useCallback(
     async (raw: string) => {
-      const tag = raw.trim();
-      if (!tag || pending) return;
-      setPending(true);
+      const tag = raw.trim()
+      if (!tag || pending) return
+      setPending(true)
       try {
-        await bulkAddTags([tag]);
-        setAppliedTags((prev) => (prev.includes(tag) ? prev : [...prev, tag]));
-        setInput("");
-        setSuggestions([]);
+        await bulkAddTags([tag])
+        setAppliedTags((prev) => (prev.includes(tag) ? prev : [...prev, tag]))
+        setInput('')
+        setSuggestions([])
       } finally {
-        setPending(false);
+        setPending(false)
       }
     },
-    [bulkAddTags, pending],
-  );
+    [bulkAddTags, pending]
+  )
 
   const removeTag = useCallback(
     async (tag: string) => {
-      await bulkRemoveTag(tag);
-      setAppliedTags((prev) => prev.filter((entry) => entry !== tag));
+      await bulkRemoveTag(tag)
+      setAppliedTags((prev) => prev.filter((entry) => entry !== tag))
     },
-    [bulkRemoveTag],
-  );
+    [bulkRemoveTag]
+  )
 
-  return { selectedCount, input, setInput, suggestions, appliedTags, pending, addTag, removeTag };
+  return { selectedCount, input, setInput, suggestions, appliedTags, pending, addTag, removeTag }
 }

@@ -1,57 +1,59 @@
-import { useCallback, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { useGalleryStore } from "../store";
-import { LightboxDetailsPanel } from "./lightbox/LightboxDetailsPanel";
-import { LightboxNavButton } from "./lightbox/LightboxNavButton";
-import { LightboxViewport } from "./lightbox/LightboxViewport";
-import { SlideshowView } from "./lightbox/SlideshowView";
-import { useLightboxMediaDetails } from "./lightbox/useLightboxMediaDetails";
-import { useLightboxNavigation } from "./lightbox/useLightboxNavigation";
-import { useRegionSelection } from "./lightbox/useRegionSelection";
-import { useSlideshow } from "./lightbox/useSlideshow";
-import { ViewTransform } from "./lightbox/types";
-import { IDENTITY_VIEW } from "./lightbox/viewTransform";
+import { useCallback, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { useGalleryStore } from '../store'
+import { LightboxDetailsPanel } from './lightbox/LightboxDetailsPanel'
+import { LightboxNavButton } from './lightbox/LightboxNavButton'
+import { LightboxViewport } from './lightbox/LightboxViewport'
+import { SlideshowView } from './lightbox/SlideshowView'
+import { useLightboxMediaDetails } from './lightbox/useLightboxMediaDetails'
+import { useLightboxNavigation } from './lightbox/useLightboxNavigation'
+import { useRegionSelection } from './lightbox/useRegionSelection'
+import { useSlideshow } from './lightbox/useSlideshow'
+import { ViewTransform } from './lightbox/types'
+import { IDENTITY_VIEW } from './lightbox/viewTransform'
 
 export function Lightbox() {
-  const selectedImage = useGalleryStore((state) => state.selectedImage);
-  const closeImage = useGalleryStore((state) => state.closeImage);
-  const images = useGalleryStore((state) => state.images);
-  const openImage = useGalleryStore((state) => state.openImage);
-  const findSimilar = useGalleryStore((state) => state.findSimilar);
-  const findSimilarByRegion = useGalleryStore((state) => state.findSimilarByRegion);
-  const updateImageDetails = useGalleryStore((state) => state.updateImageDetails);
-  const getImageTags = useGalleryStore((state) => state.getImageTags);
-  const addUserTag = useGalleryStore((state) => state.addUserTag);
-  const removeTag = useGalleryStore((state) => state.removeTag);
-  const taggerModelStatus = useGalleryStore((state) => state.taggerModelStatus);
-  const loadTaggerModelStatus = useGalleryStore((state) => state.loadTaggerModelStatus);
-  const queueTaggingForImage = useGalleryStore((state) => state.queueTaggingForImage);
-  const albums = useGalleryStore((state) => state.albums);
-  const addToAlbum = useGalleryStore((state) => state.addToAlbum);
-  const createAlbum = useGalleryStore((state) => state.createAlbum);
-  const getImageExif = useGalleryStore((state) => state.getImageExif);
-  const loadMoreImages = useGalleryStore((state) => state.loadMoreImages);
-  const loadedCount = useGalleryStore((state) => state.loadedCount);
-  const totalImages = useGalleryStore((state) => state.totalImages);
-  const slideshowIntervalSeconds = useGalleryStore((state) => state.slideshowIntervalSeconds);
-  const slideshowOrder = useGalleryStore((state) => state.slideshowOrder);
-  const slideshowTransition = useGalleryStore((state) => state.slideshowTransition);
+  const selectedImage = useGalleryStore((state) => state.selectedImage)
+  const closeImage = useGalleryStore((state) => state.closeImage)
+  const images = useGalleryStore((state) => state.images)
+  const openImage = useGalleryStore((state) => state.openImage)
+  const findSimilar = useGalleryStore((state) => state.findSimilar)
+  const findSimilarByRegion = useGalleryStore((state) => state.findSimilarByRegion)
+  const updateImageDetails = useGalleryStore((state) => state.updateImageDetails)
+  const getImageTags = useGalleryStore((state) => state.getImageTags)
+  const addUserTag = useGalleryStore((state) => state.addUserTag)
+  const removeTag = useGalleryStore((state) => state.removeTag)
+  const taggerModelStatus = useGalleryStore((state) => state.taggerModelStatus)
+  const loadTaggerModelStatus = useGalleryStore((state) => state.loadTaggerModelStatus)
+  const queueTaggingForImage = useGalleryStore((state) => state.queueTaggingForImage)
+  const albums = useGalleryStore((state) => state.albums)
+  const addToAlbum = useGalleryStore((state) => state.addToAlbum)
+  const createAlbum = useGalleryStore((state) => state.createAlbum)
+  const getImageExif = useGalleryStore((state) => state.getImageExif)
+  const loadMoreImages = useGalleryStore((state) => state.loadMoreImages)
+  const loadedCount = useGalleryStore((state) => state.loadedCount)
+  const totalImages = useGalleryStore((state) => state.totalImages)
+  const slideshowIntervalSeconds = useGalleryStore((state) => state.slideshowIntervalSeconds)
+  const slideshowOrder = useGalleryStore((state) => state.slideshowOrder)
+  const slideshowTransition = useGalleryStore((state) => state.slideshowTransition)
 
-  const lightboxRootRef = useRef<HTMLDivElement>(null);
-  const imageViewportRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
-  const [view, setView] = useState<ViewTransform>(IDENTITY_VIEW);
+  const lightboxRootRef = useRef<HTMLDivElement>(null)
+  const imageViewportRef = useRef<HTMLDivElement>(null)
+  const imgRef = useRef<HTMLImageElement>(null)
+  const [view, setView] = useState<ViewTransform>(IDENTITY_VIEW)
 
-  const currentIndex = selectedImage ? images.findIndex((image) => image.id === selectedImage.id) : -1;
-  const canFindSimilar = selectedImage?.embedding_status === "ready";
-  const canSearchRegion = canFindSimilar && selectedImage?.media_kind === "image";
-  const taggerReady = taggerModelStatus?.ready ?? false;
-  const taggerStatusKnown = taggerModelStatus !== null;
+  const currentIndex = selectedImage
+    ? images.findIndex((image) => image.id === selectedImage.id)
+    : -1
+  const canFindSimilar = selectedImage?.embedding_status === 'ready'
+  const canSearchRegion = canFindSimilar && selectedImage?.media_kind === 'image'
+  const taggerReady = taggerModelStatus?.ready ?? false
+  const taggerStatusKnown = taggerModelStatus !== null
   const taggerButtonTooltip = !taggerStatusKnown
-    ? "Checking AI tagger model..."
+    ? 'Checking AI tagger model...'
     : taggerReady
-      ? "Queue AI tagging for this image"
-      : "AI tagger model not installed";
+      ? 'Queue AI tagging for this image'
+      : 'AI tagger model not installed'
 
   const region = useRegionSelection({
     selectedImage,
@@ -61,7 +63,7 @@ export function Lightbox() {
     view,
     setView,
     findSimilarByRegion,
-  });
+  })
 
   const slideshow = useSlideshow({
     rootRef: lightboxRootRef,
@@ -77,13 +79,13 @@ export function Lightbox() {
     loadMoreImages,
     exitRegionMode: region.exitRegionMode,
     setView,
-  });
+  })
 
   const resetForSelectedImage = useCallback(() => {
-    setView(IDENTITY_VIEW);
-    region.exitRegionMode();
-    region.setRegionSearching(false);
-  }, [region.exitRegionMode, region.setRegionSearching]);
+    setView(IDENTITY_VIEW)
+    region.exitRegionMode()
+    region.setRegionSearching(false)
+  }, [region.exitRegionMode, region.setRegionSearching])
 
   const details = useLightboxMediaDetails({
     selectedImage,
@@ -92,7 +94,7 @@ export function Lightbox() {
     getImageExif,
     loadTaggerModelStatus,
     onSelectedImageReset: resetForSelectedImage,
-  });
+  })
 
   const { goPrev, goNext } = useLightboxNavigation({
     selectedImage,
@@ -109,15 +111,15 @@ export function Lightbox() {
     openImage,
     setView,
     clampPan: region.clampPan,
-  });
+  })
 
   const toggleRegionMode = useCallback(() => {
     if (region.regionSelectMode) {
-      region.exitRegionMode();
+      region.exitRegionMode()
     } else {
-      region.setRegionSelectMode(true);
+      region.setRegionSelectMode(true)
     }
-  }, [region.exitRegionMode, region.regionSelectMode, region.setRegionSelectMode]);
+  }, [region.exitRegionMode, region.regionSelectMode, region.setRegionSelectMode])
 
   return (
     <AnimatePresence>
@@ -126,13 +128,19 @@ export function Lightbox() {
           ref={lightboxRootRef}
           key="lightbox"
           className={`media-dark-surface fixed inset-0 z-50 flex ${
-            slideshow.active ? "bg-black" : "bg-black/90 backdrop-blur-sm"
+            slideshow.active ? 'bg-black' : 'bg-black/90 backdrop-blur-sm'
           }`}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.15 }}
-          onClick={slideshow.active ? slideshow.showControls : region.regionSelectMode ? undefined : closeImage}
+          onClick={
+            slideshow.active
+              ? slideshow.showControls
+              : region.regionSelectMode
+                ? undefined
+                : closeImage
+          }
         >
           {slideshow.active ? (
             <SlideshowView
@@ -223,5 +231,5 @@ export function Lightbox() {
         </motion.div>
       ) : null}
     </AnimatePresence>
-  );
+  )
 }

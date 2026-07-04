@@ -1,4 +1,4 @@
 export interface BufferedRange {
-  start: number;
-  end: number;
+  start: number
+  end: number
 }

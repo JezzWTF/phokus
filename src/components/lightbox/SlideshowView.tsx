@@ -1,23 +1,23 @@
-import { AnimatePresence, motion } from "framer-motion";
-import { ImageRecord } from "../../store";
-import { mediaSrc } from "../../lib/mediaSrc";
-import { Tooltip } from "../Tooltip";
-import { ChevronRightIcon, CloseIcon } from "../icons";
-import { SlideshowMotion } from "./useSlideshow";
+import { AnimatePresence, motion } from 'framer-motion'
+import { ImageRecord } from '../../store'
+import { mediaSrc } from '../../lib/mediaSrc'
+import { Tooltip } from '../Tooltip'
+import { ChevronRightIcon, CloseIcon } from '../icons'
+import { SlideshowMotion } from './useSlideshow'
 
 interface SlideshowViewProps {
-  selectedImage: ImageRecord;
-  imageCount: number;
-  position: number;
-  controlsShown: boolean;
-  paused: boolean;
-  loadingMore: boolean;
-  motionConfig: SlideshowMotion;
-  onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
-  onShowControls: () => void;
-  onExit: () => void;
-  onGo: (direction: -1 | 1) => void;
-  onTogglePaused: () => void;
+  selectedImage: ImageRecord
+  imageCount: number
+  position: number
+  controlsShown: boolean
+  paused: boolean
+  loadingMore: boolean
+  motionConfig: SlideshowMotion
+  onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void
+  onShowControls: () => void
+  onExit: () => void
+  onGo: (direction: -1 | 1) => void
+  onTogglePaused: () => void
 }
 
 export function SlideshowView({
@@ -37,16 +37,16 @@ export function SlideshowView({
   return (
     <div
       className={`relative flex h-full w-full items-center justify-center overflow-hidden bg-black ${
-        controlsShown ? "" : "cursor-none"
+        controlsShown ? '' : 'cursor-none'
       }`}
       onClick={(event) => {
-        event.stopPropagation();
-        onShowControls();
+        event.stopPropagation()
+        onShowControls()
       }}
       onPointerMove={onPointerMove}
     >
       <AnimatePresence initial={false}>
-        {selectedImage.media_kind === "image" ? (
+        {selectedImage.media_kind === 'image' ? (
           <motion.div
             key={selectedImage.id}
             className="absolute inset-0 flex items-center justify-center"
@@ -56,7 +56,7 @@ export function SlideshowView({
             transition={motionConfig.imageTransition}
           >
             <motion.img
-              src={mediaSrc(selectedImage.path) ?? ""}
+              src={mediaSrc(selectedImage.path) ?? ''}
               alt={selectedImage.filename}
               className="max-h-full max-w-full object-contain"
               draggable={false}
@@ -84,20 +84,22 @@ export function SlideshowView({
         animate={{ opacity: controlsShown ? 1 : 0, y: controlsShown ? 0 : -6 }}
         transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
       >
-        <div className="max-w-[60vw] whitespace-nowrap rounded-full border border-white/10 bg-black/45 px-3 py-1.5 text-xs text-gray-300 shadow-2xl shadow-black/30 backdrop-blur-md">
+        <div className="max-w-[60vw] rounded-full border border-white/10 bg-black/45 px-3 py-1.5 text-xs whitespace-nowrap text-gray-300 shadow-2xl shadow-black/30 backdrop-blur-md">
           <span className="font-medium text-white">{position}</span>
           <span className="mx-1 text-gray-600">/</span>
           <span>{imageCount}</span>
           <span className="mx-2 text-gray-700">•</span>
-          <span className="inline-block max-w-[42vw] truncate align-bottom text-gray-400">{selectedImage.filename}</span>
+          <span className="inline-block max-w-[42vw] truncate align-bottom text-gray-400">
+            {selectedImage.filename}
+          </span>
         </div>
         <Tooltip label="Exit slideshow" followCursor>
           <button
             aria-label="Exit slideshow"
             className="pointer-events-auto rounded-full border border-white/10 bg-black/45 p-2 text-gray-300 shadow-2xl shadow-black/30 backdrop-blur-md transition-colors hover:bg-white/10 hover:text-white"
             onClick={(event) => {
-              event.stopPropagation();
-              onExit();
+              event.stopPropagation()
+              onExit()
             }}
           >
             <CloseIcon className="h-4 w-4" strokeWidth={1.8} />
@@ -118,23 +120,28 @@ export function SlideshowView({
               className="rounded-full p-2 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
               disabled={imageCount <= 1}
               onClick={(event) => {
-                event.stopPropagation();
-                onGo(-1);
+                event.stopPropagation()
+                onGo(-1)
               }}
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 19l-7-7 7-7" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.8}
+                  d="M15 19l-7-7 7-7"
+                />
               </svg>
             </button>
           </Tooltip>
-          <Tooltip label={paused ? "Resume slideshow" : "Pause slideshow"} followCursor>
+          <Tooltip label={paused ? 'Resume slideshow' : 'Pause slideshow'} followCursor>
             <button
-              aria-label={paused ? "Resume slideshow" : "Pause slideshow"}
+              aria-label={paused ? 'Resume slideshow' : 'Pause slideshow'}
               className="rounded-full border border-white/10 bg-white/10 p-2.5 text-white transition-colors hover:bg-white/15"
               onClick={(event) => {
-                event.stopPropagation();
-                onTogglePaused();
-                onShowControls();
+                event.stopPropagation()
+                onTogglePaused()
+                onShowControls()
               }}
             >
               {paused ? (
@@ -154,8 +161,8 @@ export function SlideshowView({
               className="rounded-full p-2 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
               disabled={imageCount <= 1}
               onClick={(event) => {
-                event.stopPropagation();
-                onGo(1);
+                event.stopPropagation()
+                onGo(1)
               }}
             >
               <ChevronRightIcon className="h-5 w-5" strokeWidth={1.8} />
@@ -165,10 +172,10 @@ export function SlideshowView({
       </motion.div>
 
       {loadingMore ? (
-        <div className="pointer-events-none absolute bottom-6 right-6 rounded-full border border-white/10 bg-black/45 px-3 py-1.5 text-xs text-gray-500 backdrop-blur-md">
+        <div className="pointer-events-none absolute right-6 bottom-6 rounded-full border border-white/10 bg-black/45 px-3 py-1.5 text-xs text-gray-500 backdrop-blur-md">
           Loading more…
         </div>
       ) : null}
     </div>
-  );
+  )
 }

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { FolderJobProgress, useGalleryStore } from "../store";
+import { useEffect, useRef, useState } from 'react'
+import { FolderJobProgress, useGalleryStore } from '../store'
 
 // Dev-only screenshot/demo helper. Injects frozen UI states that are otherwise
 // too transient (or unreachable) to capture: the background-worker pipeline,
@@ -25,7 +25,7 @@ function emptyProgress(folderId: number): FolderJobProgress {
     tagging_pending: 0,
     tagging_ready: 0,
     tagging_failed: 0,
-  };
+  }
 }
 
 // A believable multi-folder "busy pipeline" — three folders at different stages.
@@ -36,56 +36,56 @@ const BUSY_PRESETS: Partial<FolderJobProgress>[] = [
   { thumbnail_pending: 11, embedding_pending: 50, tagging_pending: 50 },
   // Late stage: embeddings done, tagging running.
   { embedding_ready: 40, tagging_ready: 18, tagging_pending: 22 },
-];
+]
 
-const DEMO_UPDATE_VERSION = "0.2.0";
+const DEMO_UPDATE_VERSION = '0.2.0'
 
 export function DemoPanel() {
-  const folders = useGalleryStore((state) => state.folders);
-  const appVersion = useGalleryStore((state) => state.appVersion);
-  const [open, setOpen] = useState(false);
-  const downloadTimer = useRef<number | null>(null);
+  const folders = useGalleryStore((state) => state.folders)
+  const appVersion = useGalleryStore((state) => state.appVersion)
+  const [open, setOpen] = useState(false)
+  const downloadTimer = useRef<number | null>(null)
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "d") {
-        event.preventDefault();
-        setOpen((value) => !value);
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'd') {
+        event.preventDefault()
+        setOpen((value) => !value)
       }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const stopTimer = () => {
     if (downloadTimer.current !== null) {
-      window.clearInterval(downloadTimer.current);
-      downloadTimer.current = null;
+      window.clearInterval(downloadTimer.current)
+      downloadTimer.current = null
     }
-  };
+  }
 
   // Stop any running download animation when the panel unmounts.
-  useEffect(() => stopTimer, []);
+  useEffect(() => stopTimer, [])
 
   const injectBusy = () => {
-    const progress: Record<number, FolderJobProgress> = {};
+    const progress: Record<number, FolderJobProgress> = {}
     folders.slice(0, BUSY_PRESETS.length).forEach((folder, index) => {
-      progress[folder.id] = { ...emptyProgress(folder.id), ...BUSY_PRESETS[index] };
-    });
-    useGalleryStore.setState({ mediaJobProgress: progress });
-  };
+      progress[folder.id] = { ...emptyProgress(folder.id), ...BUSY_PRESETS[index] }
+    })
+    useGalleryStore.setState({ mediaJobProgress: progress })
+  }
 
   const injectSingleEmbedding = () => {
-    const folder = folders[0];
-    if (!folder) return;
+    const folder = folders[0]
+    if (!folder) return
     useGalleryStore.setState({
       mediaJobProgress: {
         [folder.id]: { ...emptyProgress(folder.id), embedding_ready: 27, embedding_pending: 23 },
       },
-    });
-  };
+    })
+  }
 
-  const clear = () => useGalleryStore.setState({ mediaJobProgress: {} });
+  const clear = () => useGalleryStore.setState({ mediaJobProgress: {} })
 
   // --- Updater flow ---------------------------------------------------------
   // These drive the real UpdateToast + Settings "About" row. The Install button
@@ -93,73 +93,73 @@ export function DemoPanel() {
   // presentation only — see DemoPanel's header note for the real e2e path.
 
   const updateAvailable = () => {
-    stopTimer();
+    stopTimer()
     useGalleryStore.setState({
-      updateStatus: "available",
+      updateStatus: 'available',
       updateVersion: DEMO_UPDATE_VERSION,
       updateProgress: null,
       updateError: null,
       updateDismissed: false,
-    });
-  };
+    })
+  }
 
   // Indeterminate pulse, then climb 0 → 100%, then flip to "installing".
   const simulateDownload = () => {
-    stopTimer();
+    stopTimer()
     useGalleryStore.setState({
-      updateStatus: "downloading",
+      updateStatus: 'downloading',
       updateVersion: DEMO_UPDATE_VERSION,
       updateProgress: null,
       updateError: null,
       updateDismissed: false,
-    });
-    let progress = 0;
+    })
+    let progress = 0
     window.setTimeout(() => {
       downloadTimer.current = window.setInterval(() => {
-        progress = Math.min(progress + 0.07, 1);
-        useGalleryStore.setState({ updateProgress: progress });
+        progress = Math.min(progress + 0.07, 1)
+        useGalleryStore.setState({ updateProgress: progress })
         if (progress >= 1) {
-          stopTimer();
-          useGalleryStore.setState({ updateStatus: "installing" });
+          stopTimer()
+          useGalleryStore.setState({ updateStatus: 'installing' })
         }
-      }, 200);
-    }, 700);
-  };
+      }, 200)
+    }, 700)
+  }
 
   const updateInstalling = () => {
-    stopTimer();
+    stopTimer()
     useGalleryStore.setState({
-      updateStatus: "installing",
+      updateStatus: 'installing',
       updateVersion: DEMO_UPDATE_VERSION,
       updateProgress: 1,
       updateDismissed: false,
-    });
-  };
+    })
+  }
 
   const updateError = () => {
-    stopTimer();
+    stopTimer()
     useGalleryStore.setState({
-      updateStatus: "error",
-      updateError: "Could not reach the update server (connection timed out).",
+      updateStatus: 'error',
+      updateError: 'Could not reach the update server (connection timed out).',
       updateDismissed: false,
-    });
-  };
+    })
+  }
 
   const updateUpToDate = () => {
-    stopTimer();
-    useGalleryStore.setState({ updateStatus: "upToDate", updateVersion: null, updateError: null });
-  };
+    stopTimer()
+    useGalleryStore.setState({ updateStatus: 'upToDate', updateVersion: null, updateError: null })
+  }
 
   const resetUpdate = () => {
-    stopTimer();
+    stopTimer()
     useGalleryStore.setState({
-      updateStatus: "idle",
+      updateStatus: 'idle',
       updateVersion: null,
       updateProgress: null,
       updateError: null,
       updateDismissed: false,
-    });
-  };
+    })
+  }
 
   // --- What's New flow ------------------------------------------------------
   // Drives the post-update greeting without needing a real version change. The
@@ -167,26 +167,32 @@ export function DemoPanel() {
   // app version, so the current release's notes are what render.
 
   const showWhatsNewToast = () =>
-    useGalleryStore.setState({ whatsNewToast: appVersion ?? DEMO_UPDATE_VERSION, whatsNewOpen: false });
+    useGalleryStore.setState({
+      whatsNewToast: appVersion ?? DEMO_UPDATE_VERSION,
+      whatsNewOpen: false,
+    })
 
-  const openWhatsNewModal = () => useGalleryStore.setState({ whatsNewOpen: true, whatsNewToast: null });
+  const openWhatsNewModal = () =>
+    useGalleryStore.setState({ whatsNewOpen: true, whatsNewToast: null })
 
-  const resetWhatsNew = () => useGalleryStore.setState({ whatsNewOpen: false, whatsNewToast: null });
+  const resetWhatsNew = () => useGalleryStore.setState({ whatsNewOpen: false, whatsNewToast: null })
 
-  if (!open) return null;
+  if (!open) return null
 
   const injectBtn =
-    "rounded-md border border-amber-400/30 bg-amber-500/15 px-2 py-1.5 text-left hover:bg-amber-500/25";
+    'rounded-md border border-amber-400/30 bg-amber-500/15 px-2 py-1.5 text-left hover:bg-amber-500/25'
   const neutralBtn =
-    "rounded-md border border-white/10 bg-white/[0.06] px-2 py-1.5 text-left text-gray-300 hover:bg-white/10";
+    'rounded-md border border-white/10 bg-white/[0.06] px-2 py-1.5 text-left text-gray-300 hover:bg-white/10'
 
   return (
     <div className="fixed bottom-4 left-4 z-[100] max-h-[calc(100vh-2rem)] w-56 overflow-y-auto rounded-lg border border-amber-400/40 bg-amber-950/90 p-3 text-xs text-amber-100 shadow-xl backdrop-blur">
       <div className="mb-2 flex items-center justify-between">
-        <span className="font-semibold uppercase tracking-wide">Demo · Ctrl+Shift+D</span>
+        <span className="font-semibold tracking-wide uppercase">Demo · Ctrl+Shift+D</span>
       </div>
 
-      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-200/60">Pipeline</p>
+      <p className="mb-1.5 text-[11px] font-semibold tracking-wide text-amber-200/60 uppercase">
+        Pipeline
+      </p>
       <p className="mb-2 text-[11px] leading-snug text-amber-200/70">
         Inject a frozen worker-bar state, hide this panel, then screenshot.
       </p>
@@ -204,7 +210,9 @@ export function DemoPanel() {
 
       <div className="my-3 h-px bg-amber-400/20" />
 
-      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-200/60">Update flow</p>
+      <p className="mb-1.5 text-[11px] font-semibold tracking-wide text-amber-200/60 uppercase">
+        Update flow
+      </p>
       <p className="mb-2 text-[11px] leading-snug text-amber-200/70">
         Drives the real toast (bottom-right) + Settings → About row. Install is inert here.
       </p>
@@ -231,9 +239,11 @@ export function DemoPanel() {
 
       <div className="my-3 h-px bg-amber-400/20" />
 
-      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-200/60">What's new</p>
+      <p className="mb-1.5 text-[11px] font-semibold tracking-wide text-amber-200/60 uppercase">
+        What's new
+      </p>
       <p className="mb-2 text-[11px] leading-snug text-amber-200/70">
-        Post-update greeting for v{appVersion ?? "—"}, sourced from the bundled changelog.
+        Post-update greeting for v{appVersion ?? '—'}, sourced from the bundled changelog.
       </p>
       <div className="flex flex-col gap-1.5">
         <button className={injectBtn} onClick={showWhatsNewToast}>
@@ -247,5 +257,5 @@ export function DemoPanel() {
         </button>
       </div>
     </div>
-  );
+  )
 }

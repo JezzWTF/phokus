@@ -1,18 +1,18 @@
-import { useEffect } from "react";
-import { useGalleryStore } from "../../store";
-import { Dropdown } from "../menu";
-import { getSortOptions } from "./sortOptions";
+import { useEffect } from 'react'
+import { useGalleryStore } from '../../store'
+import { Dropdown } from '../menu'
+import { getSortOptions } from './sortOptions'
 
 export function SortControl() {
-  const sort = useGalleryStore((state) => state.sort);
-  const setSort = useGalleryStore((state) => state.setSort);
-  const mediaFilter = useGalleryStore((state) => state.mediaFilter);
+  const sort = useGalleryStore((state) => state.sort)
+  const setSort = useGalleryStore((state) => state.setSort)
+  const mediaFilter = useGalleryStore((state) => state.mediaFilter)
 
   useEffect(() => {
-    if (mediaFilter !== "video" && (sort === "duration_asc" || sort === "duration_desc")) {
-      setSort("date_desc");
+    if (mediaFilter !== 'video' && (sort === 'duration_asc' || sort === 'duration_desc')) {
+      setSort('date_desc')
     }
-  }, [mediaFilter, sort, setSort]);
+  }, [mediaFilter, sort, setSort])
 
   return (
     <Dropdown
@@ -24,5 +24,5 @@ export function SortControl() {
       size="md"
       panelClassName="min-w-44"
     />
-  );
+  )
 }

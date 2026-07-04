@@ -1,4 +1,4 @@
-import { RefObject, useEffect } from "react";
+import { RefObject, useEffect } from 'react'
 
 /**
  * Closes a floating element on pointer-down outside `ref` or on Escape.
@@ -7,22 +7,22 @@ import { RefObject, useEffect } from "react";
 export function useDismissable<T extends HTMLElement>(
   ref: RefObject<T | null>,
   onClose: () => void,
-  enabled = true,
+  enabled = true
 ) {
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) return
     const handlePointerDown = (event: PointerEvent) => {
-      const el = ref.current;
-      if (el && !el.contains(event.target as Node)) onClose();
-    };
+      const el = ref.current
+      if (el && !el.contains(event.target as Node)) onClose()
+    }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("pointerdown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
     return () => {
-      window.removeEventListener("pointerdown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [ref, onClose, enabled]);
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [ref, onClose, enabled])
 }

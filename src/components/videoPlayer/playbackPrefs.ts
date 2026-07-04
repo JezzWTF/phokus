@@ -1,18 +1,18 @@
-let persistedVolume = 1;
-let persistedMuted = false;
+let persistedVolume = 1
+let persistedMuted = false
 
 export function getPersistedVolume(): number {
-  return persistedVolume;
+  return persistedVolume
 }
 
 export function setPersistedVolume(volume: number) {
-  persistedVolume = volume;
+  persistedVolume = volume
 }
 
 export function getPersistedMuted(): boolean {
-  return persistedMuted;
+  return persistedMuted
 }
 
 export function setPersistedMuted(muted: boolean) {
-  persistedMuted = muted;
+  persistedMuted = muted
 }

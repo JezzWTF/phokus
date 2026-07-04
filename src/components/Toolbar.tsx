@@ -1,12 +1,12 @@
-import { SortControl } from "./toolbar/SortControl";
-import { ToolbarFilters } from "./toolbar/ToolbarFilters";
-import { ToolbarSearch } from "./toolbar/ToolbarSearch";
-import { ToolbarTitle } from "./toolbar/ToolbarTitle";
-import { useToolbarSearch } from "./toolbar/useToolbarSearch";
-import { ZoomControl } from "./toolbar/ZoomControl";
+import { SortControl } from './toolbar/SortControl'
+import { ToolbarFilters } from './toolbar/ToolbarFilters'
+import { ToolbarSearch } from './toolbar/ToolbarSearch'
+import { ToolbarTitle } from './toolbar/ToolbarTitle'
+import { useToolbarSearch } from './toolbar/useToolbarSearch'
+import { ZoomControl } from './toolbar/ZoomControl'
 
 export function Toolbar() {
-  const searchState = useToolbarSearch();
+  const searchState = useToolbarSearch()
 
   return (
     <div className="relative z-40 shrink-0 border-b border-white/[0.06] bg-gray-950/80 backdrop-blur-xl">
@@ -20,5 +20,5 @@ export function Toolbar() {
       </div>
       <ToolbarFilters />
     </div>
-  );
+  )
 }

@@ -1,18 +1,18 @@
-import { Dropdown } from "../menu";
-import { useGalleryStore } from "../../store";
-import { SettingsGroup, SettingsItem } from "./shared";
+import { Dropdown } from '../menu'
+import { useGalleryStore } from '../../store'
+import { SettingsGroup, SettingsItem } from './shared'
 
 export function MediaSettingsSection() {
-  const lightboxAutoplay = useGalleryStore((state) => state.lightboxAutoplay);
-  const setLightboxAutoplay = useGalleryStore((state) => state.setLightboxAutoplay);
-  const lightboxAutoMute = useGalleryStore((state) => state.lightboxAutoMute);
-  const setLightboxAutoMute = useGalleryStore((state) => state.setLightboxAutoMute);
-  const slideshowIntervalSeconds = useGalleryStore((state) => state.slideshowIntervalSeconds);
-  const setSlideshowIntervalSeconds = useGalleryStore((state) => state.setSlideshowIntervalSeconds);
-  const slideshowOrder = useGalleryStore((state) => state.slideshowOrder);
-  const setSlideshowOrder = useGalleryStore((state) => state.setSlideshowOrder);
-  const slideshowTransition = useGalleryStore((state) => state.slideshowTransition);
-  const setSlideshowTransition = useGalleryStore((state) => state.setSlideshowTransition);
+  const lightboxAutoplay = useGalleryStore((state) => state.lightboxAutoplay)
+  const setLightboxAutoplay = useGalleryStore((state) => state.setLightboxAutoplay)
+  const lightboxAutoMute = useGalleryStore((state) => state.lightboxAutoMute)
+  const setLightboxAutoMute = useGalleryStore((state) => state.setLightboxAutoMute)
+  const slideshowIntervalSeconds = useGalleryStore((state) => state.slideshowIntervalSeconds)
+  const setSlideshowIntervalSeconds = useGalleryStore((state) => state.setSlideshowIntervalSeconds)
+  const slideshowOrder = useGalleryStore((state) => state.slideshowOrder)
+  const setSlideshowOrder = useGalleryStore((state) => state.setSlideshowOrder)
+  const slideshowTransition = useGalleryStore((state) => state.slideshowTransition)
+  const setSlideshowTransition = useGalleryStore((state) => state.setSlideshowTransition)
 
   return (
     <div className="mt-8 space-y-9">
@@ -24,10 +24,12 @@ export function MediaSettingsSection() {
           <button
             role="switch"
             aria-checked={lightboxAutoplay}
-            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${lightboxAutoplay ? "bg-sky-500" : "bg-white/15"}`}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${lightboxAutoplay ? 'bg-sky-500' : 'bg-white/15'}`}
             onClick={() => setLightboxAutoplay(!lightboxAutoplay)}
           >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${lightboxAutoplay ? "translate-x-4" : "translate-x-0"}`} />
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${lightboxAutoplay ? 'translate-x-4' : 'translate-x-0'}`}
+            />
           </button>
         </SettingsItem>
         <SettingsItem
@@ -37,10 +39,12 @@ export function MediaSettingsSection() {
           <button
             role="switch"
             aria-checked={lightboxAutoMute}
-            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${lightboxAutoMute ? "bg-sky-500" : "bg-white/15"}`}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${lightboxAutoMute ? 'bg-sky-500' : 'bg-white/15'}`}
             onClick={() => setLightboxAutoMute(!lightboxAutoMute)}
           >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${lightboxAutoMute ? "translate-x-4" : "translate-x-0"}`} />
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${lightboxAutoMute ? 'translate-x-4' : 'translate-x-0'}`}
+            />
           </button>
         </SettingsItem>
       </SettingsGroup>
@@ -61,7 +65,9 @@ export function MediaSettingsSection() {
               className="w-32 accent-sky-500"
               onChange={(event) => setSlideshowIntervalSeconds(Number(event.currentTarget.value))}
             />
-            <span className="min-w-10 text-right text-xs tabular-nums text-gray-400">{slideshowIntervalSeconds}s</span>
+            <span className="min-w-10 text-right text-xs text-gray-400 tabular-nums">
+              {slideshowIntervalSeconds}s
+            </span>
           </div>
         </SettingsItem>
         <SettingsItem
@@ -73,8 +79,8 @@ export function MediaSettingsSection() {
             onChange={setSlideshowOrder}
             ariaLabel="Slideshow order"
             options={[
-              { value: "sequential", label: "Sequential" },
-              { value: "random", label: "Random" },
+              { value: 'sequential', label: 'Sequential' },
+              { value: 'random', label: 'Random' },
             ]}
           />
         </SettingsItem>
@@ -87,12 +93,12 @@ export function MediaSettingsSection() {
             onChange={setSlideshowTransition}
             ariaLabel="Slideshow transition"
             options={[
-              { value: "soft-fade", label: "Soft fade" },
-              { value: "gentle-motion", label: "Gentle motion" },
+              { value: 'soft-fade', label: 'Soft fade' },
+              { value: 'gentle-motion', label: 'Gentle motion' },
             ]}
           />
         </SettingsItem>
       </SettingsGroup>
     </div>
-  );
+  )
 }

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useGalleryStore } from "../store";
+import { useState } from 'react'
+import { useGalleryStore } from '../store'
 
 /**
  * Album list plus a create-new-album form. The host decides what picking
@@ -7,23 +7,23 @@ import { useGalleryStore } from "../store";
  * picked immediately.
  */
 export function AlbumPicker({ onPick }: { onPick: (albumId: number) => Promise<void> | void }) {
-  const albums = useGalleryStore((state) => state.albums);
-  const createAlbum = useGalleryStore((state) => state.createAlbum);
-  const [creating, setCreating] = useState(false);
-  const [newAlbumName, setNewAlbumName] = useState("");
+  const albums = useGalleryStore((state) => state.albums)
+  const createAlbum = useGalleryStore((state) => state.createAlbum)
+  const [creating, setCreating] = useState(false)
+  const [newAlbumName, setNewAlbumName] = useState('')
 
   const handleCreate = async () => {
-    const name = newAlbumName.trim();
-    if (!name || creating) return;
-    setCreating(true);
+    const name = newAlbumName.trim()
+    if (!name || creating) return
+    setCreating(true)
     try {
-      const album = await createAlbum(name);
-      setNewAlbumName("");
-      await onPick(album.id);
+      const album = await createAlbum(name)
+      setNewAlbumName('')
+      await onPick(album.id)
     } finally {
-      setCreating(false);
+      setCreating(false)
     }
-  };
+  }
 
   return (
     <>
@@ -46,8 +46,8 @@ export function AlbumPicker({ onPick }: { onPick: (albumId: number) => Promise<v
       <form
         className="mt-1 flex gap-1 border-t border-white/[0.06] pt-2"
         onSubmit={(event) => {
-          event.preventDefault();
-          void handleCreate();
+          event.preventDefault()
+          void handleCreate()
         }}
       >
         <input
@@ -66,5 +66,5 @@ export function AlbumPicker({ onPick }: { onPick: (albumId: number) => Promise<v
         </button>
       </form>
     </>
-  );
+  )
 }

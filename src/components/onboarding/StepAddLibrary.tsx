@@ -1,13 +1,13 @@
-import { useGalleryStore } from "../../store";
-import { FakeTile } from "./fakes";
+import { useGalleryStore } from '../../store'
+import { FakeTile } from './fakes'
 
 export function StepAddLibrary() {
-  const folders = useGalleryStore((s) => s.folders);
-  const setFolderPickerOpen = useGalleryStore((s) => s.setFolderPickerOpen);
+  const folders = useGalleryStore((s) => s.folders)
+  const setFolderPickerOpen = useGalleryStore((s) => s.setFolderPickerOpen)
 
   const handlePick = () => {
-    setFolderPickerOpen(true);
-  };
+    setFolderPickerOpen(true)
+  }
 
   return (
     <div>
@@ -16,15 +16,18 @@ export function StepAddLibrary() {
         added, renamed, or removed. Nothing is moved or copied.
       </p>
 
-      <div className="mt-5 flex items-center justify-between gap-6 border-y border-white/[0.05] py-4 light-theme:border-gray-300/70">
+      <div className="light-theme:border-gray-300/70 mt-5 flex items-center justify-between gap-6 border-y border-white/[0.05] py-4">
         <div className="min-w-0">
           {folders.length > 0 ? (
             <>
               <p className="text-sm text-white">
-                {folders.length === 1 ? `“${folders[0].name}” added` : `${folders.length} folders in your library`}
+                {folders.length === 1
+                  ? `“${folders[0].name}” added`
+                  : `${folders.length} folders in your library`}
               </p>
               <p className="mt-1 text-xs text-gray-500">
-                Indexing runs in the background — you can add more folders from the sidebar any time.
+                Indexing runs in the background — you can add more folders from the sidebar any
+                time.
               </p>
             </>
           ) : (
@@ -40,13 +43,13 @@ export function StepAddLibrary() {
           className="shrink-0 rounded-md border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45"
           onClick={handlePick}
         >
-          {folders.length > 0 ? "Add another folder" : "Choose a folder"}
+          {folders.length > 0 ? 'Add another folder' : 'Choose a folder'}
         </button>
       </div>
 
       <p className="mt-5 text-xs leading-relaxed text-gray-500">
-        As indexing runs, the gallery fills in roughly like this — tiles appear immediately and sharpen
-        as thumbnails are generated:
+        As indexing runs, the gallery fills in roughly like this — tiles appear immediately and
+        sharpen as thumbnails are generated:
       </p>
       <div className="media-dark-surface mt-3 grid grid-cols-6 gap-1.5">
         <FakeTile index={0} />
@@ -57,5 +60,5 @@ export function StepAddLibrary() {
         <FakeTile index={5} loaded={false} />
       </div>
     </div>
-  );
+  )
 }

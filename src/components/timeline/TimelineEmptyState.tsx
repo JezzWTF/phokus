@@ -7,7 +7,7 @@ export function TimelineLoadingState() {
         <p className="mt-1 text-xs text-white/20">Fetching results</p>
       </div>
     </div>
-  );
+  )
 }
 
 export function TimelineEmptyState({ imageLoadError }: { imageLoadError: string | null }) {
@@ -28,12 +28,12 @@ export function TimelineEmptyState({ imageLoadError }: { imageLoadError: string 
           />
         </svg>
         <p className="text-sm font-medium text-white/30">
-          {imageLoadError ? "Could not load timeline" : "No media found"}
+          {imageLoadError ? 'Could not load timeline' : 'No media found'}
         </p>
         <p className="mt-1 text-xs text-white/15">
-          {imageLoadError ?? "Add a folder to see your timeline"}
+          {imageLoadError ?? 'Add a folder to see your timeline'}
         </p>
       </div>
     </div>
-  );
+  )
 }

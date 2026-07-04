@@ -1,7 +1,7 @@
-import { AlbumPicker } from "../AlbumPicker";
+import { AlbumPicker } from '../AlbumPicker'
 
 interface BulkAlbumPopoverProps {
-  onPick: (albumId: number) => Promise<void>;
+  onPick: (albumId: number) => Promise<void>
 }
 
 export function BulkAlbumPopover({ onPick }: BulkAlbumPopoverProps) {
@@ -12,5 +12,5 @@ export function BulkAlbumPopover({ onPick }: BulkAlbumPopoverProps) {
     >
       <AlbumPicker onPick={(albumId) => void onPick(albumId)} />
     </div>
-  );
+  )
 }

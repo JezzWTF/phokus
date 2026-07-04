@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from 'react'
 
 /**
  * In-place rename input for sidebar rows (folders, albums). Mount it in
@@ -10,41 +10,41 @@ export function InlineRename({
   onRename,
   onClose,
 }: {
-  name: string;
-  onRename: (next: string) => Promise<void> | void;
-  onClose: () => void;
+  name: string
+  onRename: (next: string) => Promise<void> | void
+  onClose: () => void
 }) {
-  const [value, setValue] = useState(name);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [value, setValue] = useState(name)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, []);
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [])
 
   const commit = async () => {
-    const trimmed = value.trim();
+    const trimmed = value.trim()
     if (trimmed && trimmed !== name) {
-      await onRename(trimmed);
+      await onRename(trimmed)
     }
-    onClose();
-  };
+    onClose()
+  }
 
   return (
     <input
       ref={inputRef}
-      className="w-full bg-white/10 text-white text-[13px] font-medium rounded px-1 py-0 outline-none ring-1 ring-blue-500/60 leading-tight"
+      className="w-full rounded bg-white/10 px-1 py-0 text-[13px] leading-tight font-medium text-white ring-1 ring-blue-500/60 outline-none"
       value={value}
       onChange={(event) => setValue(event.target.value)}
       onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          void commit();
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          void commit()
         }
-        if (event.key === "Escape") onClose();
+        if (event.key === 'Escape') onClose()
       }}
       onBlur={() => void commit()}
       onClick={(event) => event.stopPropagation()}
     />
-  );
+  )
 }
