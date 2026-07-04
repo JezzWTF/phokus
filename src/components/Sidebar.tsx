@@ -3,11 +3,39 @@ import { Reorder, useDragControls } from "framer-motion";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useGalleryStore, Folder, Album, IndexProgress } from "../store";
 import { ContextMenu, Dropdown, MenuItem, MenuSeparator } from "./menu";
+import { InlineConfirm } from "./InlineConfirm";
+import { InlineRename } from "./InlineRename";
 import { mediaSrc } from "../lib/mediaSrc";
 import { Tooltip } from "./Tooltip";
 
 type LibrarySort = "az" | "za" | "custom";
 const LIBRARY_SORT_KEY = "phokus-library-sort";
+
+function NavItem({
+  label,
+  iconPath,
+  active,
+  onClick,
+}: {
+  label: string;
+  iconPath: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div
+      className={`flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150 ${
+        active ? "bg-white/8 text-white" : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
+      }`}
+      onClick={onClick}
+    >
+      <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={iconPath} />
+      </svg>
+      <span className={`text-[13px] font-medium ${active ? "text-white" : ""}`}>{label}</span>
+    </div>
+  );
+}
 
 function FolderItem({
   folder,
@@ -42,16 +70,7 @@ function FolderItem({
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(folder.name);
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
-  const renameInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (renaming) {
-      setRenameValue(folder.name);
-      setTimeout(() => renameInputRef.current?.select(), 0);
-    }
-  }, [renaming, folder.name]);
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -64,19 +83,6 @@ function FolderItem({
     if (picked && typeof picked === "string") {
       await updateFolderPath(folder.id, picked);
     }
-  };
-
-  const commitRename = async () => {
-    const trimmed = renameValue.trim();
-    if (trimmed && trimmed !== folder.name) {
-      await renameFolder(folder.id, trimmed);
-    }
-    setRenaming(false);
-  };
-
-  const handleRenameKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
-    if (e.key === "Escape") { setRenaming(false); }
   };
 
   return (
@@ -148,14 +154,10 @@ function FolderItem({
 
         <div className="flex-1 min-w-0">
           {renaming ? (
-            <input
-              ref={renameInputRef}
-              className="w-full bg-white/10 text-white text-[13px] font-medium rounded px-1 py-0 outline-none ring-1 ring-blue-500/60 leading-tight"
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              onKeyDown={handleRenameKey}
-              onBlur={() => void commitRename()}
-              onClick={(e) => e.stopPropagation()}
+            <InlineRename
+              name={folder.name}
+              onRename={(next) => renameFolder(folder.id, next)}
+              onClose={() => setRenaming(false)}
             />
           ) : (
             <div className={`truncate text-[13px] font-medium leading-tight ${selected ? "text-white" : ""}`}>
@@ -180,20 +182,10 @@ function FolderItem({
         {/* Hover action buttons */}
         {!renaming && (
           confirmingRemoval ? (
-            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-              <button
-                className="px-1.5 py-0.5 text-[10px] rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 hover:text-red-300 transition-colors"
-                onClick={() => { void removeFolder(folder.id); setConfirmingRemoval(false); }}
-              >
-                Confirm
-              </button>
-              <button
-                className="px-1.5 py-0.5 text-[10px] rounded bg-white/5 text-gray-500 hover:bg-white/10 hover:text-gray-300 transition-colors"
-                onClick={() => setConfirmingRemoval(false)}
-              >
-                Cancel
-              </button>
-            </div>
+            <InlineConfirm
+              onConfirm={() => { void removeFolder(folder.id); setConfirmingRemoval(false); }}
+              onCancel={() => setConfirmingRemoval(false)}
+            />
           ) : (
             <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
               <Tooltip label="Reindex" anchorToCursor>
@@ -294,24 +286,7 @@ function AlbumItem({
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(album.name);
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
-  const renameInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (renaming) {
-      setRenameValue(album.name);
-      setTimeout(() => renameInputRef.current?.select(), 0);
-    }
-  }, [renaming, album.name]);
-
-  const commitRename = async () => {
-    const trimmed = renameValue.trim();
-    if (trimmed && trimmed !== album.name) {
-      await renameAlbum(album.id, trimmed);
-    }
-    setRenaming(false);
-  };
 
   const cover = mediaSrc(album.cover_thumbnail_path);
 
@@ -404,17 +379,10 @@ function AlbumItem({
 
       <div className="min-w-0 flex-1">
         {renaming ? (
-          <input
-            ref={renameInputRef}
-            className="w-full bg-white/10 text-white text-[13px] font-medium rounded px-1 py-0 outline-none ring-1 ring-blue-500/60 leading-tight"
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
-              if (e.key === "Escape") setRenaming(false);
-            }}
-            onBlur={() => void commitRename()}
-            onClick={(e) => e.stopPropagation()}
+          <InlineRename
+            name={album.name}
+            onRename={(next) => renameAlbum(album.id, next)}
+            onClose={() => setRenaming(false)}
           />
         ) : (
           <div className={`truncate text-[13px] font-medium leading-tight ${selected ? "text-white" : ""}`}>
@@ -425,20 +393,10 @@ function AlbumItem({
       </div>
 
       {!renaming && confirmingRemoval ? (
-        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-          <button
-            className="px-1.5 py-0.5 text-[10px] rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 hover:text-red-300 transition-colors"
-            onClick={() => { void deleteAlbum(album.id); setConfirmingRemoval(false); }}
-          >
-            Confirm
-          </button>
-          <button
-            className="px-1.5 py-0.5 text-[10px] rounded bg-white/5 text-gray-500 hover:bg-white/10 hover:text-gray-300 transition-colors"
-            onClick={() => setConfirmingRemoval(false)}
-          >
-            Cancel
-          </button>
-        </div>
+        <InlineConfirm
+          onConfirm={() => { void deleteAlbum(album.id); setConfirmingRemoval(false); }}
+          onCancel={() => setConfirmingRemoval(false)}
+        />
       ) : null}
 
       {menu ? (
@@ -714,73 +672,30 @@ export function Sidebar() {
 
       {/* Nav */}
       <div className="px-2 pt-2 pb-1 space-y-px">
-        <div
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150 ${
-            activeView === "gallery" && selectedFolderId === null
-              ? "bg-white/8 text-white"
-              : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
-          }`}
+        <NavItem
+          label="All Media"
+          active={activeView === "gallery" && selectedFolderId === null}
           onClick={() => selectFolder(null)}
-        >
-          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          <span className={`text-[13px] font-medium ${activeView === "gallery" && selectedFolderId === null ? "text-white" : ""}`}>
-            All Media
-          </span>
-        </div>
-
-        <div
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150 ${
-            activeView === "explore"
-              ? "bg-white/8 text-white"
-              : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
-          }`}
+          iconPath="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+        />
+        <NavItem
+          label="Explore"
+          active={activeView === "explore"}
           onClick={() => setView("explore")}
-        >
-          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-              d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
-          </svg>
-          <span className={`text-[13px] font-medium ${activeView === "explore" ? "text-white" : ""}`}>
-            Explore
-          </span>
-        </div>
-
-        <div
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150 ${
-            activeView === "timeline"
-              ? "bg-white/8 text-white"
-              : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
-          }`}
+          iconPath="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"
+        />
+        <NavItem
+          label="Timeline"
+          active={activeView === "timeline"}
           onClick={() => setView("timeline")}
-        >
-          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-              d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          <span className={`text-[13px] font-medium ${activeView === "timeline" ? "text-white" : ""}`}>
-            Timeline
-          </span>
-        </div>
-
-        <div
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150 ${
-            activeView === "duplicates"
-              ? "bg-white/8 text-white"
-              : "text-gray-500 hover:text-gray-200 hover:bg-white/5"
-          }`}
+          iconPath="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+        />
+        <NavItem
+          label="Duplicates"
+          active={activeView === "duplicates"}
           onClick={() => setView("duplicates")}
-        >
-          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-          <span className={`text-[13px] font-medium ${activeView === "duplicates" ? "text-white" : ""}`}>
-            Duplicates
-          </span>
-        </div>
+          iconPath="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+        />
       </div>
 
       {/* Section label */}
