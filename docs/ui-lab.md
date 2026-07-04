@@ -55,6 +55,20 @@ http://127.0.0.1:1422/?scenario=errors
 http://127.0.0.1:1422/?scenario=huge
 ```
 
+## Changelog Previews
+
+The What's New modal adapts its layout to release size (compact single column
+for small releases, a two-pane section rail for large ones). UI Lab reads
+`?changelog=` to override which entry the modal shows:
+
+| URL | Purpose |
+| --- | --- |
+| `/?changelog=unreleased` | The in-progress `[Unreleased]` notes — large release, rail layout |
+| `/?changelog=small` | Synthetic hotfix-sized entry — compact single-column layout |
+| `/?changelog=0.1.1` | Any specific released version |
+
+Open the modal via the demo panel: `Ctrl+Shift+D` → Open "What's new" modal.
+
 ## How It Works
 
 `src/main.tsx` bootstraps the app asynchronously. In `ui` mode it imports

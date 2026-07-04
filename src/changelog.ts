@@ -107,7 +107,65 @@ function parseChangelog(raw: string): ChangelogEntry[] {
 
 const ENTRIES = parseChangelog(changelogRaw)
 
+// Synthetic small release for UI Lab (`?changelog=small`). The What's New modal
+// switches layout by release size, and every real entry in CHANGELOG.md is
+// large — so the compact single-column layout can't be exercised from real
+// data. This stays below the modal's rail threshold on purpose.
+const SMALL_PREVIEW_ENTRY: ChangelogEntry = {
+  version: '0.0.0-preview',
+  date: '2026-01-01',
+  sections: [
+    {
+      title: 'Added',
+      items: [
+        {
+          lead: 'Sample setting',
+          body: 'a small toggle that exists purely so this preview has an Added section.',
+        },
+      ],
+    },
+    {
+      title: 'Changed',
+      items: [
+        {
+          lead: 'Snappier previews',
+          body: 'the preview fixture now loads instantly, because it is made up.',
+        },
+        { lead: null, body: 'A plain full-sentence bullet without a bold lead, for coverage.' },
+      ],
+    },
+    {
+      title: 'Fixed',
+      items: [
+        {
+          lead: 'Hotfix-sized fix',
+          body: 'a believable one-liner about a bug that never shipped.',
+        },
+        {
+          lead: 'Another small fix',
+          body: 'keeps the total item count comfortably under the rail threshold.',
+        },
+      ],
+    },
+  ],
+}
+
+// UI Lab affordance (browser-only `ui` mode): `?changelog=` previews an entry
+// other than the running version's, mirroring the `?scenario=` pattern.
+//   ?changelog=unreleased — the in-progress [Unreleased] notes (large release)
+//   ?changelog=small      — synthetic hotfix-sized entry (compact layout)
+//   ?changelog=0.1.1      — any specific released version
+function previewOverride(): ChangelogEntry | null {
+  if (import.meta.env.MODE !== 'ui') return null
+  const preview = new URLSearchParams(window.location.search).get('changelog')
+  if (!preview) return null
+  if (preview === 'small') return SMALL_PREVIEW_ENTRY
+  return ENTRIES.find((e) => e.version.toLowerCase() === preview.toLowerCase()) ?? null
+}
+
 export function getChangelogForVersion(version: string | null | undefined): ChangelogEntry | null {
+  const override = previewOverride()
+  if (override) return override
   if (!version) return null
   // Strip leading "v" and any build suffix (e.g. "-ui", "-dev", "-beta.1") so
   // dev/UI-lab builds still resolve to the correct changelog entry.
