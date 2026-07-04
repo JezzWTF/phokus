@@ -1,69 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { useGalleryStore, WorkerKey } from "../store";
-import { Tooltip } from "./Tooltip";
-import { ChevronDownIcon, CloseIcon, PlayIcon, WarningIcon } from "./icons";
-
-const WORKER_FOR_STAGE: Record<string, WorkerKey> = {
-  Thumbnails: "thumbnail",
-  Metadata: "metadata",
-  Embeddings: "embedding",
-  Tags: "tagging",
-};
-
-interface TaskStage {
-  label: string;
-  detail: string;
-  progress: number | null; // 0–100, or null for indeterminate
-  failed: boolean;
-}
-
-interface Task {
-  id: number;
-  name: string;
-  stages: TaskStage[];
-  isActive: boolean;
-  hasFailedEmbeddings: boolean;
-  hasFailedTagging: boolean;
-  hasFailedCaptions: boolean;
-  pendingMediaWork: number;
-  embeddingProcessed: number;
-  embeddingTotal: number;
-  currentFile: string | null;
-  snapshot: string;
-}
-
-interface FailedWorkerItem {
-  image_id: number;
-  filename: string;
-  path: string;
-  error: string | null;
-}
-
-function FailedWorkerItemRow({ item }: { item: FailedWorkerItem }) {
-  return (
-    <div className="flex min-w-0 items-start gap-1.5">
-      <WarningIcon className="mt-px h-2.5 w-2.5 shrink-0 text-amber-500 light-theme:text-amber-700" strokeWidth={2.5} />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[10px] font-medium text-amber-400/80 light-theme:text-amber-700">{item.filename}</p>
-        {item.error && (
-          <p className="truncate text-[9px] text-gray-600">{item.error}</p>
-        )}
-      </div>
-      <Tooltip label="Reveal in Explorer" anchorToCursor>
-      <button
-        className="shrink-0 text-gray-700 transition-colors hover:text-gray-300 light-theme:text-gray-600 light-theme:hover:text-gray-100"
-        onClick={() => void revealItemInDir(item.path)}
-      >
-        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-        </svg>
-      </button>
-      </Tooltip>
-    </div>
-  );
-}
+import { useGalleryStore, type WorkerKey } from "../store";
+import { BackgroundTaskSummary } from "./backgroundTasks/BackgroundTaskSummary";
+import { ExpandedTaskPanel } from "./backgroundTasks/ExpandedTaskPanel";
+import { buildDuplicateScanTask, buildFolderTasks, taskHasTerminalFailure, taskProgress } from "./backgroundTasks/taskModel";
+import type { BackgroundTask, FailedWorkerItem } from "./backgroundTasks/types";
 
 export function BackgroundTasks() {
   const folders = useGalleryStore((state) => state.folders);
@@ -74,31 +15,29 @@ export function BackgroundTasks() {
   const showFailedTagging = useGalleryStore((state) => state.showFailedTagging);
   const duplicateScanning = useGalleryStore((state) => state.duplicateScanning);
   const duplicateScanProgress = useGalleryStore((state) => state.duplicateScanProgress);
+  const workerPaused = useGalleryStore((state) => state.workerPaused);
+  const loadWorkerStates = useGalleryStore((state) => state.loadWorkerStates);
+  const setWorkerPaused = useGalleryStore((state) => state.setWorkerPaused);
   const [expanded, setExpanded] = useState(false);
   const [dismissed, setDismissed] = useState<Record<number, string>>({});
   const [failedEmbeddingItems, setFailedEmbeddingItems] = useState<Record<number, FailedWorkerItem[]>>({});
   const [failedTaggingItems, setFailedTaggingItems] = useState<Record<number, FailedWorkerItem[]>>({});
 
-  const workerPaused = useGalleryStore((state) => state.workerPaused);
-  const loadWorkerStates = useGalleryStore((state) => state.loadWorkerStates);
-  const setWorkerPaused = useGalleryStore((state) => state.setWorkerPaused);
-
   useEffect(() => {
     void loadWorkerStates();
   }, [folders, loadWorkerStates]);
 
-  // Fetch failed filenames whenever the expanded panel opens or failure counts change.
   const failedEmbeddingCounts = useMemo(
     () =>
       Object.fromEntries(
-        Object.entries(mediaJobProgress).map(([id, p]) => [id, p?.embedding_failed ?? 0]),
+        Object.entries(mediaJobProgress).map(([id, progress]) => [id, progress?.embedding_failed ?? 0]),
       ),
     [mediaJobProgress],
   );
   const failedTaggingCounts = useMemo(
     () =>
       Object.fromEntries(
-        Object.entries(mediaJobProgress).map(([id, p]) => [id, p?.tagging_failed ?? 0]),
+        Object.entries(mediaJobProgress).map(([id, progress]) => [id, progress?.tagging_failed ?? 0]),
       ),
     [mediaJobProgress],
   );
@@ -125,475 +64,76 @@ export function BackgroundTasks() {
     }
   }, [expanded, failedEmbeddingCounts, failedTaggingCounts]);
 
-  const isWorkerPaused = (folderId: number, worker: WorkerKey) => {
-    return workerPaused[folderId]?.[worker] ?? false;
-  };
+  const folderTasks = useMemo(
+    () =>
+      buildFolderTasks({
+        dismissed,
+        folders,
+        indexingProgress,
+        mediaJobProgress,
+        workerPaused,
+      }),
+    [dismissed, folders, indexingProgress, mediaJobProgress, workerPaused],
+  );
+
+  const duplicateScanTask = useMemo(
+    () => buildDuplicateScanTask(duplicateScanning, duplicateScanProgress),
+    [duplicateScanning, duplicateScanProgress],
+  );
+  const allTasks = duplicateScanTask ? [duplicateScanTask, ...folderTasks] : folderTasks;
+
+  if (allTasks.length === 0) return null;
+
+  const isWorkerPaused = (folderId: number, worker: WorkerKey) => workerPaused[folderId]?.[worker] ?? false;
 
   const toggleWorker = (folderId: number, worker: WorkerKey) => {
     setWorkerPaused(folderId, worker, !isWorkerPaused(folderId, worker));
   };
 
-  const dismissTask = (id: number, snapshot: string) => {
-    if (id < 0) return; // system tasks (duplicate scan) cannot be dismissed
-    setDismissed((prev) => ({ ...prev, [id]: snapshot }));
+  const dismissTask = (task: BackgroundTask) => {
+    if (task.id < 0) return;
+    setDismissed((prev) => ({ ...prev, [task.id]: task.snapshot }));
     setExpanded(false);
   };
 
-  const tasks = useMemo<Task[]>(() => {
-    return folders
-      .map((folder): Task | null => {
-        const index = indexingProgress[folder.id];
-        const jobs = mediaJobProgress[folder.id];
-
-        const thumbnailPending = jobs?.thumbnail_pending ?? 0;
-        const metadataPending = jobs?.metadata_pending ?? 0;
-        const embeddingPending = jobs?.embedding_pending ?? 0;
-        const embeddingReady = jobs?.embedding_ready ?? 0;
-        const embeddingFailed = jobs?.embedding_failed ?? 0;
-        const taggingPending = jobs?.tagging_pending ?? 0;
-        const taggingReady = jobs?.tagging_ready ?? 0;
-        const taggingFailed = jobs?.tagging_failed ?? 0;
-        const captionPending = jobs?.caption_pending ?? 0;
-        const captionReady = jobs?.caption_ready ?? 0;
-        const captionFailed = jobs?.caption_failed ?? 0;
-
-        // A folder is "actively processing" when something is genuinely moving:
-        // an in-progress scan, or pending work on a worker that isn't paused.
-        // Captions have no per-folder pause toggle, so any caption work counts.
-        const paused = workerPaused[folder.id];
-        const isActive =
-          (!!index && !index.done) ||
-          (thumbnailPending > 0 && !(paused?.thumbnail ?? false)) ||
-          (metadataPending > 0 && !(paused?.metadata ?? false)) ||
-          (embeddingPending > 0 && !(paused?.embedding ?? false)) ||
-          (taggingPending > 0 && !(paused?.tagging ?? false)) ||
-          captionPending > 0;
-
-        const pendingMediaWork = thumbnailPending + metadataPending + embeddingPending + taggingPending + captionPending;
-        const embeddingProcessed = embeddingReady + embeddingFailed;
-        const embeddingTotal = embeddingProcessed + embeddingPending;
-        const taggingProcessed = taggingReady + taggingFailed;
-        const taggingTotal = taggingProcessed + taggingPending;
-        const captionProcessed = captionReady + captionFailed;
-        const captionTotal = captionProcessed + captionPending;
-        const hasFailedEmbeddings = embeddingFailed > 0;
-        const hasFailedTagging = taggingFailed > 0;
-        const hasFailedCaptions = captionFailed > 0;
-
-        if (!index && pendingMediaWork === 0 && !hasFailedEmbeddings && !hasFailedTagging && !hasFailedCaptions) return null;
-
-        const stages: TaskStage[] = [];
-
-        if (index && !index.done) {
-          const pct = index.total > 0 ? (index.indexed / index.total) * 100 : 0;
-          stages.push({
-            label: "Scanning",
-            detail: `${index.indexed.toLocaleString()} / ${index.total.toLocaleString()}`,
-            progress: pct,
-            failed: false,
-          });
-        }
-
-        if (thumbnailPending > 0) {
-          stages.push({
-            label: "Thumbnails",
-            detail: thumbnailPending.toLocaleString(),
-            progress: null,
-            failed: false,
-          });
-        }
-
-        if (metadataPending > 0) {
-          stages.push({
-            label: "Metadata",
-            detail: metadataPending.toLocaleString(),
-            progress: null,
-            failed: false,
-          });
-        }
-
-        if (embeddingPending > 0) {
-          const pct = embeddingTotal > 0 ? (embeddingProcessed / embeddingTotal) * 100 : 0;
-          stages.push({
-            label: "Embeddings",
-            detail: `${embeddingProcessed.toLocaleString()} / ${embeddingTotal.toLocaleString()}`,
-            progress: pct,
-            failed: false,
-          });
-        }
-
-        if (taggingPending > 0) {
-          const pct = taggingTotal > 0 ? (taggingProcessed / taggingTotal) * 100 : 0;
-          stages.push({
-            label: "Tags",
-            detail: `${taggingProcessed.toLocaleString()} / ${taggingTotal.toLocaleString()}`,
-            progress: pct,
-            failed: false,
-          });
-        }
-
-        if (captionPending > 0) {
-          const pct = captionTotal > 0 ? (captionProcessed / captionTotal) * 100 : 0;
-          stages.push({
-            label: "Captions",
-            detail: `${captionProcessed.toLocaleString()} / ${captionTotal.toLocaleString()}`,
-            progress: pct,
-            failed: false,
-          });
-        }
-
-        if (hasFailedEmbeddings && pendingMediaWork === 0) {
-          stages.push({
-            label: "Failed",
-            detail: `${embeddingFailed.toLocaleString()} embeddings`,
-            progress: null,
-            failed: true,
-          });
-        }
-
-        if (hasFailedTagging && pendingMediaWork === 0) {
-          stages.push({
-            label: "Failed",
-            detail: `${taggingFailed.toLocaleString()} tags`,
-            progress: null,
-            failed: true,
-          });
-        }
-
-        if (hasFailedCaptions && pendingMediaWork === 0) {
-          stages.push({
-            label: "Failed",
-            detail: `${captionFailed.toLocaleString()} captions`,
-            progress: null,
-            failed: true,
-          });
-        }
-
-        const snapshot = `${pendingMediaWork}:${embeddingFailed}:${taggingFailed}:${captionFailed}`;
-
-        return {
-          id: folder.id,
-          name: folder.name,
-          stages,
-          isActive,
-          hasFailedEmbeddings,
-          hasFailedTagging,
-          hasFailedCaptions,
-          pendingMediaWork,
-          embeddingProcessed,
-          embeddingTotal,
-          currentFile: index && !index.done ? (index.current_file || null) : null,
-          snapshot,
-        };
-      })
-      .filter((t): t is Task => t !== null)
-      .filter((t) => dismissed[t.id] !== t.snapshot)
-      // Surface actively-processing folders first so a paused folder never holds
-      // the primary (collapsed) slot while another is genuinely working. Array
-      // sort is stable, so folders within each group keep their existing order.
-      .sort((a, b) => Number(b.isActive) - Number(a.isActive));
-  }, [folders, indexingProgress, mediaJobProgress, workerPaused, dismissed]);
-
-  // Synthetic task for duplicate scanning — negative id so dismiss/retry are suppressed
-  const duplicateScanTask: Task | null = duplicateScanning ? {
-    id: -1,
-    name: "Duplicate Scan",
-    stages: [{
-      label: duplicateScanProgress?.phase === "checking"
-        ? "Checking"
-        : duplicateScanProgress?.phase === "confirming"
-          ? "Confirming"
-          : "Hashing",
-      detail: duplicateScanProgress
-        ? `${duplicateScanProgress.processed.toLocaleString()} / ${duplicateScanProgress.total.toLocaleString()}${duplicateScanProgress.skipped > 0 ? ` · ${duplicateScanProgress.skipped.toLocaleString()} skipped` : ""}`
-        : "Starting…",
-      progress: duplicateScanProgress && duplicateScanProgress.total > 0
-        ? (duplicateScanProgress.processed / duplicateScanProgress.total) * 100
-        : null,
-      failed: false,
-    }],
-    isActive: true,
-    hasFailedEmbeddings: false,
-    hasFailedTagging: false,
-    hasFailedCaptions: false,
-    pendingMediaWork: 1,
-    embeddingProcessed: 0,
-    embeddingTotal: 0,
-    currentFile: null,
-    snapshot: "",
-  } : null;
-
-  const allTasks = duplicateScanTask ? [duplicateScanTask, ...tasks] : tasks;
-
-  if (allTasks.length === 0) return null;
+  const retryTask = (task: BackgroundTask) => {
+    if (task.hasFailedEmbeddings) void retryFailedEmbeddings(task.id);
+    if (task.hasFailedTagging) void queueTaggingJobs(task.id);
+  };
 
   const primary = allTasks[0];
-  const extraCount = allTasks.length - 1;
-  const hasFailed = tasks.some((t) => (t.hasFailedEmbeddings || t.hasFailedTagging || t.hasFailedCaptions) && t.pendingMediaWork === 0);
-
-  // Best progress bar value: use embedding progress if available (most informative),
-  // otherwise tagging progress, otherwise fall back to scanning progress, otherwise indeterminate.
-  const embeddingStage = primary.stages.find((s) => s.label === "Embeddings");
-  const taggingStage = primary.stages.find((s) => s.label === "Tags");
-  const scanningStage = primary.stages.find((s) => s.label === "Scanning");
-  const duplicateStage = primary.id === -1 ? primary.stages[0] : null;
-  const barProgress = embeddingStage?.progress ?? taggingStage?.progress ?? scanningStage?.progress ?? duplicateStage?.progress ?? null;
+  const hasFailed = folderTasks.some(taskHasTerminalFailure);
+  const barProgress = taskProgress(primary);
 
   return (
     <div className="shrink-0 border-b border-white/[0.06]">
-      {/* Slim bar */}
-      <div
-        className={`group flex items-center gap-3 px-5 h-11 cursor-pointer select-none transition-colors ${
-          expanded ? "bg-white/[0.03]" : "hover:bg-white/[0.02]"
-        }`}
-        onClick={() => setExpanded((v) => !v)}
-      >
-        {/* Pulse dot */}
-        <div className="relative shrink-0">
-          <div className={`h-1.5 w-1.5 rounded-full ${hasFailed ? "bg-amber-400" : "bg-blue-400"}`} />
-          <div className={`absolute inset-0 h-1.5 w-1.5 rounded-full animate-ping opacity-60 ${hasFailed ? "bg-amber-400" : "bg-blue-400"}`} />
-        </div>
+      <BackgroundTaskSummary
+        expanded={expanded}
+        extraCount={allTasks.length - 1}
+        hasFailed={hasFailed}
+        isWorkerPaused={isWorkerPaused}
+        onDismiss={dismissTask}
+        onLocate={showFailedTagging}
+        onRetry={retryTask}
+        onToggleExpanded={() => setExpanded((value) => !value)}
+        onToggleWorker={toggleWorker}
+        primary={primary}
+        progress={barProgress}
+        taskCount={allTasks.length}
+      />
 
-        {/* Folder name */}
-        <span className="text-[13px] font-medium text-white/60 shrink-0">{primary.name}</span>
-
-        {/* Stage tags — all active stages visible simultaneously */}
-        <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-hidden">
-          {primary.stages.map((stage) => {
-            const workerKey = WORKER_FOR_STAGE[stage.label];
-            const isPaused = workerKey ? isWorkerPaused(primary.id, workerKey) : false;
-            return (
-              <span
-                key={stage.label}
-                className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] shrink-0 ${
-                  stage.failed
-                    ? "bg-amber-500/10 text-amber-400 light-theme:border light-theme:border-amber-500/40 light-theme:bg-amber-100 light-theme:text-amber-700"
-                    : isPaused
-                      ? "bg-white/4 text-gray-600"
-                      : "bg-white/5 text-gray-400"
-                }`}
-              >
-                <span>{stage.label}</span>
-                <span className={`tabular-nums ${stage.failed ? "text-amber-500 light-theme:text-amber-700" : isPaused ? "text-gray-700" : "text-gray-600"}`}>
-                  {stage.detail}
-                </span>
-                {workerKey && (
-                  <Tooltip label={isPaused ? `Resume ${stage.label}` : `Pause ${stage.label}`} anchorToCursor>
-                  <button
-                    className="ml-0.5 opacity-0 group-hover:opacity-100 hover:text-white transition-opacity"
-                    onClick={(e) => { e.stopPropagation(); toggleWorker(primary.id, workerKey); }}
-                  >
-                    {isPaused ? (
-                      <PlayIcon className="h-2.5 w-2.5" />
-                    ) : (
-                      <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                      </svg>
-                    )}
-                  </button>
-                </Tooltip>
-              )}
-              </span>
-            );
-          })}
-        </div>
-
-        {/* Progress bar — embedding or scanning progress, pulsing if indeterminate */}
-        <div className="w-24 h-px bg-white/8 rounded-full overflow-hidden shrink-0">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${
-              hasFailed
-                ? "bg-amber-400/60"
-                : barProgress === null
-                  ? "bg-blue-500/40 animate-pulse w-full"
-                  : "bg-blue-500"
-            }`}
-            style={barProgress !== null ? { width: `${barProgress}%` } : undefined}
-          />
-        </div>
-
-        {/* Extra folders badge */}
-        {extraCount > 0 && (
-          <span className="rounded-full bg-white/8 px-2 py-0.5 text-[10px] text-gray-500 shrink-0">
-            +{extraCount}
-          </span>
-        )}
-
-        {primary.pendingMediaWork === 0 && (primary.hasFailedEmbeddings || primary.hasFailedTagging) && (
-          <div className="flex shrink-0 items-center gap-1.5">
-            {primary.hasFailedTagging ? (
-              <button
-                className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-300 transition-colors hover:bg-amber-500/20 light-theme:border-amber-500/50 light-theme:bg-amber-100 light-theme:text-amber-700 light-theme:hover:bg-amber-200"
-                onClick={(e) => { e.stopPropagation(); showFailedTagging(primary.id); }}
-              >
-                Locate
-              </button>
-            ) : null}
-            <button
-              className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-300 transition-colors hover:bg-amber-500/20 light-theme:border-amber-500/50 light-theme:bg-amber-100 light-theme:text-amber-700 light-theme:hover:bg-amber-200"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (primary.hasFailedEmbeddings) void retryFailedEmbeddings(primary.id);
-                if (primary.hasFailedTagging) void queueTaggingJobs(primary.id);
-              }}
-            >
-              Retry
-            </button>
-          </div>
-        )}
-
-        {/* Expand chevron (only when multiple tasks) */}
-        {allTasks.length > 1 && (
-          <ChevronDownIcon className={`h-3.5 w-3.5 text-gray-600 transition-transform duration-200 shrink-0 ${expanded ? "rotate-180" : ""}`} />
-        )}
-
-        {/* Dismiss — hidden for system tasks like duplicate scan */}
-        {primary.id >= 0 && (
-          <Tooltip label="Dismiss" anchorToCursor>
-          <button
-            className="p-1 rounded-md text-gray-600 hover:text-gray-300 hover:bg-white/8 transition-colors shrink-0"
-            onClick={(e) => { e.stopPropagation(); dismissTask(primary.id, primary.snapshot); }}
-          >
-            <CloseIcon className="h-3.5 w-3.5" />
-          </button>
-        </Tooltip>
-      )}
-      </div>
-
-      {/* Expanded panel — one row per folder */}
-      {expanded && (
-        <div className="border-t border-white/[0.06] bg-white/[0.02] px-5 py-3 space-y-3">
-          {allTasks.map((task) => {
-            const taskEmbeddingStage = task.stages.find((s) => s.label === "Embeddings");
-            const taskTaggingStage = task.stages.find((s) => s.label === "Tags");
-            const taskScanningStage = task.stages.find((s) => s.label === "Scanning");
-            const taskDuplicateStage = task.id === -1 ? task.stages[0] : null;
-            const taskBarProgress = taskEmbeddingStage?.progress ?? taskTaggingStage?.progress ?? taskScanningStage?.progress ?? taskDuplicateStage?.progress ?? null;
-            const taskHasFailed = (task.hasFailedEmbeddings || task.hasFailedTagging || task.hasFailedCaptions) && task.pendingMediaWork === 0;
-
-            return (
-              <div key={task.id}>
-                <div className="flex items-center gap-3">
-                  <span className="text-[12px] text-white/50 w-28 truncate shrink-0">{task.name}</span>
-
-                  <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-hidden">
-                    {task.stages.map((stage) => {
-                      const workerKey = WORKER_FOR_STAGE[stage.label];
-                      const isPaused = workerKey ? isWorkerPaused(task.id, workerKey) : false;
-                      return (
-                        <span
-                          key={stage.label}
-                          className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] shrink-0 ${
-                            stage.failed
-                              ? "bg-amber-500/10 text-amber-400 light-theme:border light-theme:border-amber-500/40 light-theme:bg-amber-100 light-theme:text-amber-700"
-                              : isPaused
-                                ? "bg-white/4 text-gray-600"
-                                : "bg-white/5 text-gray-500"
-                          }`}
-                        >
-                          {isPaused && (
-                            <svg className="h-2 w-2 text-gray-600" fill="currentColor" viewBox="0 0 24 24">
-                              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                            </svg>
-                          )}
-                          <span>{stage.label}</span>
-                          <span className={`tabular-nums ${stage.failed ? "text-amber-500 light-theme:text-amber-700" : "text-gray-600"}`}>
-                            {stage.detail}
-                          </span>
-                          {workerKey && (
-                            <Tooltip label={isPaused ? `Resume ${stage.label}` : `Pause ${stage.label}`} anchorToCursor>
-                            <button
-                              className="ml-0.5 text-gray-600 hover:text-white transition-colors"
-                              onClick={() => toggleWorker(task.id, workerKey)}
-                            >
-                              {isPaused ? (
-                                <PlayIcon className="h-2.5 w-2.5" />
-                              ) : (
-                                <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                                </svg>
-                              )}
-                            </button>
-                          </Tooltip>
-                        )}
-                        </span>
-                      );
-                    })}
-                  </div>
-
-                  <div className="w-20 h-px bg-white/8 rounded-full overflow-hidden shrink-0">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        taskHasFailed
-                          ? "bg-amber-400/60"
-                          : taskBarProgress === null
-                            ? "bg-blue-500/40 animate-pulse w-full"
-                            : "bg-blue-500"
-                      }`}
-                      style={taskBarProgress !== null ? { width: `${taskBarProgress}%` } : undefined}
-                    />
-                  </div>
-
-                  {taskHasFailed && (
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      {task.hasFailedTagging ? (
-                        <button
-                          className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300 transition-colors hover:bg-amber-500/20 light-theme:border-amber-500/50 light-theme:bg-amber-100 light-theme:text-amber-700 light-theme:hover:bg-amber-200"
-                          onClick={() => showFailedTagging(task.id)}
-                        >
-                          Locate
-                        </button>
-                      ) : null}
-                      <button
-                        className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300 transition-colors hover:bg-amber-500/20 light-theme:border-amber-500/50 light-theme:bg-amber-100 light-theme:text-amber-700 light-theme:hover:bg-amber-200"
-                        onClick={() => {
-                          if (task.hasFailedEmbeddings) void retryFailedEmbeddings(task.id);
-                          if (task.hasFailedTagging) void queueTaggingJobs(task.id);
-                        }}
-                      >
-                        Retry
-                      </button>
-                    </div>
-                  )}
-
-                  {task.id >= 0 && (
-                    <Tooltip label="Dismiss" anchorToCursor>
-                    <button
-                      className="p-1 rounded-md text-gray-600 hover:text-gray-300 hover:bg-white/8 transition-colors shrink-0"
-                      onClick={() => dismissTask(task.id, task.snapshot)}
-                    >
-                      <CloseIcon className="h-3 w-3" />
-                    </button>
-                    </Tooltip>
-                  )}
-                </div>
-
-                {task.currentFile && (
-                  <p className="text-[10px] text-gray-600 truncate mt-1 pl-[calc(7rem+0.75rem)]">
-                    {task.currentFile}
-                  </p>
-                )}
-
-                {/* Failed worker file lists */}
-                {taskHasFailed && failedEmbeddingItems[task.id] && failedEmbeddingItems[task.id].length > 0 && (
-                  <div className="mt-2 pl-[calc(7rem+0.75rem)] space-y-0.5">
-                    {failedEmbeddingItems[task.id].map((item) => (
-                      <FailedWorkerItemRow key={item.image_id} item={item} />
-                    ))}
-                  </div>
-                )}
-                {taskHasFailed && failedTaggingItems[task.id] && failedTaggingItems[task.id].length > 0 && (
-                  <div className="mt-2 pl-[calc(7rem+0.75rem)] space-y-0.5">
-                    {failedTaggingItems[task.id].map((item) => (
-                      <FailedWorkerItemRow key={item.image_id} item={item} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {expanded ? (
+        <ExpandedTaskPanel
+          failedEmbeddingItems={failedEmbeddingItems}
+          failedTaggingItems={failedTaggingItems}
+          isWorkerPaused={isWorkerPaused}
+          onDismiss={dismissTask}
+          onLocate={showFailedTagging}
+          onRetry={retryTask}
+          onToggleWorker={toggleWorker}
+          tasks={allTasks}
+        />
+      ) : null}
     </div>
   );
 }
