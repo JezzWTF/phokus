@@ -71,9 +71,8 @@ function DuplicateGroupCard({ group }: { group: DuplicateGroup }) {
           const isSelected = selectedIds.has(image.id);
           const src = mediaSrc(image.thumbnail_path);
           return (
-            <Tooltip label={image.path} anchorToCursor>
+            <Tooltip key={image.id} label={image.path} anchorToCursor>
             <button
-              key={image.id}
               className={`media-dark-surface group relative overflow-hidden rounded-xl border transition-all ${
                 isSelected
                   ? "border-red-400/50 ring-1 ring-red-400/30"
