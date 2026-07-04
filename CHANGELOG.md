@@ -41,6 +41,13 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Choose your tagging model** — Settings -> AI Workspace now lets you pick
   between the anime-focused WD tagger and JoyTag, which is better suited to photo
   libraries and stronger on NSFW concepts (if that's your thing, we don't judge).
+  New users get the same choice during the welcome tour, and each model keeps its
+  own confidence threshold instead of sharing one.
+- **Reset AI tags** — a new reset action in Settings -> AI Workspace and the Tag
+  manager wipes AI-generated tags for a folder or the whole library, cancelling
+  any tagging still in flight. Tag manager rows now show which tags came from the
+  AI, so you know what you are about to lose before you lose it. Manually-added
+  tags are never touched.
 - **Related tags in Explore** — Hover over a tag in the Tag Cloud to see the tags
   that most often appear with it, complete with connection lines and image counts.
   Handy for finding little clusters you did not know were there.
@@ -57,6 +64,9 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- **Settings got a spring clean** — preferences are now organised into General,
+  Media, Updates & Setup, Storage, and AI Workspace pages, so update and
+  maintenance controls no longer hide at the bottom of unrelated sections.
 - **Menus got their act together** — right-click menus (images, folders,
   albums, the theme switcher) and every dropdown (sort, folder scope, settings,
   sidebar) now share one style with one set of manners: they stay on screen
@@ -95,40 +105,48 @@ aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Explore no longer flashes the last folder** — switching folders now clears
   the old clusters/tags and shows a loading state while the new folder catches
   up.
-- **Ratings keep your search order** — rating or favoriting an image no longer
-  reshuffles similar-image, region, semantic, tag, or album results.
+- **Ratings keep your search order** — if you ever rated an image mid-search and
+  watched your results reshuffle themselves, that's over. Similar-image, region,
+  semantic, tag, and album results now stay put.
 - **Update progress comes back when you need it** — if you dismiss the update
   prompt and later start the update from the title bar or Settings, the progress
   toast now reappears instead of hiding away in Settings.
 - **Subtle Light cleanup** — fixed dark or hard-to-read surfaces, hover states,
   dialogs, updater buttons, onboarding controls, and green action buttons in the
   light theme.
-- **No more self-indexing loops** — if you add a broad folder like your user
-  profile, Phokus now skips its own app-data directory instead of indexing its
-  thumbnail cache forever.
+- **No more self-indexing loops** — adding a broad folder like your whole user
+  profile used to send Phokus off indexing its own thumbnail cache, generating
+  thumbnails of thumbnails until the end of time. It now skips its own app-data
+  directory.
 - **Background tasks show the active work first** — when one folder is paused and
   another is processing, the active folder gets the main spot in the background
   tasks bar.
-- **First launch fits smaller screens** — fresh installs now clamp the window to
-  the usable monitor area, so 1366x768-style displays do not lose part of the app
-  below the taskbar.
+- **First launch fits smaller screens** — on 1366x768-style displays, fresh
+  installs used to open with part of the app tucked below the taskbar. The window
+  now clamps itself to the usable monitor area.
 - **Explore is clearer in Subtle Light** — cluster captions, buttons, cloud
   words, hover glows, and the new connection lines now use stronger light-theme
   colours.
 - **Explore got a few sharp edges sanded down** — Cluster Cloud uses the in-app
   tooltip, singular counts now say "1 image", and the folder-scope dropdown no
   longer hides behind cluster cards.
-- **AI tagging stays responsive** — GPU tagging now works in smaller bursts with
-  brief pauses between them, so the UI keeps moving and the first batch starts
+- **AI tagging stays responsive** — starting a big tagging job used to turn the
+  rest of the app into a slideshow. GPU tagging now works in smaller bursts with
+  brief pauses between them, so the UI keeps moving and the first results land
   sooner.
+- **Lightbox AI tags wake up on time** — the lightbox's AI tags action no longer
+  stays disabled until you happen to open Settings, and it switches on as soon as
+  a model download finishes.
 - **Noisy AI tags get cleaned up** — generic low-signal tags from WD and JoyTag
   are filtered before they are saved, and matching older generated tags are
   cleaned up on startup. Your manually-added tags are left alone.
 - **Selected Folders starts empty** — choosing "Selected Folders" for AI tagging
   no longer pre-selects the first folder. You decide exactly what gets queued.
-- **A couple of tiny UI papercuts are gone** — the zoom buttons now show the
-  right tile size when you hover them, and the folder picker no longer adds an
-  odd trailing slash to Windows drive breadcrumbs.
+- **A handful of tiny UI papercuts are gone** — the zoom buttons now show the
+  right tile size when you hover them, the folder picker no longer adds an odd
+  trailing slash to Windows drive breadcrumbs, the search field's clear button
+  no longer sits a few pixels too high, and menu labels no longer highlight like
+  text when you drag across them.
 
 ## [0.1.1] — 2026-06-23
 
