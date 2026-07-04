@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGalleryStore } from "../store";
 import { BulkTagPopover } from "./bulk/BulkTagPopover";
+import { useDismissable } from "./menu";
 import { Tooltip } from "./Tooltip"
 
 type Panel = "tag" | "rating" | "album" | "delete" | null;
@@ -28,15 +29,8 @@ export function BulkActionBar() {
   const [newAlbumName, setNewAlbumName] = useState("");
   const barRef = useRef<HTMLDivElement>(null);
 
-  // Close any open popover when clicking outside the bar.
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (barRef.current?.contains(event.target as Node)) return;
-      setPanel(null);
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, []);
+  // Close any open popover when clicking outside the bar or pressing Escape.
+  useDismissable(barRef, () => setPanel(null), panel !== null);
 
   // Reset transient UI whenever the selection empties.
   useEffect(() => {

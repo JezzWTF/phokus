@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useGalleryStore } from "../store";
+import { useDismissable } from "./menu";
 import { Tooltip } from "./Tooltip";
 
 type Rgb = [number, number, number];
@@ -45,15 +46,8 @@ export function ColorFilter() {
   const isActive = colorFilter !== null;
   const isCustom = isActive && !SWATCHES.some((swatch) => rgbEquals(colorFilter, swatch.rgb));
 
-  // Collapse the panel when clicking elsewhere.
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
+  // Collapse the panel when clicking elsewhere or pressing Escape.
+  useDismissable(ref, () => setOpen(false), open);
 
   return (
     <div ref={ref} className="relative ml-1 flex shrink-0 items-center border-l border-white/6 pl-2">
