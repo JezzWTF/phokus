@@ -2,9 +2,29 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { invoke } from '@tauri-apps/api/core'
 import { useGalleryStore } from '../store'
-import { getChangelogForVersion, type ChangelogSection } from '../changelog'
+import {
+  getChangelogForVersion,
+  type ChangelogEntry,
+  type ChangelogItem,
+  type ChangelogSection,
+} from '../changelog'
 import { Tooltip } from './Tooltip'
 import { ChevronRightIcon, CloseIcon } from './icons'
+
+// The modal adapts its layout to the size of the release: small releases keep
+// the compact single-column list, while big ones switch to a two-pane layout
+// with a section nav rail so no one pane is a marathon scroll. Preview both in
+// UI Lab via `?changelog=unreleased` + the demo panel's "Open What's new modal".
+type WhatsNewLayout = 'single' | 'rail'
+
+// Above this many total bullets, the single column gets unpleasantly long.
+const RAIL_THRESHOLD = 20
+
+function chooseLayout(entry: ChangelogEntry | null): WhatsNewLayout {
+  if (!entry || entry.sections.length < 2) return 'single'
+  const total = entry.sections.reduce((sum, section) => sum + section.items.length, 0)
+  return total > RAIL_THRESHOLD ? 'rail' : 'single'
+}
 
 // Shown in the tooltip so the user can see the link's destination before
 // clicking. The actual navigation is handled by the open_changelog_url command.
@@ -24,6 +44,10 @@ const SECTION_STYLES: Record<string, { label: string; dot: string }> = {
 }
 
 const NEUTRAL_STYLE = { label: 'text-gray-300', dot: 'bg-gray-400/70' }
+
+function sectionStyle(title: string) {
+  return SECTION_STYLES[title] ?? NEUTRAL_STYLE
+}
 
 // Render the small amount of inline markdown the changelog uses: **bold** and
 // `code`. Anything else passes through as plain text.
@@ -58,8 +82,44 @@ function renderInline(text: string): ReactNode[] {
   return nodes
 }
 
-function Section({ section }: { section: ChangelogSection }) {
-  const style = SECTION_STYLES[section.title] ?? NEUTRAL_STYLE
+function Item({ item, dot }: { item: ChangelogItem; dot: string }) {
+  return (
+    <li className="flex gap-3">
+      <span className={`mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
+      <p className="text-[13px] leading-relaxed text-gray-400">
+        {item.lead ? (
+          <>
+            <span className="font-semibold text-gray-100">{item.lead}</span>
+            {item.body ? <span> — {renderInline(item.body)}</span> : null}
+          </>
+        ) : (
+          renderInline(item.body)
+        )}
+      </p>
+    </li>
+  )
+}
+
+function ItemList({
+  items,
+  dot,
+  className = '',
+}: {
+  items: ChangelogItem[]
+  dot: string
+  className?: string
+}) {
+  return (
+    <ul className={`space-y-2.5 ${className}`}>
+      {items.map((item, index) => (
+        <Item key={index} item={item} dot={dot} />
+      ))}
+    </ul>
+  )
+}
+
+function CollapsibleSection({ section }: { section: ChangelogSection }) {
+  const style = sectionStyle(section.title)
   const [open, setOpen] = useState(true)
 
   return (
@@ -88,28 +148,60 @@ function Section({ section }: { section: ChangelogSection }) {
             transition={{ duration: 0.18 }}
             className="overflow-hidden"
           >
-            <ul className="mt-2.5 space-y-2.5 pl-5">
-              {section.items.map((item, index) => (
-                <li key={index} className="flex gap-3">
-                  <span className={`mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full ${style.dot}`} />
-                  <p className="text-[13px] leading-relaxed text-gray-400">
-                    {item.lead ? (
-                      <>
-                        <span className="font-semibold text-gray-100">{item.lead}</span>
-                        {item.body ? <span> — {renderInline(item.body)}</span> : null}
-                      </>
-                    ) : (
-                      renderInline(item.body)
-                    )}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <ItemList items={section.items} dot={style.dot} className="mt-2.5 pl-5" />
           </motion.div>
         ) : null}
       </AnimatePresence>
     </section>
   )
+}
+
+// 'rail' layout — a section nav rail on the left, the selected section's items
+// on the right.
+function RailSections({ sections }: { sections: ChangelogSection[] }) {
+  const [active, setActive] = useState(0)
+  const section = sections[Math.min(active, sections.length - 1)]
+  const style = sectionStyle(section.title)
+
+  return (
+    <div className="flex min-h-0 flex-1">
+      <nav className="flex w-44 shrink-0 flex-col gap-1 border-r border-white/[0.07] px-3 py-4">
+        {sections.map((s, index) => {
+          const navStyle = sectionStyle(s.title)
+          const isActive = index === active
+          return (
+            <button
+              key={s.title}
+              type="button"
+              onClick={() => setActive(index)}
+              className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-left text-[12px] font-medium transition-colors ${
+                isActive
+                  ? 'bg-white/[0.07] text-white'
+                  : 'text-gray-500 hover:bg-white/[0.04] hover:text-gray-300'
+              }`}
+            >
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${navStyle.dot}`} />
+              <span className="flex-1">{s.title}</span>
+              <span className="text-[11px] font-medium text-gray-600">{s.items.length}</span>
+            </button>
+          )
+        })}
+      </nav>
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <p
+          className={`mb-3 text-[11px] font-semibold tracking-[0.1em] uppercase ${style.label}`}
+        >
+          {section.title}
+        </p>
+        <ItemList items={section.items} dot={style.dot} />
+      </div>
+    </div>
+  )
+}
+
+const MODAL_WIDTHS: Record<WhatsNewLayout, string> = {
+  single: 'w-[min(88vw,560px)]',
+  rail: 'w-[min(90vw,780px)]',
 }
 
 export function WhatsNewModal() {
@@ -118,6 +210,7 @@ export function WhatsNewModal() {
   const appVersion = useGalleryStore((s) => s.appVersion)
 
   const entry = getChangelogForVersion(appVersion)
+  const layout = chooseLayout(entry)
 
   useEffect(() => {
     if (!whatsNewOpen) return
@@ -127,6 +220,8 @@ export function WhatsNewModal() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [whatsNewOpen, closeWhatsNew])
+
+  const hasSections = entry !== null && entry.sections.length > 0
 
   return (
     <AnimatePresence>
@@ -140,7 +235,7 @@ export function WhatsNewModal() {
           transition={{ duration: 0.15 }}
         >
           <motion.div
-            className="relative flex max-h-[min(82vh,760px)] w-[min(88vw,560px)] flex-col overflow-hidden rounded-lg border border-white/10 bg-gray-950 shadow-2xl shadow-black/60"
+            className={`relative flex max-h-[min(82vh,760px)] ${MODAL_WIDTHS[layout]} flex-col overflow-hidden rounded-lg border border-white/10 bg-gray-950 shadow-2xl shadow-black/60`}
             onClick={(event) => event.stopPropagation()}
             initial={{ opacity: 0, scale: 0.97, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -169,16 +264,22 @@ export function WhatsNewModal() {
               </Tooltip>
             </div>
 
-            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
-              {entry && entry.sections.length > 0 ? (
-                entry.sections.map((section) => <Section key={section.title} section={section} />)
-              ) : (
-                <p className="text-sm text-gray-500">
-                  Release notes for this version aren't available in-app. See the full changelog on
-                  GitHub.
-                </p>
-              )}
-            </div>
+            {hasSections && layout === 'rail' ? (
+              <RailSections sections={entry.sections} />
+            ) : (
+              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
+                {hasSections ? (
+                  entry.sections.map((section) => (
+                    <CollapsibleSection key={section.title} section={section} />
+                  ))
+                ) : (
+                  <p className="text-sm text-gray-500">
+                    Release notes for this version aren't available in-app. See the full changelog
+                    on GitHub.
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="flex items-center justify-between gap-4 border-t border-white/[0.07] px-6 py-4">
               <Tooltip label={CHANGELOG_URL} side="top" align="start">
