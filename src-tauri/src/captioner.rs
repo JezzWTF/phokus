@@ -16,11 +16,28 @@ use std::sync::Mutex;
 use std::time::Instant;
 use tokenizers::Tokenizer;
 
-// Suppress the console window when spawning curl.exe from the GUI app.
+// Suppress the console window when spawning curl from the GUI app.
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// Discard target for curl output we only need the headers of.
+#[cfg(target_os = "windows")]
+const NULL_DEVICE: &str = "NUL";
+#[cfg(not(target_os = "windows"))]
+const NULL_DEVICE: &str = "/dev/null";
+
+/// Build a `curl` command with platform quirks applied. Windows resolves the
+/// bare name to `curl.exe` (bundled since Windows 10 1803) and needs the
+/// no-window flag; macOS ships curl; Linux is expected to have it installed.
+fn curl_command() -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new("curl");
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
 
 pub const FLORENCE_MODEL_ID: &str = "onnx-community/Florence-2-base-ft";
 pub const FLORENCE_CAPTION_MODEL_NAME: &str = "florence-2-base-ft-onnx-q4";
@@ -727,7 +744,7 @@ fn download_onnx_runtime_files(local_dir: &Path) -> Result<()> {
 // rather than locking the UI on "preparing" for many minutes.
 const MAX_STALL_RETRIES: usize = 3;
 
-/// Resiliently download `url` to `destination` using the system `curl.exe`.
+/// Resiliently download `url` to `destination` using the system `curl`.
 ///
 /// ureq's read timeout does not fire on a stalled large transfer on Windows
 /// (schannel doesn't honor the socket read timeout), so a stall there hangs
@@ -818,7 +835,7 @@ pub fn download_file_resilient(
 /// ureq so no part of the download path depends on ureq (which hangs on this
 /// VM's TLS stack). Returns None if the server doesn't report a size.
 fn remote_content_length(url: &str) -> Option<u64> {
-    let mut command = Command::new("curl.exe");
+    let mut command = curl_command();
     command.args([
         "-sL",
         "-r",
@@ -826,15 +843,13 @@ fn remote_content_length(url: &str) -> Option<u64> {
         "-D",
         "-",
         "-o",
-        "NUL",
+        NULL_DEVICE,
         "--connect-timeout",
         "30",
         "--max-time",
         "30",
         url,
     ]);
-    #[cfg(target_os = "windows")]
-    command.creation_flags(CREATE_NO_WINDOW);
     let output = command.output().ok()?;
     let headers = String::from_utf8_lossy(&output.stdout);
     for line in headers.lines() {
@@ -849,7 +864,7 @@ fn remote_content_length(url: &str) -> Option<u64> {
     None
 }
 
-/// Run one `curl.exe` download to `dest`, resuming from any partial file, while
+/// Run one `curl` download to `dest`, resuming from any partial file, while
 /// reporting progress from the growing file size. Returns an error (leaving the
 /// partial in place) if curl exits non-zero.
 fn run_curl_download(
@@ -858,7 +873,7 @@ fn run_curl_download(
     total: Option<u64>,
     on_progress: &mut impl FnMut(u64, Option<u64>),
 ) -> Result<()> {
-    let mut command = Command::new("curl.exe");
+    let mut command = curl_command();
     command
         .arg("-fSL") // fail on HTTP errors, follow redirects, show errors
         .args(["-C", "-"]) // resume from the existing output file
@@ -873,12 +888,10 @@ fn run_curl_download(
         .arg(url)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());
-    #[cfg(target_os = "windows")]
-    command.creation_flags(CREATE_NO_WINDOW);
 
     let mut child = command
         .spawn()
-        .map_err(|e| anyhow::anyhow!("failed to launch curl.exe (required for downloads): {e}"))?;
+        .map_err(|e| anyhow::anyhow!("failed to launch curl (required for downloads): {e}"))?;
 
     loop {
         if let Some(status) = child.try_wait()? {
