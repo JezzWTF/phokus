@@ -188,9 +188,7 @@ function RailSections({ sections }: { sections: ChangelogSection[] }) {
         })}
       </nav>
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-        <p
-          className={`mb-3 text-[11px] font-semibold tracking-[0.1em] uppercase ${style.label}`}
-        >
+        <p className={`mb-3 text-[11px] font-semibold tracking-[0.1em] uppercase ${style.label}`}>
           {section.title}
         </p>
         <ItemList items={section.items} dot={style.dot} />
