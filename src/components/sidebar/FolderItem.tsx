@@ -39,14 +39,28 @@ export function FolderItem({
   const mutedFolderIds = useGalleryStore((state) => state.mutedFolderIds)
   const setAllWorkersPaused = useGalleryStore((state) => state.setAllWorkersPaused)
   const folderWorkers = useGalleryStore((state) => state.workerPaused[folder.id])
+  const folderJobs = useGalleryStore((state) => state.mediaJobProgress[folder.id])
   const isMuted = mutedFolderIds.includes(folder.id)
-  // "Fully paused" only when every worker for this folder is paused.
-  const isPausedAll =
-    !!folderWorkers &&
-    folderWorkers.thumbnail &&
-    folderWorkers.metadata &&
-    folderWorkers.embedding &&
-    folderWorkers.tagging
+  // "Fully paused" means every worker that currently has pending work is
+  // paused. Workers with nothing pending are ignored — the background tasks
+  // panel only lets you toggle the stages it actually shows, so requiring
+  // every worker key to be literally true left this permanently out of sync
+  // (menu kept offering "Pause" after the visible work was already paused).
+  const hasPendingWork =
+    (folderJobs?.thumbnail_pending ?? 0) > 0 ||
+    (folderJobs?.metadata_pending ?? 0) > 0 ||
+    (folderJobs?.embedding_pending ?? 0) > 0 ||
+    (folderJobs?.tagging_pending ?? 0) > 0
+  const isPausedAll = hasPendingWork
+    ? ((folderJobs?.thumbnail_pending ?? 0) === 0 || !!folderWorkers?.thumbnail) &&
+      ((folderJobs?.metadata_pending ?? 0) === 0 || !!folderWorkers?.metadata) &&
+      ((folderJobs?.embedding_pending ?? 0) === 0 || !!folderWorkers?.embedding) &&
+      ((folderJobs?.tagging_pending ?? 0) === 0 || !!folderWorkers?.tagging)
+    : !!folderWorkers &&
+      folderWorkers.thumbnail &&
+      folderWorkers.metadata &&
+      folderWorkers.embedding &&
+      folderWorkers.tagging
   const isIndexing = progress && !progress.done
   const isMissing = !!folder.scan_error && !isIndexing
 
