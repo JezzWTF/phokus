@@ -15,7 +15,7 @@ import { UpdateToast } from './components/UpdateToast'
 import { WhatsNewToast } from './components/WhatsNewToast'
 import { WhatsNewModal } from './components/WhatsNewModal'
 import { OnboardingOverlay } from './components/onboarding/OnboardingOverlay'
-import { DemoPanel } from './components/DemoPanel'
+import { DemoPanel } from './dev/DemoPanel'
 import { initializeNotifications } from './notifications'
 
 export default function App() {
