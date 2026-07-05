@@ -42,4 +42,13 @@ mod tests {
             assert!(!is_removed_ai_tag(tag), "{tag} should be kept");
         }
     }
+
+    #[test]
+    fn removed_ai_tags_tolerate_padding_and_mixed_separators() {
+        assert!(is_removed_ai_tag("  1girl  "));
+        assert!(is_removed_ai_tag("1_-_girl"));
+        assert!(is_removed_ai_tag("No Humans"));
+        assert!(!is_removed_ai_tag(""));
+        assert!(!is_removed_ai_tag("   "));
+    }
 }

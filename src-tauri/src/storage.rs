@@ -122,3 +122,53 @@ fn fallback_profile_for_path(path: &Path) -> StorageProfile {
 
     StorageProfile::Balanced
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn thumbnail_workers_scale_with_parallelism_within_clamps() {
+        assert_eq!(StorageProfile::Fast.thumbnail_workers(3), 2);
+        assert_eq!(StorageProfile::Fast.thumbnail_workers(12), 4);
+        assert_eq!(StorageProfile::Fast.thumbnail_workers(64), 4);
+        assert_eq!(StorageProfile::Balanced.thumbnail_workers(4), 2);
+        assert_eq!(StorageProfile::Balanced.thumbnail_workers(12), 3);
+        assert_eq!(StorageProfile::Balanced.thumbnail_workers(64), 3);
+        assert_eq!(StorageProfile::Conservative.thumbnail_workers(64), 1);
+    }
+
+    #[test]
+    fn adaptive_profile_tracks_scan_speed() {
+        let mut adaptive = RuntimeAdaptiveProfile::new(StorageProfile::Balanced);
+        assert_eq!(adaptive.profile(), StorageProfile::Balanced);
+
+        // 1 ms/item → fast storage.
+        adaptive.observe_scan_batch(10, Duration::from_millis(10));
+        assert_eq!(adaptive.profile(), StorageProfile::Fast);
+
+        // A very slow batch drags the EMA over the conservative threshold.
+        adaptive.observe_scan_batch(1, Duration::from_millis(100));
+        assert_eq!(adaptive.profile(), StorageProfile::Conservative);
+    }
+
+    #[test]
+    fn adaptive_profile_ignores_empty_batches() {
+        let mut adaptive = RuntimeAdaptiveProfile::new(StorageProfile::Fast);
+        adaptive.observe_scan_batch(0, Duration::from_secs(10));
+        assert_eq!(adaptive.profile(), StorageProfile::Fast);
+    }
+
+    #[test]
+    fn fallback_profile_treats_unc_paths_as_conservative() {
+        assert_eq!(
+            fallback_profile_for_path(Path::new("\\\\server\\share\\photos")),
+            StorageProfile::Conservative
+        );
+        assert_eq!(
+            fallback_profile_for_path(Path::new("C:\\photos")),
+            StorageProfile::Balanced
+        );
+    }
+}
