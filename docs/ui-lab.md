@@ -22,7 +22,7 @@ http://127.0.0.1:1422
 The script runs Vite in the custom `ui` mode:
 
 ```bash
-vite --mode ui --host 127.0.0.1 --port 1422 --strictPort --open
+vite --mode ui --host 127.0.0.1 --port 1422 --strictPort
 ```
 
 The normal app development commands are unchanged:
