@@ -68,6 +68,8 @@ Key modules:
 | `hnsw_index.rs` | In-memory HNSW index wrapper (hnsw_rs) |
 | `tagger.rs` | WD tagger: ONNX model download, inference, CSV tag loading |
 | `captioner.rs` | AI captioning (ONNX, disabled in workers but code intact) |
+| `download.rs` | Resilient file downloads via the system `curl` (resume, stall detection) |
+| `onnx_runtime.rs` | Shared ONNX Runtime DLL provisioning + `ort` init (used by tagger and captioner; DLLs live in the caption model dir for legacy reasons) |
 | `thumbnail.rs` | Thumbnail generation (image crate + fast_image_resize, FFmpeg for video) |
 | `media.rs` | FFmpeg sidecar provisioning and probing |
 | `storage.rs` | `StorageProfile` for tuning worker counts |

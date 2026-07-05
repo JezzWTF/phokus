@@ -31,15 +31,6 @@ const JOYTAG_STD: [f32; 3] = [0.268_629_54, 0.261_302_6, 0.275_777_1];
 // JoyTag's recommended detection threshold.
 const JOYTAG_DEFAULT_THRESHOLD: f32 = 0.4;
 
-// Shared ONNX Runtime DLLs (live in the caption model's `onnxruntime/` dir and
-// are reused by the tagger). The per-model weight + label files are listed by
-// `TaggerModel::download_files`.
-const TAGGER_RUNTIME_DLLS: &[&str] = &[
-    "onnxruntime/onnxruntime.dll",
-    "onnxruntime/onnxruntime_providers_shared.dll",
-    "onnxruntime/DirectML.dll",
-];
-
 // Tags in these Danbooru categories are kept in the output.
 // Category 0 = general, category 4 = character.
 // Category 9 = rating (explicit/questionable/sensitive/general) – used for
@@ -354,12 +345,11 @@ pub fn set_tagger_batch_size(app_data_dir: &Path, batch_size: usize) -> Result<u
 pub fn tagger_model_status(app_data_dir: &Path) -> TaggerModelStatus {
     let model = tagger_model(app_data_dir);
     let local_dir = model_dir(app_data_dir);
-    // The ONNX runtime DLLs live in the caption model dir; reuse them.
-    let caption_model_dir = app_data_dir.join("models").join("florence-2-base-ft");
+    let runtime_dir = crate::onnx_runtime::runtime_dir(app_data_dir);
 
-    let mut missing_files: Vec<String> = TAGGER_RUNTIME_DLLS
+    let mut missing_files: Vec<String> = crate::onnx_runtime::RUNTIME_DLLS
         .iter()
-        .filter(|file| !caption_model_dir.join(file).exists())
+        .filter(|file| !runtime_dir.join(file).exists())
         .map(|file| (*file).to_string())
         .collect();
     missing_files.extend(
@@ -387,15 +377,14 @@ pub fn prepare_tagger_model_with_progress(
     let local_dir = model_dir(app_data_dir);
     std::fs::create_dir_all(&local_dir)?;
 
-    // The tagger shares the ONNX runtime DLLs with the captioner; download
-    // them here so the tagger works even on a clean install where the caption
-    // model has never been fetched (ensure_onnx_runtime only initializes).
+    // Download the shared ONNX Runtime DLLs here so the tagger works even on
+    // a clean install (ensure_onnx_runtime only initializes).
     let download_files = model.download_files();
-    let caption_model_dir = crate::captioner::model_dir(app_data_dir);
-    std::fs::create_dir_all(&caption_model_dir)?;
+    let runtime_dir = crate::onnx_runtime::runtime_dir(app_data_dir);
+    std::fs::create_dir_all(&runtime_dir)?;
 
     // Unified step count across DLLs and tagger files so the bar is coherent.
-    let dll_count = crate::captioner::missing_onnx_runtime_count(&caption_model_dir);
+    let dll_count = crate::onnx_runtime::missing_onnx_runtime_count(&runtime_dir);
     let model_pending = download_files
         .iter()
         .filter(|file| !local_dir.join(file).exists())
@@ -415,8 +404,8 @@ pub fn prepare_tagger_model_with_progress(
     // ── ONNX runtime DLLs (small, but non-trivial on a slow link) ──
     {
         let mut last_emit = Instant::now() - std::time::Duration::from_secs(1);
-        crate::captioner::provision_onnx_runtime_with_progress(
-            &caption_model_dir,
+        crate::onnx_runtime::provision_onnx_runtime_with_progress(
+            &runtime_dir,
             |label, downloaded, total| {
                 if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
                     last_emit = Instant::now();
@@ -434,7 +423,7 @@ pub fn prepare_tagger_model_with_progress(
         completed_files += dll_count;
     }
     log::info!("Tagger: ONNX runtime DLLs ready; initializing runtime");
-    crate::captioner::ensure_onnx_runtime(&caption_model_dir)?;
+    crate::onnx_runtime::ensure_onnx_runtime(&runtime_dir)?;
     log::info!("Tagger: runtime initialized; downloading model files");
 
     // ── Tagger model files (model.onnx is ~446 MB) ──
@@ -452,7 +441,7 @@ pub fn prepare_tagger_model_with_progress(
         let url = repo.url(file);
         let label = (*file).to_string();
         let mut last_emit = Instant::now() - std::time::Duration::from_secs(1);
-        crate::captioner::download_file_resilient(&url, &destination, |downloaded, total| {
+        crate::download::download_file_resilient(&url, &destination, |downloaded, total| {
             if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
                 last_emit = Instant::now();
                 emit_progress(TaggerModelProgress {
@@ -500,8 +489,7 @@ pub fn probe_tagger_runtime(app_data_dir: &Path) -> Result<TaggerRuntimeProbe> {
     }
 
     let local_dir = model_dir(app_data_dir);
-    let caption_model_dir = app_data_dir.join("models").join("florence-2-base-ft");
-    crate::captioner::ensure_onnx_runtime(&caption_model_dir)?;
+    crate::onnx_runtime::ensure_onnx_runtime(&crate::onnx_runtime::runtime_dir(app_data_dir))?;
 
     let acceleration = tagger_acceleration(app_data_dir);
     let model_path = local_dir.join("model.onnx");
@@ -663,13 +651,11 @@ impl WdTagger {
 
         let local_dir = model_dir(app_data_dir);
 
-        // The ONNX runtime DLLs are shared with the captioner; use the
-        // captioner's shared ORT init lock to avoid double-initialisation.
-        let caption_model_dir = app_data_dir.join("models").join("florence-2-base-ft");
-        crate::captioner::ensure_onnx_runtime(&caption_model_dir).map_err(|e| {
+        let runtime_dir = crate::onnx_runtime::runtime_dir(app_data_dir);
+        crate::onnx_runtime::ensure_onnx_runtime(&runtime_dir).map_err(|e| {
             anyhow::anyhow!(
-                "ONNX Runtime not initialised — download the Florence-2 caption model first \
-                 to get the shared runtime DLLs. Original error: {e}"
+                "ONNX Runtime not initialised — the shared runtime DLLs are missing; \
+                 re-run the tagger model download. Original error: {e}"
             )
         })?;
 
@@ -856,11 +842,11 @@ impl JoyTagger {
         let local_dir = model_dir(app_data_dir);
 
         // Shared ONNX runtime DLLs (see WdTagger::new).
-        let caption_model_dir = app_data_dir.join("models").join("florence-2-base-ft");
-        crate::captioner::ensure_onnx_runtime(&caption_model_dir).map_err(|e| {
+        let runtime_dir = crate::onnx_runtime::runtime_dir(app_data_dir);
+        crate::onnx_runtime::ensure_onnx_runtime(&runtime_dir).map_err(|e| {
             anyhow::anyhow!(
-                "ONNX Runtime not initialised — download the Florence-2 caption model first \
-                 to get the shared runtime DLLs. Original error: {e}"
+                "ONNX Runtime not initialised — the shared runtime DLLs are missing; \
+                 re-run the tagger model download. Original error: {e}"
             )
         })?;
 
