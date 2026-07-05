@@ -3265,3 +3265,483 @@ fn folder_exclusion_clause(
         .join(",");
     format!("AND {image_alias}.folder_id NOT IN ({id_list})")
 }
+
+/// Shared fixtures for unit tests across modules (db, vector, …).
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    pub(crate) fn test_conn() -> Connection {
+        vector::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        // The r2d2 pool customizer normally sets this; mirror it so FK cascades
+        // (album deletion, folder deletion) behave like production.
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        migrate(&conn).unwrap();
+        vector::migrate(&conn).unwrap();
+        conn
+    }
+
+    pub(crate) fn test_image(folder_id: i64, path: &str) -> ImageRecord {
+        ImageRecord {
+            id: 0,
+            folder_id,
+            path: path.to_string(),
+            filename: path.rsplit('/').next().unwrap_or(path).to_string(),
+            thumbnail_path: None,
+            width: Some(100),
+            height: Some(100),
+            file_size: 1024,
+            created_at: None,
+            modified_at: Some("2026-01-01T00:00:00Z".into()),
+            taken_at: None,
+            mime_type: "image/jpeg".into(),
+            media_kind: "image".into(),
+            duration_ms: None,
+            video_codec: None,
+            audio_codec: None,
+            metadata_updated_at: None,
+            metadata_error: None,
+            favorite: false,
+            rating: 0,
+            embedding_status: "pending".into(),
+            embedding_model: None,
+            embedding_updated_at: None,
+            embedding_error: None,
+            generated_caption: None,
+            caption_model: None,
+            caption_updated_at: None,
+            caption_error: None,
+            ai_rating: None,
+            ai_tagger_model: None,
+            ai_tagged_at: None,
+            ai_tagger_error: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::{test_conn, test_image};
+    use super::*;
+
+    #[test]
+    fn insert_folder_is_idempotent_per_path() {
+        let conn = test_conn();
+        let first = insert_folder(&conn, "C:/media", "media").unwrap();
+        let second = insert_folder(&conn, "C:/media", "media again").unwrap();
+        assert_eq!(first, second);
+
+        insert_folder(&conn, "C:/other", "other").unwrap();
+        let folders = get_folders(&conn).unwrap();
+        assert_eq!(folders.len(), 2);
+        assert_eq!(folders[0].name, "media");
+    }
+
+    #[test]
+    fn upsert_image_updates_in_place_and_preserves_user_state() {
+        let conn = test_conn();
+        let folder_id = insert_folder(&conn, "C:/media", "media").unwrap();
+        let mut img = test_image(folder_id, "C:/media/a.jpg");
+        let id = upsert_image(&conn, &img).unwrap();
+
+        // Simulate user state + AI state on the stored row.
+        conn.execute(
+            "UPDATE images SET favorite = 1, rating = 4, ai_tagger_model = 'wd' WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+        add_user_tag(&conn, id, "keeper").unwrap();
+        conn.execute(
+            "INSERT INTO image_tags (image_id, tag, source, ai_model, confidence, created_at)
+             VALUES (?1, 'cat', 'ai', 'wd', 0.9, datetime('now'))",
+            [id],
+        )
+        .unwrap();
+
+        img.file_size = 2048;
+        let same_id = upsert_image(&conn, &img).unwrap();
+        assert_eq!(same_id, id);
+
+        let stored = get_image_by_id(&conn, id).unwrap();
+        assert_eq!(stored.file_size, 2048);
+        // favorite/rating survive re-index; AI tag state is invalidated.
+        assert!(stored.favorite);
+        assert_eq!(stored.rating, 4);
+        assert_eq!(stored.ai_tagger_model, None);
+
+        let tags = get_image_tags(&conn, id).unwrap();
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].tag, "keeper");
+        assert_eq!(tags[0].source, "user");
+    }
+
+    #[test]
+    fn get_images_applies_filters_and_agrees_with_count() {
+        let conn = test_conn();
+        let folder_a = insert_folder(&conn, "C:/a", "a").unwrap();
+        let folder_b = insert_folder(&conn, "C:/b", "b").unwrap();
+
+        upsert_image(&conn, &test_image(folder_a, "C:/a/cat.jpg")).unwrap();
+        let dog_id = upsert_image(&conn, &test_image(folder_a, "C:/a/dog.jpg")).unwrap();
+        let mut video = test_image(folder_b, "C:/b/clip.mp4");
+        video.media_kind = "video".into();
+        video.embedding_status = "failed".into();
+        upsert_image(&conn, &video).unwrap();
+        conn.execute(
+            "UPDATE images SET favorite = 1, rating = 5 WHERE id = ?1",
+            [dog_id],
+        )
+        .unwrap();
+
+        let no_filter = get_images(
+            &conn, None, None, None, false, 0, false, false, None, "name_asc", 0, 100,
+        )
+        .unwrap();
+        assert_eq!(no_filter.len(), 3);
+        assert_eq!(
+            count_images(&conn, None, None, None, false, 0, false, false, None).unwrap(),
+            3
+        );
+
+        let by_folder = get_images(
+            &conn,
+            Some(folder_a),
+            None,
+            None,
+            false,
+            0,
+            false,
+            false,
+            None,
+            "name_asc",
+            0,
+            100,
+        )
+        .unwrap();
+        assert_eq!(by_folder.len(), 2);
+
+        let by_search = get_images(
+            &conn,
+            None,
+            Some("cat"),
+            None,
+            false,
+            0,
+            false,
+            false,
+            None,
+            "name_asc",
+            0,
+            100,
+        )
+        .unwrap();
+        assert_eq!(by_search.len(), 1);
+        assert_eq!(by_search[0].filename, "cat.jpg");
+
+        let videos = get_images(
+            &conn,
+            None,
+            None,
+            Some("video"),
+            false,
+            0,
+            false,
+            false,
+            None,
+            "name_asc",
+            0,
+            100,
+        )
+        .unwrap();
+        assert_eq!(videos.len(), 1);
+
+        let favorites = get_images(
+            &conn, None, None, None, true, 0, false, false, None, "name_asc", 0, 100,
+        )
+        .unwrap();
+        assert_eq!(favorites.len(), 1);
+        assert_eq!(favorites[0].filename, "dog.jpg");
+
+        let rated = get_images(
+            &conn, None, None, None, false, 3, false, false, None, "name_asc", 0, 100,
+        )
+        .unwrap();
+        assert_eq!(rated.len(), 1);
+
+        let failed = get_images(
+            &conn, None, None, None, false, 0, true, false, None, "name_asc", 0, 100,
+        )
+        .unwrap();
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].filename, "clip.mp4");
+
+        // Pagination: page size 2 then the remaining 1.
+        let page_one = get_images(
+            &conn, None, None, None, false, 0, false, false, None, "name_asc", 0, 2,
+        )
+        .unwrap();
+        let page_two = get_images(
+            &conn, None, None, None, false, 0, false, false, None, "name_asc", 2, 2,
+        )
+        .unwrap();
+        assert_eq!(page_one.len(), 2);
+        assert_eq!(page_two.len(), 1);
+        assert_eq!(page_one[0].filename, "cat.jpg");
+        assert_eq!(page_two[0].filename, "dog.jpg");
+    }
+
+    #[test]
+    fn user_tags_upgrade_ai_tags_and_survive_tag_maintenance() {
+        let conn = test_conn();
+        let folder_id = insert_folder(&conn, "C:/a", "a").unwrap();
+        let id = upsert_image(&conn, &test_image(folder_id, "C:/a/a.jpg")).unwrap();
+
+        conn.execute(
+            "INSERT INTO image_tags (image_id, tag, source, ai_model, confidence, created_at)
+             VALUES (?1, 'cat', 'ai', 'wd', 0.9, datetime('now'))",
+            [id],
+        )
+        .unwrap();
+        let upgraded = add_user_tag(&conn, id, "cat").unwrap();
+        assert_eq!(upgraded.source, "user");
+        assert_eq!(upgraded.ai_model, None);
+        assert_eq!(get_image_tags(&conn, id).unwrap().len(), 1);
+
+        let tag = add_user_tag(&conn, id, "kitty").unwrap();
+        remove_tag(&conn, tag.id).unwrap();
+        assert_eq!(get_image_tags(&conn, id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn rename_tag_merges_into_existing_tag() {
+        let conn = test_conn();
+        let folder_id = insert_folder(&conn, "C:/a", "a").unwrap();
+        let with_both = upsert_image(&conn, &test_image(folder_id, "C:/a/a.jpg")).unwrap();
+        let with_old = upsert_image(&conn, &test_image(folder_id, "C:/a/b.jpg")).unwrap();
+
+        add_user_tag(&conn, with_both, "cat").unwrap();
+        add_user_tag(&conn, with_both, "kitty").unwrap();
+        add_user_tag(&conn, with_old, "kitty").unwrap();
+
+        rename_tag(&conn, "kitty", "cat").unwrap();
+
+        let both_tags = get_image_tags(&conn, with_both).unwrap();
+        assert_eq!(both_tags.len(), 1);
+        assert_eq!(both_tags[0].tag, "cat");
+        let old_tags = get_image_tags(&conn, with_old).unwrap();
+        assert_eq!(old_tags.len(), 1);
+        assert_eq!(old_tags[0].tag, "cat");
+    }
+
+    #[test]
+    fn delete_tag_removes_it_everywhere_and_reports_count() {
+        let conn = test_conn();
+        let folder_id = insert_folder(&conn, "C:/a", "a").unwrap();
+        let first = upsert_image(&conn, &test_image(folder_id, "C:/a/a.jpg")).unwrap();
+        let second = upsert_image(&conn, &test_image(folder_id, "C:/a/b.jpg")).unwrap();
+        add_user_tag(&conn, first, "cat").unwrap();
+        add_user_tag(&conn, second, "cat").unwrap();
+        add_user_tag(&conn, second, "dog").unwrap();
+
+        assert_eq!(delete_tag(&conn, "cat").unwrap(), 2);
+        assert_eq!(get_image_tags(&conn, first).unwrap().len(), 0);
+        assert_eq!(get_image_tags(&conn, second).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn album_crud_and_membership() {
+        let conn = test_conn();
+        let folder_id = insert_folder(&conn, "C:/a", "a").unwrap();
+        let first = upsert_image(&conn, &test_image(folder_id, "C:/a/a.jpg")).unwrap();
+        let second = upsert_image(&conn, &test_image(folder_id, "C:/a/b.jpg")).unwrap();
+
+        let album = create_album(&conn, "Holiday").unwrap();
+        assert_eq!(album.name, "Holiday");
+        assert_eq!(album.image_count, 0);
+
+        // Adding is idempotent.
+        assert_eq!(
+            add_images_to_album(&conn, album.id, &[first, second]).unwrap(),
+            2
+        );
+        assert_eq!(add_images_to_album(&conn, album.id, &[first]).unwrap(), 0);
+        assert_eq!(count_album_images(&conn, album.id).unwrap(), 2);
+
+        remove_images_from_album(&conn, album.id, &[first]).unwrap();
+        assert_eq!(count_album_images(&conn, album.id).unwrap(), 1);
+
+        rename_album(&conn, album.id, "Trip").unwrap();
+        assert_eq!(get_album(&conn, album.id).unwrap().name, "Trip");
+
+        delete_album(&conn, album.id).unwrap();
+        assert!(list_albums(&conn).unwrap().is_empty());
+        // Membership rows cascade away with the album.
+        let orphans: i64 = conn
+            .query_row("SELECT COUNT(*) FROM album_images", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(orphans, 0);
+    }
+
+    #[test]
+    fn backfill_enqueues_only_unqueued_unready_images() {
+        let conn = test_conn();
+        let folder_id = insert_folder(&conn, "C:/a", "a").unwrap();
+        let pending = upsert_image(&conn, &test_image(folder_id, "C:/a/a.jpg")).unwrap();
+        let mut ready = test_image(folder_id, "C:/a/b.jpg");
+        ready.embedding_status = "ready".into();
+        upsert_image(&conn, &ready).unwrap();
+        let queued = upsert_image(&conn, &test_image(folder_id, "C:/a/c.jpg")).unwrap();
+        enqueue_embedding_job(&conn, queued).unwrap();
+
+        assert_eq!(backfill_embedding_jobs(&conn).unwrap(), 1);
+        let has_job: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM embedding_jobs WHERE image_id = ?1",
+                [pending],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_job, 1);
+    }
+
+    #[test]
+    fn retry_failed_embeddings_skips_thumbnailless_videos() {
+        let conn = test_conn();
+        let folder_id = insert_folder(&conn, "C:/a", "a").unwrap();
+        let mut failed_image = test_image(folder_id, "C:/a/a.jpg");
+        failed_image.embedding_status = "failed".into();
+        let failed_image_id = upsert_image(&conn, &failed_image).unwrap();
+
+        let mut failed_video = test_image(folder_id, "C:/a/clip.mp4");
+        failed_video.media_kind = "video".into();
+        failed_video.embedding_status = "failed".into();
+        failed_video.thumbnail_path = None;
+        upsert_image(&conn, &failed_video).unwrap();
+
+        assert_eq!(retry_failed_embedding_jobs(&conn, folder_id).unwrap(), 1);
+        let requeued = get_image_by_id(&conn, failed_image_id).unwrap();
+        assert_eq!(requeued.embedding_status, "pending");
+    }
+
+    #[test]
+    fn repair_embedding_consistency_requeues_ready_images_without_vectors() {
+        let conn = test_conn();
+        let folder_id = insert_folder(&conn, "C:/a", "a").unwrap();
+        let mut ready = test_image(folder_id, "C:/a/a.jpg");
+        ready.embedding_status = "ready".into();
+        let ready_id = upsert_image(&conn, &ready).unwrap();
+
+        let (orphaned, requeued) = repair_embedding_consistency(&conn).unwrap();
+        assert_eq!(orphaned, 0);
+        assert_eq!(requeued, 1);
+        let repaired = get_image_by_id(&conn, ready_id).unwrap();
+        assert_eq!(repaired.embedding_status, "pending");
+    }
+
+    #[test]
+    fn search_images_by_tag_is_case_insensitive_and_paginates() {
+        let conn = test_conn();
+        let folder_a = insert_folder(&conn, "C:/a", "a").unwrap();
+        let folder_b = insert_folder(&conn, "C:/b", "b").unwrap();
+        let first = upsert_image(&conn, &test_image(folder_a, "C:/a/a.jpg")).unwrap();
+        let second = upsert_image(&conn, &test_image(folder_a, "C:/a/b.jpg")).unwrap();
+        let third = upsert_image(&conn, &test_image(folder_b, "C:/b/c.jpg")).unwrap();
+        add_user_tag(&conn, first, "Cat").unwrap();
+        add_user_tag(&conn, second, "cat").unwrap();
+        add_user_tag(&conn, third, "cat").unwrap();
+        add_user_tag(&conn, third, "dog").unwrap();
+
+        // Query is trimmed and matched case-insensitively against stored tags.
+        let (all, total) =
+            search_images_by_tag(&conn, "  CAT ", None, None, false, 0, None, 10, 0).unwrap();
+        assert_eq!(total, 3);
+        assert_eq!(all.len(), 3);
+
+        let (scoped, scoped_total) =
+            search_images_by_tag(&conn, "cat", Some(folder_a), None, false, 0, None, 10, 0)
+                .unwrap();
+        assert_eq!(scoped_total, 2);
+        assert_eq!(scoped.len(), 2);
+
+        // Pagination: total stays the full count while the page shrinks.
+        let (page, page_total) =
+            search_images_by_tag(&conn, "cat", None, None, false, 0, None, 2, 2).unwrap();
+        assert_eq!(page_total, 3);
+        assert_eq!(page.len(), 1);
+
+        // Blank queries return nothing instead of matching everything.
+        let (empty, empty_total) =
+            search_images_by_tag(&conn, "   ", None, None, false, 0, None, 10, 0).unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(empty_total, 0);
+    }
+
+    #[test]
+    fn update_ai_tags_replaces_ai_state_without_downgrading_user_tags() {
+        let conn = test_conn();
+        let folder_id = insert_folder(&conn, "C:/a", "a").unwrap();
+        let id = upsert_image(&conn, &test_image(folder_id, "C:/a/a.jpg")).unwrap();
+        add_user_tag(&conn, id, "cat").unwrap();
+        conn.execute(
+            "INSERT INTO image_tags (image_id, tag, source, ai_model, confidence, created_at)
+             VALUES (?1, 'stale', 'ai', 'wd', 0.5, datetime('now'))",
+            [id],
+        )
+        .unwrap();
+        enqueue_tagging_job(&conn, id).unwrap();
+
+        update_ai_tags(
+            &conn,
+            id,
+            &[("cat".into(), 0.9), ("outdoors".into(), 0.7)],
+            "general",
+            "wd",
+        )
+        .unwrap();
+
+        let tags = get_image_tags(&conn, id).unwrap();
+        assert_eq!(tags.len(), 2, "stale AI tag should be gone");
+        let cat = tags.iter().find(|tag| tag.tag == "cat").unwrap();
+        assert_eq!(cat.source, "user", "user tag must not be downgraded to ai");
+        let outdoors = tags.iter().find(|tag| tag.tag == "outdoors").unwrap();
+        assert_eq!(outdoors.source, "ai");
+        assert_eq!(outdoors.confidence, Some(0.7));
+
+        let record = get_image_by_id(&conn, id).unwrap();
+        assert_eq!(record.ai_rating.as_deref(), Some("general"));
+        assert_eq!(record.ai_tagger_model.as_deref(), Some("wd"));
+        assert_eq!(record.ai_tagger_error, None);
+
+        let pending_jobs: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tagging_jobs WHERE image_id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending_jobs, 0, "completed job should be dequeued");
+    }
+
+    #[test]
+    fn delete_folder_cascades_images_tags_and_vectors() {
+        let conn = test_conn();
+        let folder_id = insert_folder(&conn, "C:/a", "a").unwrap();
+        let id = upsert_image(&conn, &test_image(folder_id, "C:/a/a.jpg")).unwrap();
+        add_user_tag(&conn, id, "cat").unwrap();
+        vector::upsert_embedding(&conn, id, &vec![0.5f32; vector::CLIP_VECTOR_DIM]).unwrap();
+
+        delete_folder(&conn, folder_id).unwrap();
+
+        assert!(get_folders(&conn).unwrap().is_empty());
+        let remaining_images: i64 = conn
+            .query_row("SELECT COUNT(*) FROM images", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(remaining_images, 0);
+        let remaining_tags: i64 = conn
+            .query_row("SELECT COUNT(*) FROM image_tags", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(remaining_tags, 0);
+        assert!(!vector::has_image_vector(&conn, id).unwrap());
+    }
+}

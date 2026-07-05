@@ -384,6 +384,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fit_dimensions_preserves_aspect_ratio_within_max() {
+        // Already small enough: unchanged.
+        assert_eq!(fit_dimensions(100, 50, THUMB_SIZE), (100, 50));
+        // Landscape and portrait scale to the max on their long edge.
+        assert_eq!(fit_dimensions(6400, 3200, THUMB_SIZE), (320, 160));
+        assert_eq!(fit_dimensions(3200, 6400, THUMB_SIZE), (160, 320));
+        // Extreme ratios never collapse to zero.
+        assert_eq!(fit_dimensions(1, 100_000, 320), (1, 320));
+        assert_eq!(fit_dimensions(100_000, 1, 320), (320, 1));
+    }
+
+    #[test]
+    fn is_jpeg_checks_extension_only() {
+        assert!(is_jpeg(Path::new("photo.jpg")));
+        assert!(is_jpeg(Path::new("photo.JPEG")));
+        assert!(!is_jpeg(Path::new("photo.png")));
+        assert!(!is_jpeg(Path::new("photo")));
+    }
+
+    #[test]
     fn scale_numerator_picks_smallest_sufficient() {
         assert_eq!(scale_numerator(6000, THUMB_SIZE), 1);
         assert_eq!(scale_numerator(640, THUMB_SIZE), 4);

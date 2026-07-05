@@ -27,6 +27,13 @@ pnpm build:app:cuda
 # Type-check frontend
 pnpm build:vite
 
+# Frontend unit tests (Vitest; only picks up src/**/*.test.ts)
+pnpm test:unit
+pnpm test:unit:watch
+
+# Rust unit tests (in-memory SQLite; --no-default-features skips CUDA)
+pnpm test:rust
+
 # E2E tests (Playwright against the UI Lab; auto-starts the server)
 pnpm test:e2e
 pnpm exec playwright test tests/ui-lab.spec.ts        # single file
@@ -38,7 +45,10 @@ pnpm format:all
 
 Use **pnpm** — never npm.
 
-The only tests are the Playwright e2e smoke tests in `tests/`, which run against the UI Lab (browser mocks), not the real Tauri app. There are no unit tests.
+Three test layers, none of which exercise the real Tauri window:
+- **Vitest unit tests** — co-located `*.test.ts` next to the pure logic they cover (`src/store/helpers.ts`, formatters, path utils); fixture factories in `src/test/factories.ts`.
+- **Rust unit tests** — inline `#[cfg(test)]` modules; DB tests run against in-memory SQLite via the shared `db::test_support` fixture (`test_conn()` + `test_image()`), which registers sqlite-vec and applies both migrations. Reuse it for any new DB-touching tests.
+- **Playwright e2e smoke tests** in `tests/` — run against the UI Lab (browser mocks).
 
 ## Architecture
 

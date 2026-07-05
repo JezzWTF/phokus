@@ -562,3 +562,81 @@ fn pack_f32(values: &[f32]) -> Vec<u8> {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::test_support::{test_conn, test_image};
+
+    #[test]
+    fn pack_unpack_roundtrip() {
+        let values = vec![0.0f32, 1.5, -2.25, f32::MIN_POSITIVE, 1e10];
+        assert_eq!(unpack_f32(&pack_f32(&values)), values);
+        assert!(unpack_f32(&pack_f32(&[])).is_empty());
+    }
+
+    #[test]
+    fn upsert_embedding_rejects_wrong_dimension() {
+        let conn = test_conn();
+        let error = upsert_embedding(&conn, 1, &[0.5f32; 3]).unwrap_err();
+        assert!(error.to_string().contains("dimension"));
+    }
+
+    #[test]
+    fn upsert_and_delete_embedding_roundtrip() {
+        let conn = test_conn();
+        let embedding = vec![0.25f32; CLIP_VECTOR_DIM];
+        upsert_embedding(&conn, 42, &embedding).unwrap();
+        assert!(has_image_vector(&conn, 42).unwrap());
+
+        // Upsert replaces rather than duplicates.
+        upsert_embedding(&conn, 42, &embedding).unwrap();
+        let rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM image_vec WHERE image_id = 42",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(rows, 1);
+
+        delete_embedding(&conn, 42).unwrap();
+        assert!(!has_image_vector(&conn, 42).unwrap());
+    }
+
+    #[test]
+    fn find_similar_image_ids_ranks_by_cosine_distance() {
+        let conn = test_conn();
+        let folder_id = crate::db::insert_folder(&conn, "C:/a", "a").unwrap();
+        let base_id =
+            crate::db::upsert_image(&conn, &test_image(folder_id, "C:/a/base.jpg")).unwrap();
+        let close_id =
+            crate::db::upsert_image(&conn, &test_image(folder_id, "C:/a/close.jpg")).unwrap();
+        let far_id =
+            crate::db::upsert_image(&conn, &test_image(folder_id, "C:/a/far.jpg")).unwrap();
+
+        let mut base = vec![0.0f32; CLIP_VECTOR_DIM];
+        base[0] = 1.0;
+        let mut close = vec![0.0f32; CLIP_VECTOR_DIM];
+        close[0] = 1.0;
+        close[1] = 0.2;
+        let mut far = vec![0.0f32; CLIP_VECTOR_DIM];
+        far[1] = 1.0;
+        upsert_embedding(&conn, base_id, &base).unwrap();
+        upsert_embedding(&conn, close_id, &close).unwrap();
+        upsert_embedding(&conn, far_id, &far).unwrap();
+
+        // Global KNN path: nearest first, query image excluded.
+        let global = find_similar_image_ids(&conn, base_id, 2, None).unwrap();
+        assert_eq!(global, vec![close_id, far_id]);
+
+        // Folder-scoped brute-force path returns the same ranking.
+        let scoped = find_similar_image_ids(&conn, base_id, 2, Some(folder_id)).unwrap();
+        assert_eq!(scoped, vec![close_id, far_id]);
+
+        // Images without an embedding yield no matches instead of an error.
+        assert!(find_similar_image_ids(&conn, 9999, 5, None)
+            .unwrap()
+            .is_empty());
+    }
+}

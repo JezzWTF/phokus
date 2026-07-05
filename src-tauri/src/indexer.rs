@@ -1995,3 +1995,42 @@ fn process_watcher_rename(
         Err(e) => log::error!("Watcher rename: post-update fetch error: {e}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supported_media_matches_known_extensions_case_insensitively() {
+        for path in ["a.jpg", "b.JPEG", "c.PNG", "d.avif", "e.mp4", "f.WEBM"] {
+            assert!(
+                is_supported_media(Path::new(path)),
+                "{path} should be supported"
+            );
+        }
+        for path in ["notes.txt", "archive.zip", "no_extension", "clip.mkv"] {
+            assert!(
+                !is_supported_media(Path::new(path)),
+                "{path} should be skipped"
+            );
+        }
+    }
+
+    #[test]
+    fn media_kind_splits_video_from_image_extensions() {
+        for ext in ["mp4", "MOV", "m4v", "webm"] {
+            assert_eq!(media_kind_for_ext(ext), "video");
+        }
+        for ext in ["jpg", "PNG", "webp", "avif"] {
+            assert_eq!(media_kind_for_ext(ext), "image");
+        }
+    }
+
+    #[test]
+    fn mime_types_map_per_extension() {
+        assert_eq!(mime_for_ext("JPG"), "image/jpeg");
+        assert_eq!(mime_for_ext("png"), "image/png");
+        assert_eq!(mime_for_ext("mov"), "video/quicktime");
+        assert_eq!(mime_for_ext("m4v"), "video/mp4");
+    }
+}
