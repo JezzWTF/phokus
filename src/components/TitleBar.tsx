@@ -5,11 +5,15 @@ import { ContextMenu, MenuItem, MenuLabel } from './menu'
 import { PhokusMark } from './PhokusMark'
 import { Tooltip } from './Tooltip'
 
-const THEME_OPTIONS: { value: AppTheme; label: string }[] = [
-  { value: 'phokus', label: 'Phokus' },
-  { value: 'subtle-light', label: 'Subtle Light' },
-  { value: 'conventional-dark', label: 'Conventional Dark' },
-]
+const THEME_LABELS: Record<AppTheme, string> = {
+  phokus: 'Phokus',
+  'subtle-light': 'Subtle Light',
+  'conventional-dark': 'Conventional Dark',
+}
+const THEME_OPTIONS = (Object.keys(THEME_LABELS) as AppTheme[]).map((value) => ({
+  value,
+  label: THEME_LABELS[value],
+}))
 
 // SVG icons for window controls
 function MinimizeIcon() {
