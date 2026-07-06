@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { StateCreator } from 'zustand'
 import { notifyTaskComplete } from '../notifications'
+import { invalidateDuplicateScanCaches } from './helpers'
 import type { GalleryStore } from './index'
 import type { DuplicateGroup, DuplicateScanProgress, DuplicateScanResult } from './types'
 
@@ -146,10 +147,7 @@ export const createDuplicateSlice: StateCreator<GalleryStore, [], [], DuplicateS
         .filter((img) => succeededSet.has(img.id))
         .map((img) => img.folder_id)
     )
-    await invoke('invalidate_duplicate_scan_cache', { folderId: null }) // global
-    for (const folderId of affectedFolderIds) {
-      await invoke('invalidate_duplicate_scan_cache', { folderId })
-    }
+    await invalidateDuplicateScanCaches(affectedFolderIds)
     return succeededIds.length
   },
 })

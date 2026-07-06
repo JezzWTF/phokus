@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core'
 import type {
   ImageRecord,
   MediaFilter,
@@ -266,6 +267,26 @@ export function scopeHasTaggingPending(
     return Object.values(progressByFolder).some((progress) => progress.tagging_pending > 0)
   }
   return (progressByFolder[folderId]?.tagging_pending ?? 0) > 0
+}
+
+// Invalidates the persisted duplicate-scan cache for every scope affected by a
+// deletion: the global "all" cache (always, since a folder-scoped deletion
+// still makes the global result stale) and each folder that contained a
+// deleted image. This is a best-effort background refresh — a failure here
+// must not turn an already-successful delete into a rejected promise for the
+// caller, so failures are logged rather than thrown.
+export async function invalidateDuplicateScanCaches(affectedFolderIds: Set<number>): Promise<void> {
+  const results = await Promise.allSettled([
+    invoke('invalidate_duplicate_scan_cache', { folderId: null }),
+    ...[...affectedFolderIds].map((folderId) =>
+      invoke('invalidate_duplicate_scan_cache', { folderId })
+    ),
+  ])
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error('Failed to invalidate duplicate-scan cache:', result.reason)
+    }
+  }
 }
 
 export function taggingProgressAffectsScope(

@@ -3,6 +3,7 @@ import type { StateCreator } from 'zustand'
 import {
   PAGE_SIZE,
   TIMELINE_PAGE_SIZE,
+  invalidateDuplicateScanCaches,
   isCurrentGalleryRequest,
   isDerivedCollectionTitle,
   mergeImages,
@@ -608,10 +609,7 @@ export const createGallerySlice: StateCreator<GalleryStore, [], [], GallerySlice
     }))
     // The DB cascade already removed these from album_images; refresh counts/covers.
     void get().loadAlbums()
-    await invoke('invalidate_duplicate_scan_cache', { folderId: null })
-    for (const folderId of affectedFolderIds) {
-      await invoke('invalidate_duplicate_scan_cache', { folderId })
-    }
+    await invalidateDuplicateScanCaches(affectedFolderIds)
     return succeededIds.length
   },
 })
