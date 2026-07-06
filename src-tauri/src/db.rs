@@ -1308,7 +1308,10 @@ fn media_kind_clause(include_videos: bool) -> &'static str {
 /// in a `LIKE` pattern (paired with `ESCAPE '\\'` in the query) without the
 /// wildcards being interpreted literally.
 fn escape_like_pattern(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 /// True if any claimable (pending, non-excluded) jobs exist in `job_table`.
