@@ -142,6 +142,7 @@ fn remote_content_length(url: &str) -> Option<u64> {
         "30",
         "--max-time",
         "30",
+        "--",
         url,
     ]);
     let output = command.output().ok()?;
@@ -179,6 +180,7 @@ fn run_curl_download(
         .arg("-s") // no progress meter (we watch the file instead)
         .arg("-o")
         .arg(dest)
+        .arg("--")
         .arg(url)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());

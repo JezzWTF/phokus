@@ -1304,6 +1304,13 @@ fn media_kind_clause(include_videos: bool) -> &'static str {
     }
 }
 
+/// Escapes `%`, `_`, and `\` so a user-supplied string can be safely embedded
+/// in a `LIKE` pattern (paired with `ESCAPE '\\'` in the query) without the
+/// wildcards being interpreted literally.
+fn escape_like_pattern(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
 /// True if any claimable (pending, non-excluded) jobs exist in `job_table`.
 /// Used by lower-priority workers to defer to higher-priority queues.
 /// `extra_predicate` narrows the image join (e.g. videos only for metadata).
@@ -2127,7 +2134,7 @@ pub fn get_images(
         _ => "modified_at DESC NULLS LAST",
     };
 
-    let search_pattern = search.map(|value| format!("%{value}%"));
+    let search_pattern = search.map(|value| format!("%{}%", escape_like_pattern(value)));
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
     let tagging_failed_flag = i64::from(tagging_failed_only);
@@ -2143,7 +2150,7 @@ pub fn get_images(
                 ai_rating, ai_tagger_model, ai_tagged_at, ai_tagger_error
          FROM images
          WHERE (?1 IS NULL OR folder_id = ?1)
-           AND (?2 IS NULL OR filename LIKE ?2)
+           AND (?2 IS NULL OR filename LIKE ?2 ESCAPE '\\')
            AND (?3 IS NULL OR media_kind = ?3)
            AND (?4 = 0 OR favorite = 1)
            AND rating >= ?5
@@ -2194,7 +2201,7 @@ pub fn count_images(
     tagging_failed_only: bool,
     color: Option<(u8, u8, u8)>,
 ) -> Result<i64> {
-    let search_pattern = search.map(|value| format!("%{value}%"));
+    let search_pattern = search.map(|value| format!("%{}%", escape_like_pattern(value)));
 
     let favorites_flag = i64::from(favorites_only);
     let embedding_failed_flag = i64::from(embedding_failed_only);
@@ -2206,7 +2213,7 @@ pub fn count_images(
     let count = conn.query_row(
         "SELECT COUNT(*) FROM images
          WHERE (?1 IS NULL OR folder_id = ?1)
-           AND (?2 IS NULL OR filename LIKE ?2)
+           AND (?2 IS NULL OR filename LIKE ?2 ESCAPE '\\')
            AND (?3 IS NULL OR media_kind = ?3)
            AND (?4 = 0 OR favorite = 1)
            AND rating >= ?5
@@ -2342,7 +2349,7 @@ pub fn search_tags_autocomplete(
     folder_id: Option<i64>,
     limit: usize,
 ) -> Result<Vec<ExploreTagEntry>> {
-    let pattern = format!("%{}%", query.to_lowercase());
+    let pattern = format!("%{}%", escape_like_pattern(&query.to_lowercase()));
     let mut stmt = conn.prepare(
         "SELECT t.tag, COUNT(DISTINCT t.image_id) AS tag_count, MIN(t.image_id) AS representative_image_id,
                 MAX(CASE WHEN t.source = 'ai' THEN 1 ELSE 0 END) AS has_ai_source,
@@ -2350,7 +2357,7 @@ pub fn search_tags_autocomplete(
          FROM image_tags t
          JOIN images i ON i.id = t.image_id
          WHERE (?1 IS NULL OR i.folder_id = ?1)
-           AND LOWER(t.tag) LIKE ?2
+           AND LOWER(t.tag) LIKE ?2 ESCAPE '\\'
          GROUP BY t.tag
          ORDER BY tag_count DESC, t.tag ASC
          LIMIT ?3",
@@ -3324,6 +3331,15 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::{test_conn, test_image};
     use super::*;
+
+    #[test]
+    fn escape_like_pattern_escapes_wildcards_and_backslash() {
+        assert_eq!(escape_like_pattern("50%off"), "50\\%off");
+        assert_eq!(escape_like_pattern("a_b"), "a\\_b");
+        assert_eq!(escape_like_pattern(r"C:\images"), r"C:\\images");
+        assert_eq!(escape_like_pattern("50%_x\\"), "50\\%\\_x\\\\");
+        assert_eq!(escape_like_pattern("plain text"), "plain text");
+    }
 
     #[test]
     fn insert_folder_is_idempotent_per_path() {
