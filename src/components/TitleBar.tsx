@@ -114,7 +114,10 @@ export function TitleBar() {
           up its focal point and the chip becomes a button that re-opens the prompt. */}
       <div className="flex items-center gap-2 pr-4 pl-3">
         {updatePending ? (
-          <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <div
+            className="flex h-5 w-5 items-center justify-center"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          >
             {/* Instant tooltip (delay 0) — this affordance should read immediately. */}
             <Tooltip label={`Click to update — v${updateVersion}`} delay={0} align="start">
               <button
