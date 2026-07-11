@@ -80,6 +80,6 @@ for the full list.
 ## Checksums
 
 ```
-SHA-256 (Phokus_0.2.0_x64-setup.exe)      = TBD
-SHA-256 (Phokus_0.2.0_x64-cuda-setup.exe) = TBD
+SHA-256 (Phokus_0.2.0_x64-setup.exe)      = 9d52b485ef0d614620b0df4ba235fbdf285e0792e4a38841777e0f0a05f38770
+SHA-256 (Phokus_0.2.0_x64-cuda-setup.exe) = b3a24ea5fb9f00f64fe5b4040a69347b91341c75eb83fd7bb2409cc74c5eb052
 ```
