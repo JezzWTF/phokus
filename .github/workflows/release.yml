@@ -8,15 +8,59 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to build, for example v0.1.1'
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   release:
     permissions:
       contents: write
     runs-on: windows-latest
+    timeout-minutes: 120
     env:
+      CARGO_INCREMENTAL: 0
       GITEA_STATUS_TOKEN: ${{ secrets.GITEA_STATUS_TOKEN }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
+      # refs/tags/ qualification: a branch with a tag-like name must never win
+      # ref resolution. Works for tag pushes too — RELEASE_TAG is the tag name.
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      # On workflow_dispatch GITHUB_SHA is the dispatched branch head, not the
+      # tag's commit — resolve the real one for Gitea commit statuses.
+      - name: Resolve release commit
+        shell: pwsh
+        run: |
+          $sha = git rev-parse HEAD
+          "RELEASE_SHA=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Verify release version
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+(-.+)?$') {
+            throw "Release tag '$env:RELEASE_TAG' must look like v0.1.1"
+          }
+
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $cargoVersion = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
+
+          if ($packageVersion -ne $cargoVersion) {
+            throw "package.json version ($packageVersion) does not match Cargo.toml version ($cargoVersion)"
+          }
+
+          if ($env:RELEASE_TAG -ne "v$packageVersion") {
+            throw "Release tag '$env:RELEASE_TAG' does not match project version v$packageVersion"
+          }
+
       - name: Report pending status to Gitea
         if: env.GITEA_STATUS_TOKEN != ''
         continue-on-error: true
@@ -36,12 +80,10 @@ jobs:
           } | ConvertTo-Json
           Invoke-RestMethod `
             -Method Post `
-            -Uri "https://git.jezz.wtf/api/v1/repos/JezzWTF/phokus/statuses/$env:GITHUB_SHA" `
+            -Uri "https://git.jezz.wtf/api/v1/repos/JezzWTF/phokus/statuses/$env:RELEASE_SHA" `
             -Headers $headers `
             -ContentType "application/json" `
             -Body $body
-
-      - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
         with:
@@ -51,6 +93,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -71,7 +114,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
+          tagName: ${{ env.RELEASE_TAG }}
           releaseName: 'Phokus v__VERSION__'
           releaseBody: 'See the assets below to download and install this version.'
           releaseDraft: true
@@ -105,9 +148,11 @@ jobs:
             description = "GitHub Actions release finished: $env:JOB_STATUS"
             target_url = $env:GITHUB_RUN_URL
           } | ConvertTo-Json
+          # RELEASE_SHA is unset if the job died before checkout; fall back.
+          $sha = if ($env:RELEASE_SHA) { $env:RELEASE_SHA } else { $env:GITHUB_SHA }
           Invoke-RestMethod `
             -Method Post `
-            -Uri "https://git.jezz.wtf/api/v1/repos/JezzWTF/phokus/statuses/$env:GITHUB_SHA" `
+            -Uri "https://git.jezz.wtf/api/v1/repos/JezzWTF/phokus/statuses/$sha" `
             -Headers $headers `
             -ContentType "application/json" `
             -Body $body
