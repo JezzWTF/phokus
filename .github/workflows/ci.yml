@@ -4,16 +4,39 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/workflows/ci.yml'
+      # CHANGELOG.md is a build input: src/changelog.ts imports it ?raw for
+      # the What's New modal, and changelog.test.ts asserts on its content.
+      - 'CHANGELOG.md'
+      - 'index.html'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - 'src/**'
       - 'src-tauri/**'
+      - 'tsconfig*.json'
+      - 'vite.config.ts'
   pull_request:
     paths:
+      - '.github/workflows/ci.yml'
+      # CHANGELOG.md is a build input: src/changelog.ts imports it ?raw for
+      # the What's New modal, and changelog.test.ts asserts on its content.
+      - 'CHANGELOG.md'
+      - 'index.html'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - 'src/**'
       - 'src-tauri/**'
+      - 'tsconfig*.json'
+      - 'vite.config.ts'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -21,7 +44,9 @@ jobs:
     # windows-latest to match the release target — the ML crates (ort, candle)
     # and the NSIS bundle only ever ship from Windows.
     runs-on: windows-latest
+    timeout-minutes: 60
     env:
+      CARGO_INCREMENTAL: 0
       GITEA_STATUS_TOKEN: ${{ secrets.GITEA_STATUS_TOKEN }}
     steps:
       - name: Report pending status to Gitea
@@ -58,9 +83,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        run: pnpm test:unit
 
       # tsc + vite build; also produces dist/ which tauri's build script expects
       - name: Type-check and build frontend
@@ -84,6 +113,10 @@ jobs:
       - name: Clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets --locked --no-default-features -- -D warnings
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked --no-default-features
 
       - name: Report final status to Gitea
         if: always() && github.event_name != 'pull_request' && env.GITEA_STATUS_TOKEN != ''
